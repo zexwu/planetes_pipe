@@ -1,0 +1,46 @@
+# This is the configuration file for the data reduction pipeline.
+# It contains parameters for image preprocessing, P2VM calculation,
+# and input file paths.
+frames: [0, 512]
+xrange: [0, 2048]
+yrange: [0, 1024]
+output_dir: ./reduced/
+data_dir: ../bench/data_reduction/
+log_level: DEBUG
+
+# some debug options
+plot_to_pdf: True
+
+# Pixel data are ordered as [flux(telescopes), real(baselines), imag(baselines)]
+telescopes: ["4", "3", "2", "1"]
+baselines: ["43", "42", "41", "32", "31", "21"]
+
+calib:
+  dark: ./2026_02_05/p2vm2/dark.fits
+  wave: ./2026_02_05/p2vm2/wave.fits
+  wave_dark: ./2026_02_05/p2vm2/wave_dark.fits
+  wavesc: ./2026_02_05/sci2/sci.fits
+  flat:
+    - ./2026_02_05/p2vm2/tel4.fits
+    - ./2026_02_05/p2vm2/tel3.fits
+    - ./2026_02_05/p2vm2/tel2.fits
+    - ./2026_02_05/p2vm2/tel1.fits
+  p2vm:
+    - ./2026_02_05/p2vm2/bsl43.fits
+    - ./2026_02_05/p2vm2/bsl42.fits
+    - ./2026_02_05/p2vm2/bsl41.fits
+    - ./2026_02_05/p2vm2/bsl32.fits
+    - ./2026_02_05/p2vm2/bsl31.fits
+    - ./2026_02_05/p2vm2/bsl21.fits
+
+object:
+  sci: ./2026_02_05/sci2/sci.fits
+  test: ./2026_02_05/p2vm2/bsl32.fits
+
+products:
+  flat: "flat.npz"
+  p2vm: "p2vm.npz"
+  wave: "wave.npz"
+  wave_aberr: "wave_aberr.npz"
+  preproc: "{}_preproc.npz"
+  reduced: "{}_reduced.npz"

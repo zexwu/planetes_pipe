@@ -1,0 +1,4 @@
+./reduced/*
+reduced
+*__pycache__*
+requirements.txt
