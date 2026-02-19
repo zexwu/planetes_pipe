@@ -14,7 +14,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorlog
 import numpy as np
@@ -97,7 +97,7 @@ class PipelineContext:
 
     # --- Slices (Derived) ---
     @cached_property
-    def sl_data(self) -> slice:
+    def sl_data(self) -> Tuple[slice, ...]:
         """
         Standard extraction slice [Frames, Y, X].
 
@@ -208,7 +208,7 @@ class PipelineContext:
 
 
 # --- 2. Registry & CLI ---
-COMMANDS: Dict[str, Callable] = {}
+COMMANDS: Dict[str, callable] = {}
 
 
 def _infer_dest(opt_strings: Tuple[str, ...], kw: Dict[str, Any]) -> Optional[str]:
@@ -234,7 +234,7 @@ def _infer_dest(opt_strings: Tuple[str, ...], kw: Dict[str, Any]) -> Optional[st
     return opt.lstrip("-").replace("-", "_")
 
 
-def arg(*opt_strings: str, **kwargs: Any) -> Callable:
+def arg(*opt_strings: str, **kwargs: Any) -> callable:
     """
     Decorator to add argparse arguments to a specific command.
 
@@ -251,7 +251,7 @@ def arg(*opt_strings: str, **kwargs: Any) -> Callable:
         Decorator function
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: callable) -> callable:
         meta = getattr(func, "meta", None)
         if meta is None:
             meta = {"args": [], "defaults": {}, "dests": set()}
@@ -275,7 +275,7 @@ def arg(*opt_strings: str, **kwargs: Any) -> Callable:
 
 def command(name: str, help_msg: str,
             requires: Optional[List[str]] = None,
-            produces: Optional[List[str]] = None) -> Callable:
+            produces: Optional[List[str]] = None) -> callable:
     """
     Decorator to register pipeline steps.
 
@@ -289,7 +289,7 @@ def command(name: str, help_msg: str,
         Decorator function
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: callable) -> callable:
         meta = getattr(func, "meta", None)
         if meta is None:
             meta = {"args": [], "defaults": {}, "dests": set()}
