@@ -289,7 +289,7 @@ def command(name: str, help_msg: str,
         Decorator function
     """
 
-    def decorator(func: callable) -> callable:
+    def decorator(func: Callable) -> Callable:
         meta = getattr(func, "meta", None)
         if meta is None:
             meta = {"args": [], "defaults": {}, "dests": set()}

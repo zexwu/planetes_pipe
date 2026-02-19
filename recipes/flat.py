@@ -1,8 +1,9 @@
 import numpy as np
 
-from typing import Any, List
+from typing import Any, List, Optional
 from numba import njit
 from scipy.signal import find_peaks, medfilt
+from scipy.ndimage import median_filter
 
 from . import PipelineContext, arg, command, log
 from .visualize import genfig, plt
