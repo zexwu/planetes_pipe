@@ -5,7 +5,7 @@ from numba import njit, prange
 from . import PipelineContext, arg, command, log
 
 
-@command("preproc", "Preprocessing data cubes.", 
+@command("preproc", "Preprocessing data cubes.",
          requires=["flat", "wave"], produces=["preproc"])
 @arg("--object", type=str, default="p2vm", help="target to preprocess (p2vm or object name)")
 @arg("--n_wave", type=int, default=201, help="number of wavelength points for interpolation")
@@ -31,9 +31,9 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     with ctx.load_product("wave") as d:
         wave_map = d["wave_map"]
 
-    # wavelength grid for interpolation 
-    wl_grid = np.linspace(kwargs["min_wave"], 
-                          kwargs["max_wave"], 
+    # wavelength grid for interpolation
+    wl_grid = np.linspace(kwargs["min_wave"],
+                          kwargs["max_wave"],
                           kwargs["n_wave"])
 
     _spec_flat  = extract_spec_sparse(flat_map[None, :, :], profile_ys, profile_xs)
@@ -47,8 +47,8 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         spec = extract_spec_sparse(data, profile_ys, profile_xs)
 
         # NOTE:
-        # divide by flat in pixel space before interpolation 
-        # Then multiply by the flat again to preserve the 
+        # divide by flat in pixel space before interpolation
+        # Then multiply by the flat again to preserve the
         # original flux scale on the new wavelength grid.
         spec_aligned = twopx_interp(spec / _spec_flat, wave_map, wl_grid)
         spec_aligned *= spec_flat
@@ -108,8 +108,8 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
                 bsl_to_reg[bsl_idx] = list(regions_from_tels)
                 bsl_to_tel[bsl_idx] = (t1, t2)
 
-        to_save = ["spec_tel", "spec_bsl", "spec_wavesc", "spec_flat", 
-                   "tel_regs", "bsl_regs", "bsl_to_reg", "bsl_to_tel", 
+        to_save = ["spec_tel", "spec_bsl", "spec_wavesc", "spec_flat",
+                   "tel_regs", "bsl_regs", "bsl_to_reg", "bsl_to_tel",
                    "wl_grid"]
         ctx.save_product(("preproc", obj), **{k: locals()[k] for k in to_save})
         log.info("Preprocessed P2VM and FLAT data saved.")

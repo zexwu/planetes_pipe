@@ -36,7 +36,7 @@ log.addHandler(handler)
 class PipelineContext:
     """
     Manages configuration, IO, and derived dimensions for the pipeline.
-    
+
     Attributes:
         conf_path: Path to the configuration YAML file
         data_dir: Directory containing input data files
@@ -100,7 +100,7 @@ class PipelineContext:
     def sl_data(self) -> slice:
         """
         Standard extraction slice [Frames, Y, X].
-        
+
         Returns:
             Slice object for data extraction
         """
@@ -123,10 +123,10 @@ class PipelineContext:
     def _get_filename(self, product_id: Union[str, Tuple[str, str]]) -> str:
         """
         Look up filename for a product ID.
-        
+
         Args:
             product_id: Product identifier (string or tuple)
-            
+
         Returns:
             Filename for the product
         """
@@ -139,10 +139,10 @@ class PipelineContext:
     def product_exists(self, product_id: str) -> bool:
         """
         Check if a product file exists.
-        
+
         Args:
             product_id: Product identifier
-            
+
         Returns:
             True if the product file exists
         """
@@ -152,25 +152,25 @@ class PipelineContext:
     def load_fits(self, filename: str, **kwargs) -> np.ndarray:
         """
         Load FITS file and apply data slice.
-        
+
         Args:
             filename: Name of the FITS file
             **kwargs: Additional arguments to pass to fits.getdata
-            
+
         Returns:
             Numpy array containing the data
         """
         path = self.data_dir / filename
         if not path.exists():
             raise FileNotFoundError(f"FITS file not found: {path}")
-        
+
         data = fits.getdata(path, **kwargs)
         return data[self.sl_data].astype(np.float32)
 
     def save_product(self, product_id: str, **kwargs) -> None:
         """
         Save pipeline product to disk.
-        
+
         Args:
             product_id: Product identifier
             **kwargs: Data to save (key-value pairs)
@@ -181,11 +181,11 @@ class PipelineContext:
     def load_product(self, product_id: str, **kwargs) -> Dict[str, Any]:
         """
         Load pipeline product from disk.
-        
+
         Args:
             product_id: Product identifier
             **kwargs: Additional arguments to pass to np.load
-            
+
         Returns:
             Dictionary containing the loaded data
         """
@@ -195,10 +195,10 @@ class PipelineContext:
     def plot_ctx(self, filename: str) -> Union[PdfPages, nullcontext]:
         """
         Create a plotting context for PDF output.
-        
+
         Args:
             filename: Name of the PDF file
-            
+
         Returns:
             PDF context manager or null context
         """
@@ -214,21 +214,21 @@ COMMANDS: Dict[str, Callable] = {}
 def _infer_dest(opt_strings: Tuple[str, ...], kw: Dict[str, Any]) -> Optional[str]:
     """
     Infer destination name from option strings.
-    
+
     Args:
         opt_strings: Tuple of option strings (e.g., ("--threshold", "-t"))
         kw: Keyword arguments passed to add_argument
-        
+
     Returns:
         Destination name or None
     """
     if "dest" in kw:
         return kw["dest"]
-    
+
     opts = [s for s in opt_strings if isinstance(s, str) and s.startswith("-")]
     if not opts:
         return None
-    
+
     # Prefer the longest option (usually the long form)
     opt = max(opts, key=len)
     return opt.lstrip("-").replace("-", "_")
@@ -237,16 +237,16 @@ def _infer_dest(opt_strings: Tuple[str, ...], kw: Dict[str, Any]) -> Optional[st
 def arg(*opt_strings: str, **kwargs: Any) -> Callable:
     """
     Decorator to add argparse arguments to a specific command.
-    
+
     Usage:
         @arg("--threshold", type=float, default=5.0, help="Threshold value")
         def my_command(ctx, threshold):
             ...
-    
+
     Args:
         *opt_strings: Option strings for argparse
         **kwargs: Keyword arguments for argparse.add_argument
-        
+
     Returns:
         Decorator function
     """
@@ -273,18 +273,18 @@ def arg(*opt_strings: str, **kwargs: Any) -> Callable:
     return decorator
 
 
-def command(name: str, help_msg: str, 
-            requires: Optional[List[str]] = None, 
+def command(name: str, help_msg: str,
+            requires: Optional[List[str]] = None,
             produces: Optional[List[str]] = None) -> Callable:
     """
     Decorator to register pipeline steps.
-    
+
     Args:
         name: Command name
         help_msg: Help message for the command
         requires: List of required input products
         produces: List of produced output products
-        
+
     Returns:
         Decorator function
     """
