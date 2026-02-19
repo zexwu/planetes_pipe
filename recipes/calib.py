@@ -9,9 +9,9 @@ from typing import Any
 
 from . import PipelineContext, command, log
 from .flat import run_flat
-from .wave import run_wave
-from .preproc import run_preproc
 from .p2vm import run_p2vm
+from .preproc import run_preproc
+from .wave import run_wave
 
 
 @command(

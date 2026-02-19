@@ -1,14 +1,14 @@
-import numpy as np
-
 from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 from scipy.optimize import minimize
 
-from . import PipelineContext, command, arg, log
+from . import PipelineContext, arg, command, log
 from .reduce import compute_gdelay
-from .visualize import plt, genfig
+from .visualize import genfig, plt
 
 
-@command("p2vm", "Calculate P2VM matrix.", 
+@command("p2vm", "Calculate P2VM matrix.",
          requires=["flat", "wave", ("preproc", "p2vm")],
          produces=["p2vm"])
 @arg("--phase_correction", type=int, default=1, help="Apply phase correction using WAVE,SC data.")
@@ -35,7 +35,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
 
     # Initialize matrices
     # v2pm: Visibility to Pixel Matrix
-    v2pm = np.zeros((ctx.n_reg, ctx.n_data, n_wave)) 
+    v2pm = np.zeros((ctx.n_reg, ctx.n_data, n_wave))
     cmat = np.zeros((ctx.n_reg, ctx.n_bsl, n_wave))
     ellipse_results = []
 
@@ -69,7 +69,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         log.debug(f"    Removing zero-point {opd0=:.2f} um...")
 
         if ctx.conf.get("plot_to_pdf", False):
-            fig, axs = genfig(2, 3, 
+            fig, axs = genfig(2, 3,
                               xlabel="C-A (transformed)", ylabel="D-B (transformed)")
             for i, ax in enumerate(axs):
                 iw = n_wave // 6 * i
@@ -79,24 +79,24 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
                 ax.add_artist(circ)
                 ax.set_xlim(-1.2, 1.2)
                 ax.set_ylim(-1.2, 1.2)
-                ax.text(0.5, 0.5, f"Wavelength Index {iw}", 
+                ax.text(0.5, 0.5, f"Wavelength Index {iw}",
                         transform=ax.transAxes, va="center", ha="center")
             fig.suptitle(f"Baseline {ctx.baselines[bsl]} Ellipse Fits")
             pdf.savefig(fig); plt.close(fig)
 
-            fig, axs = genfig(2, 3, 
+            fig, axs = genfig(2, 3,
                               xlabel="C-A (transformed)", ylabel="D-B (transformed)")
             for i, ax in enumerate(axs):
                 id = n_frame // 6 * i
                 c = np.linspace(0, 1, n_wave)
                 visdata = visamp[id, :] * np.exp(1j * phase[id, :])
-                ax.scatter(visdata.real, visdata.imag, 
+                ax.scatter(visdata.real, visdata.imag,
                            s=5, c=c, cmap="rainbow", alpha=0.5)
                 circ = plt.Circle((0, 0), 1, color='k', fill=False)
                 ax.add_artist(circ)
                 ax.set_xlim(-1.2, 1.2)
                 ax.set_ylim(-1.2, 1.2)
-                ax.text(0.5, 0.5, f"#Frame {id}", 
+                ax.text(0.5, 0.5, f"#Frame {id}",
                         transform=ax.transAxes, va="center", ha="center")
             fig.suptitle(f"Baseline {ctx.baselines[bsl]} Ellipse Fits")
             pdf.savefig(fig); plt.close(fig)
@@ -125,7 +125,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
 
             if ctx.conf.get("plot_to_pdf", False):
                 if iw % (n_wave // 6): continue
-                fig, axs = genfig(2, 4, xlabel="#Frame", ylabel="Flux [adu]", 
+                fig, axs = genfig(2, 4, xlabel="#Frame", ylabel="Flux [adu]",
                                   sharey=False, sharex=False)
                 regs = bsl_to_reg[bsl]
                 labels = ["A", "C", "B", "D"]
@@ -158,7 +158,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
                             a, b, c, f = theta
                             mod = model(a, b, c, f)
                             return np.sum((spec[regs[i], :, iw] - mod) ** 2)
-                        res = minimize(chi2, x0=[a[i], b[i], c[i], 1.0], method="Powell", 
+                        res = minimize(chi2, x0=[a[i], b[i], c[i], 1.0], method="Powell",
                                     bounds=[(None, None), (None, None), (None, None), (0.7, 1.3)])
                         _f = res.x[3]
 
@@ -177,7 +177,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         if ctx.conf.get("plot_to_pdf", False):
             # Also plot the raw spectra for this baseline (normalized by flat)
             _spec = spec / spec_flat
-            fig, axs = genfig(2, 2, 
+            fig, axs = genfig(2, 2,
                               xlabel="Wavelength Index", ylabel="Normalized Flux")
             regs = bsl_to_reg[bsl]
             colors = plt.cm.viridis(np.linspace(0, 1, n_frame))
@@ -264,7 +264,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
     _v2pm[:, ctx.sl_imag, :] = coh * np.sin(phase)
     _v2pm /= ctx.n_reg
 
-    log.info("V2PM -> P2VM") 
+    log.info("V2PM -> P2VM")
     p2vm = np.zeros((ctx.n_data, ctx.n_reg, n_wave))
     for iw in range(n_wave):
         p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
@@ -285,7 +285,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         for iw in range(n_wave):
             p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
 
-    to_save = ["p2vm", "v2pm", "opd", "wl_grid", 
+    to_save = ["p2vm", "v2pm", "opd", "wl_grid",
                "bsl_to_reg", "bsl_to_tel", "ellipse_results"]
     ctx.save_product("p2vm", **{k: locals()[k] for k in to_save})
     log.info("--- Step: P2VM [DONE] ---")

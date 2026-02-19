@@ -5,12 +5,13 @@ This module handles the reduction of science target data, including
 visibility extraction, group delay computation, and phase calculation.
 """
 
-import numpy as np
 from typing import Any, Dict, List, Tuple
+
+import numpy as np
 
 from . import PipelineContext, arg, command, log
 from .preproc import run_preproc
-from .visualize import summary_plot, colored_text
+from .visualize import colored_text, summary_plot
 
 
 @command(

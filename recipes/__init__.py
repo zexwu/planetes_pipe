@@ -6,10 +6,10 @@ This module provides the core infrastructure for the data reduction pipeline,
 including configuration management, command registration, and logging setup.
 """
 
+import functools
 import importlib
 import logging
 import pkgutil
-import functools
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import cached_property

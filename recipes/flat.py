@@ -1,9 +1,9 @@
-import numpy as np
-
 from typing import Any, List, Optional
+
+import numpy as np
 from numba import njit
-from scipy.signal import find_peaks, medfilt
 from scipy.ndimage import median_filter
+from scipy.signal import find_peaks, medfilt
 
 from . import PipelineContext, arg, command, log
 from .visualize import genfig, plt
@@ -26,7 +26,7 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     flat_files = ctx.conf["calib"]["flat"]
     flat_cubes = [ctx.load_fits(f) for f in flat_files]
 
-    # bad_map = compute_bad_map_gravi(dark_map, dark_std, flat_cubes, 
+    # bad_map = compute_bad_map_gravi(dark_map, dark_std, flat_cubes,
     #                                 bad_dark_factor=20)
     bad_map = compute_bad_map(dark_cube, threshold=kwargs["bad_thres"])
 
@@ -58,7 +58,7 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
         log.debug(f"    Tracing spectrum {i+1}/{ctx.n_reg} at Y={ref_y}...")
         xs = np.arange(w)
         ys, ys_err = trace_spectrum(
-            flat_map, bad_map, 
+            flat_map, bad_map,
             ref_x=w // 2, ref_y=ref_y, range_y=h_half
         )
 
@@ -137,7 +137,7 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
             axs[k].imshow(profile_map[k, :, :])
             axs[k].text(
                 0.5, 0.9, f"OUTPUT {k}",
-                c="white", transform=axs[k].transAxes, 
+                c="white", transform=axs[k].transAxes,
                 ha="center", fontsize=8,
             )
             axs[k].set_xticks([])
@@ -151,9 +151,9 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     return
 
 
-def compute_bad_map_gravi(dark_map: np.ndarray, 
-                          dark_std: np.ndarray, 
-                          flats: Optional[List[np.ndarray]] = None, 
+def compute_bad_map_gravi(dark_map: np.ndarray,
+                          dark_std: np.ndarray,
+                          flats: Optional[List[np.ndarray]] = None,
                           bad_dark_factor: float = 30) -> np.ndarray:
     BADPIX_DARK = 1
     BADPIX_RMS = 2

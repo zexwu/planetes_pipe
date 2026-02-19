@@ -1,7 +1,8 @@
-import numpy as np
 from typing import Any
 
+import numpy as np
 from numba import njit, prange
+
 from . import PipelineContext, arg, command, log
 
 
