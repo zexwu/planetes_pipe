@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 from numba import njit
@@ -17,7 +17,7 @@ from .preproc import extract_spec_sparse
 @arg("--aber_deg", type=int, default=3, help="Degree of polynomial for aberration fit")
 @arg("--disp_deg", type=int, default=3, help="Degree of polynomial for pixel-to-wavelength fit")
 @arg("--n_iter", type=int, default=int(1e6), help="Number of iterations for RANSAC line matching")
-def run_wave(ctx: PipelineContext, **kwargs) -> None:
+def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
     log.info("--- Step: WAVE ---")
 
@@ -483,7 +483,7 @@ def match_lines(
     tol: float = 2.0,
     min_inliers: int = 5,
     n_iter: int = 10000,
-) -> Tuple[np.ndarray, Tuple[float, float, float]]:
+) -> Tuple[np.ndarray, Tuple[float, ...]]:
 
     # 1. Setup Data
     obs = np.sort(np.asarray(obs_peaks, dtype=np.float64))
@@ -532,7 +532,7 @@ def match_lines_grid(
     slope_bounds: Tuple[float, float] = (0.98, 1.02),
     curve_limit: float = 1e-3,
     steps_per_unit: float = 2.0,  # Density of search. Higher = more robust but slower.
-) -> Tuple[np.ndarray, Tuple[float, float, float]]:
+) -> Tuple[np.ndarray, Tuple[float, ...]]:
     # 1. Prepare Data
     obs = np.sort(np.ascontiguousarray(obs_peaks, dtype=np.float64))
     mod = np.sort(np.ascontiguousarray(theoretical_lines, dtype=np.float64))

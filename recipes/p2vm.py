@@ -1,6 +1,6 @@
 import numpy as np
 
-from typing import Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from scipy.optimize import minimize
 
 from . import PipelineContext, command, arg, log
@@ -12,7 +12,7 @@ from .visualize import plt, genfig
          requires=["flat", "wave", ("preproc", "p2vm")],
          produces=["p2vm"])
 @arg("--phase_correction", type=int, default=1, help="Apply phase correction using WAVE,SC data.")
-def run_p2vm(ctx: PipelineContext, **kwargs) -> None:
+def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
     """
     Computes the Pixel-to-Visibility Matrix.
     """
@@ -223,7 +223,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs) -> None:
     coh = v2pm[:, ctx.sl_real, :]
     phase = v2pm[:, ctx.sl_imag, :]
 
-    def phase_corr(phase:np.ndarray, visdata:np.ndarray) -> np.ndarray:
+    def phase_corr(phase: np.ndarray, visdata: np.ndarray) -> np.ndarray:
         phase = phase.copy()
         opl = np.zeros((len(visdata), 4))
         wave0 = len(wl_grid) // 2

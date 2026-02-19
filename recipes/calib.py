@@ -7,7 +7,7 @@ flat field, wavelength calibration, preprocessing, and P2VM calculation.
 
 from typing import Any
 
-from . import PipelineContext, arg, command, log
+from . import PipelineContext, command, log
 from .flat import run_flat
 from .wave import run_wave
 from .preproc import run_preproc

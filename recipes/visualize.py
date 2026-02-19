@@ -62,7 +62,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
             axs[tel].set_title(f"Telescope {ctx.telescopes[tel]}")
             axs[tel].text(0.5, 0.8, f"Mean: {_mean:.2f}", 
                           transform=axs[tel].transAxes, ha="center", va="center")
-        fig.suptitle(f"{ctx.conf["object"][obj]}\n"\
+        fig.suptitle(f"{ctx.conf['object'][obj]}\n"\
                       "wavelength-averaged flux per telescope")
         pdf.savefig(fig); plt.close(fig)
 
@@ -77,7 +77,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
             axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
             axs[bsl].text(0.5, 0.8, f"Mean: {_mean:.2f}",
                           transform=axs[bsl].transAxes, ha="center", va="center")
-        fig.suptitle(f"{ctx.conf["object"][obj]}\n"\
+        fig.suptitle(f"{ctx.conf['object'][obj]}\n"\
                       "wavelength-averaged coherent flux per baseline")
         pdf.savefig(fig); plt.close(fig)
 
@@ -90,7 +90,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
         for bsl in range(ctx.n_bsl):
             axs[bsl].plot(mean_phase[:, bsl])
             axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
-        fig.suptitle(f"{ctx.conf["object"][obj]}\n"\
+        fig.suptitle(f"{ctx.conf['object'][obj]}\n"\
                       "wavelength-averaged phase per baseline")
         pdf.savefig(fig); plt.close(fig)
 
@@ -100,7 +100,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
         for bsl in range(ctx.n_bsl):
             axs[bsl].plot(gdelay[:, bsl])
             axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
-        fig.suptitle(f"{ctx.conf["object"][obj]}\nGroup Delay per baseline")
+        fig.suptitle(f"{ctx.conf['object'][obj]}\nGroup Delay per baseline")
         pdf.savefig(fig); plt.close(fig)
 
     def plot_visphi():
@@ -111,7 +111,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
                 axs[bsl].plot(visphi[dit, bsl, :])
                 axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
                 axs[bsl].set_ylim(-10, 10)
-            fig.suptitle(f"{ctx.conf["object"][obj]}\n"\
+            fig.suptitle(f"{ctx.conf['object'][obj]}\n"\
                           f"visphi per baseline @ DIT {dit}")
             pdf.savefig(fig); plt.close(fig)
 
@@ -125,7 +125,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
                 axs[bsl].scatter(gdelay[:, bsl], visphi[:, bsl, iwl], s=5, alpha=0.7)
                 axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
                 axs[bsl].set_ylim(-10, 10)
-            fig.suptitle(f"{ctx.conf["object"][obj]}\nvisphi per baseline")
+            fig.suptitle(f"{ctx.conf['object'][obj]}\nvisphi per baseline")
             pdf.savefig(fig); plt.close(fig)
 
 
@@ -142,7 +142,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
             axs[bsl].plot(visamp[:, bsl, :].T, alpha=0.3, lw=0.3)
             axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
             axs[bsl].set_ylim(0, 1.5)
-        fig.suptitle(f"{ctx.conf["object"][obj]}\nVISAMP per baseline")
+        fig.suptitle(f"{ctx.conf['object'][obj]}\nVISAMP per baseline")
         pdf.savefig(fig); plt.close(fig)
 
 
@@ -162,7 +162,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
                 axs[i].set_prop_cycle(color=colors)
                 axs[i].plot(spec[regs[i], :, :].T, alpha=0.5, lw=0.3)
                 axs[i].set_title(f"OUTPUT {regs[i]}-{['A','C','B','D'][i]}")
-            fig.suptitle(f"{ctx.conf["object"][obj]}\n"\
+            fig.suptitle(f"{ctx.conf['object'][obj]}\n"\
                          f"Baseline {ctx.baselines[bsl]} Extracted Spectra")
             pdf.savefig(fig); plt.close(fig)
 

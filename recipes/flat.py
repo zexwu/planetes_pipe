@@ -1,8 +1,7 @@
 import numpy as np
 
-from typing import List
+from typing import Any, List
 from numba import njit
-from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, medfilt
 
 from . import PipelineContext, arg, command, log
@@ -12,7 +11,7 @@ from .visualize import genfig, plt
 @command("flat", "Build flat, dark, and profile images.", requires=[], produces=["flat"])
 @arg("--profile_width", type=int, default=10, help="Width of the spectral profile in pixels.")
 @arg("--bad_thres", type=float, default=5.0, help="Sigma threshold for bad pixel detection.")
-def run_flat(ctx: PipelineContext, **kwargs) -> None:
+def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     """
     Creates Dark map, Bad Pixel map, Flat map, and traces spectral profiles.
     """
@@ -153,8 +152,8 @@ def run_flat(ctx: PipelineContext, **kwargs) -> None:
 
 def compute_bad_map_gravi(dark_map: np.ndarray, 
                           dark_std: np.ndarray, 
-                          flats: List[np.ndarray] = None, 
-                          bad_dark_factor: float = 30):
+                          flats: Optional[List[np.ndarray]] = None, 
+                          bad_dark_factor: float = 30) -> np.ndarray:
     BADPIX_DARK = 1
     BADPIX_RMS = 2
     BADPIX_FLAT = 4

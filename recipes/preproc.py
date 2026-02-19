@@ -10,7 +10,9 @@ from . import PipelineContext, arg, command, log
 @arg("--n_wave", type=str, default=201, help="number of wavelength points for interpolation")
 @arg("--min_wave", type=float, default=1.1, help="minimum wavelength")
 @arg("--max_wave", type=float, default=1.3, help="maximum wavelength")
-def run_preproc(ctx: PipelineContext, **kwargs) -> None:
+from typing import Any
+
+def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     """
     Extracts flux for P2VM and Flat data, Re-interpolate onto a common wavelength grid.
     """
