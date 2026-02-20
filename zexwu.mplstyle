@@ -1,0 +1,78 @@
+# --- Figure / savefig ---------------------------------------------------------
+figure.facecolor        : white
+figure.edgecolor        : white
+figure.dpi              : 100
+figure.autolayout       : False
+
+savefig.facecolor       : white
+savefig.edgecolor       : white
+savefig.dpi             : 200
+savefig.bbox            : tight
+savefig.pad_inches      : 0.02
+savefig.transparent     : True
+
+# --- Axes ---------------------------------------------------------------------
+axes.facecolor          : white
+axes.edgecolor          : black
+axes.linewidth          : 1.2
+axes.grid               : False
+axes.axisbelow          : True
+axes.labelsize          : 16
+axes.titlesize          : 16
+axes.titlepad           : 6
+
+# Optional: keep minus sign nice (esp. in PDF)
+# axes.unicode_minus      : True
+
+# --- Ticks (your settings) ----------------------------------------------------
+xtick.direction         : in
+ytick.direction         : in
+
+xtick.top               : True
+ytick.right             : True
+
+xtick.major.size        : 6
+ytick.major.size        : 6
+xtick.major.width       : 1.2
+ytick.major.width       : 1.2
+
+xtick.minor.visible     : True
+ytick.minor.visible     : True
+xtick.minor.size        : 3
+ytick.minor.size        : 3
+xtick.minor.width       : 1.0
+ytick.minor.width       : 1.0
+
+xtick.labelsize         : 15
+ytick.labelsize         : 15
+
+# Tick-label padding (replaces manual set_tick_params(pad=...))
+xtick.major.pad         : 6
+ytick.major.pad         : 6
+
+# Minor tick locator defaults (reasonable; you can override per-axis)
+# If you don't like automatic minor ticks on linear axes, set visible False above.
+# (Matplotlib chooses locators; this just ensures they show up.)
+
+# --- Lines / patches ----------------------------------------------------------
+lines.linewidth         : 1.6
+lines.markersize        : 5
+lines.solid_capstyle    : round
+lines.solid_joinstyle   : round
+
+patch.linewidth         : 1.2
+
+# --- Legend -------------------------------------------------------------------
+legend.frameon          : False
+legend.fontsize         : 15
+legend.handlelength     : 1.6
+legend.borderaxespad    : 0.5
+legend.labelspacing     : 0.3
+
+# --- Image / raster -----------------------------------------------------------
+image.interpolation     : nearest
+image.origin            : lower
+
+# --- PDF / PS output (good for papers) ---------------------------------------
+pdf.fonttype            : 42
+ps.fonttype             : 42
