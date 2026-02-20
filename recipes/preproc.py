@@ -126,7 +126,6 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     return
 
 
-
 if False:
     # GPU-accelerated version using PyTorch
     import torch
