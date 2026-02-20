@@ -99,9 +99,12 @@ class HDUModel:
             # if a.dtype.kind in ("U", "S", "O") and a.ndim == 1 and a.size <= 8:
             if a.ndim == 1 and a.size <= 8:
                 # short string lists: show a few values
-                parts.append(f"  {attr:10s}= {a.tolist()!r},")
+                parts.append(f"  {attr:10s}= {a!r},")
             else:
-                parts.append(f"  {attr:10s}= ndarray(shape={a.shape}, dtype='{a.dtype}'),")
+                shape = str(a.shape)+ ","
+                dtype = "'" + str(a.dtype) + "'"
+                parts.append(f"  {attr:10s}= array(shape={shape:10s}dtype={dtype:6s}),")
 
         parts.append(")")
+
         return "\n".join(parts)
