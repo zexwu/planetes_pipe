@@ -8,7 +8,6 @@ parsing arguments and dispatching to the appropriate recipe commands.
 
 import sys
 import argparse
-from typing import Any
 
 import recipes
 

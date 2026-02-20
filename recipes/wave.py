@@ -9,14 +9,14 @@ from .visualize import genfig, plt
 from .preproc import extract_spec_sparse
 
 
-@command("wave", "Wavelength calibration step", 
-         requires=["flat"], 
+@command("wave", "Wavelength calibration step",
+         requires=["flat"],
          produces=["wave"])
 @arg("--sigma", type=int, default=5, help="Line detection threshold")
 @arg("--deg", type=int, default=3, help="Degree of polynomial for wavemap fit")
-@arg("--aber_deg", type=int, default=3, help="Degree of polynomial for aberration fit")
-@arg("--disp_deg", type=int, default=3, help="Degree of polynomial for pixel-to-wavelength fit")
-@arg("--n_iter", type=int, default=int(1e6), help="Number of iterations for RANSAC line matching")
+@arg("--aber-deg", type=int, default=3, help="Degree of polynomial for aberration fit")
+@arg("--disp-deg", type=int, default=3, help="Degree of polynomial for pixel-to-wavelength fit")
+@arg("--niter", type=int, default=int(1e6), help="Number of iterations for RANSAC line matching")
 def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
     log.info("--- Step: WAVE ---")
@@ -32,7 +32,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     wave_dark = ctx.load_fits(ctx.conf["calib"]["wave_dark"])
     wave_cube = ctx.load_fits(ctx.conf["calib"]["wave"])
     wave_img  = wave_cube.mean(axis=0) - wave_dark.mean(axis=0)
-    wave_spec = extract_spec_sparse(wave_img[None, :, :], 
+    wave_spec = extract_spec_sparse(wave_img[None, :, :],
                                     profile_ys, profile_xs)[:, 0, :]
 
 
@@ -40,9 +40,9 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     # Known laboratory emission lines and their relative intensities
 
     # fmt: off
-    line_height=np.array([10, 20, 6, 12, 42, 8, 
-                          10, 33, 8, 12, 16, 29, 
-                          25, 21, 58, 29, 83, 8, 
+    line_height=np.array([10, 20, 6, 12, 42, 8,
+                          10, 33, 8, 12, 16, 29,
+                          25, 21, 58, 29, 83, 8,
                           25, 8, 100, 7, 7, 10])
     line_pos = np.array([ 965.78, 1047.01, 1148.81, 1211.23,
                          1243.93, 1270.23, 1280.27, 1295.67,
@@ -51,7 +51,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
                          1350.42, 1359.93, 1362.27, 1367.86,
                          1371.86, 1382.57, 1390.75, 1409.37])
 
-    # NOTE: the following lines are added based on the NIST database 
+    # NOTE: the following lines are added based on the NIST database
     add = [ 978.450, 1067.357, 1166.871, 1213.974,
            1234.339, 1240.283, 1245.612, 1248.766]
     # fmt: on
@@ -83,7 +83,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
     peak_pos_mean, _ = find_peaks(spec_mean, height=thresh(spec_mean), distance=5)
     matched_ind_mean, pixel_to_wl_mean =\
-    match_lines(line_pos, peak_pos_mean, tol=3, n_iter=kwargs["n_iter"])
+    match_lines(line_pos, peak_pos_mean, tol=3, n_iter=kwargs["n-iter"])
     log.info("Matched mean spectrum peaks to known lines: "
              f"{len(peak_pos_mean)} peaks -> {len(matched_ind_mean)} matches.")
 
@@ -117,7 +117,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
         peak_height = pct
         peak_height[good] = (_pct * np.exp(0.25 * (_pn1 - _pp1) * p_shift))[good]
 
-        # match the observed peaks to the mean spectrum peaks 
+        # match the observed peaks to the mean spectrum peaks
         # to filter out spurious detections
         matched_ind, trans = match_lines_grid(
             peak_pos_mean, peak_pos, tol=1,
@@ -191,7 +191,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
     # outliers at each region
     outliers = [reject & (idx2reg == reg) for reg in range(ctx.n_reg)]
-    outliers = [np.where(outliers[reg])[0] - reg_offsets[reg] 
+    outliers = [np.where(outliers[reg])[0] - reg_offsets[reg]
                 for reg in range(ctx.n_reg)]
 
     # --- 5. Build and save the full wavemap ---
@@ -243,11 +243,11 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
         fig, ax = plt.subplots()
         norm = plt.Normalize(vmin=-5e3 * std, vmax=5e3 * std)
-        ax.scatter(x_flat, y_flat, 
-                   c="lime", marker="x", label="All Points", 
+        ax.scatter(x_flat, y_flat,
+                   c="lime", marker="x", label="All Points",
                    lw=0.3, s=10, alpha=0.5)
-        ax.scatter(x_flat[reject], y_flat[reject], 
-                   ec="r", fc="none", label="Rejected Outliers", 
+        ax.scatter(x_flat[reject], y_flat[reject],
+                   ec="r", fc="none", label="Rejected Outliers",
                    lw=0.7, s=30)
         ax.imshow(wave_img, vmax=np.percentile(wave_img, 99.5), vmin=1)
         ax.set_xlabel("X [px]")
@@ -257,11 +257,11 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
         pdf.savefig(fig); plt.close(fig)
 
         fig, ax = plt.subplots()
-        ax.hist(residuals[~reject] * 1e3, 
+        ax.hist(residuals[~reject] * 1e3,
                 histtype="step", bins=50, label="All Points")
-        ax.hist(residuals[reject] * 1e3, 
+        ax.hist(residuals[reject] * 1e3,
                 histtype="step", bins=50, label="Rejected Outliers")
-        ax.text(0.5, 0.8, f"Std Dev: {1e3 * std:.3f} nm", 
+        ax.text(0.5, 0.8, f"Std Dev: {1e3 * std:.3f} nm",
                 color="C0", transform=ax.transAxes, ha="center")
         ax.set_xlabel("Fitted Residuals (nm)")
         pdf.savefig(fig); plt.close(fig)
@@ -271,7 +271,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
         norm = plt.Normalize(vmin=y_flat.min(), vmax=y_flat.max())
         ax.scatter(x_flat, residuals * 1e3, s=15,
                    c=y_flat, cmap="viridis", norm=norm, label="All Points")
-        ax.scatter(x_flat[reject], residuals[reject] * 1e3, s=50, 
+        ax.scatter(x_flat[reject], residuals[reject] * 1e3, s=50,
                    ec="r", fc="none", lw=0.7, label="Rejected Outliers")
         ax.set_xlabel("X [px]")
         ax.set_ylabel("Fitted Residuals (nm)")
@@ -283,7 +283,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
         norm = plt.Normalize(vmin=x_flat.min(), vmax=x_flat.max())
         ax.scatter(y_flat, residuals * 1e3, s=15,
                    c=y_flat, cmap="viridis", norm=norm, label="All Points")
-        ax.scatter(y_flat[reject], residuals[reject] * 1e3, s=50, 
+        ax.scatter(y_flat[reject], residuals[reject] * 1e3, s=50,
                    ec="r", fc="none", lw=0.7, label="Rejected Outliers")
         ax.set_xlabel("Y [px]")
         cbar = plt.colorbar(ax.collections[0], ax=ax)
@@ -304,9 +304,9 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
             for _i, _l in enumerate(x_centroids[reg]):
                 ax.axvline(_l, color="r", ls="-", alpha=0.5, lw=0.3)
                 if _i in outliers[reg]:
-                    ax.text(_l, spec.max() * 0.8, "OUTLIER", 
+                    ax.text(_l, spec.max() * 0.8, "OUTLIER",
                             alpha=0.7, rotation=90, fontsize=6, zorder=10,
-                            va="top", ha="center", color="red", 
+                            va="top", ha="center", color="red",
                             bbox=dict(facecolor="white", edgecolor="none", pad=0))
 
             for _i, _l in enumerate(line_pos):
@@ -322,20 +322,20 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
                 if _i in idx_wave:
                     # Matched lines: blue dashed line + label
                     ax.axvline(_l_tr2, color="b", ls="--", alpha=0.7, lw=0.3)
-                    ax.text(_l_tr2, spec.max() * 0.8, f"{_l:.4f}", 
-                            va="top", ha="center", rotation=90, 
-                            fontsize=6, color="blue", 
+                    ax.text(_l_tr2, spec.max() * 0.8, f"{_l:.4f}",
+                            va="top", ha="center", rotation=90,
+                            fontsize=6, color="blue",
                             bbox=dict(facecolor="white", edgecolor="none", pad=0))
                 else:
                     # Unmatched lines: gray solid line + label
                     ax.axvline(_l_tr2, color="k", ls="-", alpha=0.2, lw=0.3)
-                    ax.text(_l_tr2, spec.max() * 0.8, f"{_l:.4f}", 
-                            alpha=0.5, rotation=90, fontsize=6, 
-                            va="top", ha="center", color="gray", 
+                    ax.text(_l_tr2, spec.max() * 0.8, f"{_l:.4f}",
+                            alpha=0.5, rotation=90, fontsize=6,
+                            va="top", ha="center", color="gray",
                             bbox=dict(facecolor="white", edgecolor="none", pad=0))
             ax.set_xlim(0, nx)
             nmatch = len(matched_ind_all[reg])
-            ax.text(0.1, 0.8, f"OUTPUT{reg}: matched {nmatch} lines", 
+            ax.text(0.1, 0.8, f"OUTPUT{reg}: matched {nmatch} lines",
                     transform=ax.transAxes, c="b")
             if (reg + 1) % 4 == 0:
                 pdf.savefig(fig); plt.close(fig)
@@ -358,7 +358,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     x_centroids_common = np.array(x_centroids_common)
     y_centroids_common = np.array(y_centroids_common)
 
-    # flatten the arrays for fitting: 
+    # flatten the arrays for fitting:
     # we have a set of (x, y, wl) points.
     x_flat = np.concatenate(x_centroids_common)
     y_flat = np.concatenate(y_centroids_common)
@@ -366,7 +366,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     wl_flat = np.tile(wl_grid, ctx.n_reg)
 
     # fit a 1D polynomial to the mean spec
-    # to get the pixel-to-wavelength mapping 
+    # to get the pixel-to-wavelength mapping
     # along the dispersion direction
     log.info("Fitting 1D pixel-to-wave mapping for the mean trace...")
     x_centroids_mean = x_centroids_common.mean(axis=0)
@@ -413,7 +413,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     if ctx.conf.get("plot_to_pdf", False):
         fig, ax = plt.subplots()
         norm = plt.Normalize(vmin=wl_flat.min(), vmax=wl_flat.max())
-        ax.scatter(x_flat, y_flat, 
+        ax.scatter(x_flat, y_flat,
                    c=wl_flat, cmap="viridis", s=15, norm=norm)
         ax.set_xlabel("X [px]")
         ax.set_ylabel("Y [px]")
@@ -426,7 +426,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
         fig, ax = plt.subplots()
         norm = plt.Normalize(vmin=y_flat.min(), vmax=y_flat.max())
-        ax.scatter(x_flat, residuals * 1e3, 
+        ax.scatter(x_flat, residuals * 1e3,
                    c=y_flat, cmap="viridis", s=15, norm=norm)
         ax.set_xlabel("X [px]")
         ax.set_ylabel("Wavelength Residual (nm)")
@@ -435,7 +435,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
         fig, ax = plt.subplots()
         norm = plt.Normalize(vmin=x_flat.min(), vmax=x_flat.max())
-        ax.scatter(y_flat, residuals * 1e3, 
+        ax.scatter(y_flat, residuals * 1e3,
                    c=x_flat, cmap="viridis", s=15, norm=norm)
         ax.set_xlabel("Y [px]")
         ax.set_ylabel("Wavelength Residual (nm)")
@@ -593,8 +593,8 @@ def match_lines_grid(
 
 
 @njit(fastmath=True, cache=True)
-def _ransac_kernel(obs: np.ndarray, mod: np.ndarray, 
-                   n_iter: int, tol: float, n_mod: int, 
+def _ransac_kernel(obs: np.ndarray, mod: np.ndarray,
+                   n_iter: int, tol: float, n_mod: int,
                    n_obs: int) -> Tuple[float, float, float]:
     """
     The heavy lifting kernel compiled to machine code.
@@ -638,7 +638,7 @@ def _ransac_kernel(obs: np.ndarray, mod: np.ndarray,
         while o3 == o1 or o3 == o2: o3 = np.random.randint(0, n_obs)
         idxs_o = np.array([o1, o2, o3])
         # Sort the OBS samples to match the sorted MOD samples (assuming monotonic mapping)
-        # The original code did `sort(rng.choice)`, 
+        # The original code did `sort(rng.choice)`,
         # implying it matches lowest-to-lowest, etc.
         idxs_o_sorted = np.sort(idxs_o)
         p_samp = obs[idxs_o_sorted]
@@ -699,9 +699,9 @@ def _ransac_kernel(obs: np.ndarray, mod: np.ndarray,
 @njit(fastmath=True, cache=True)
 def _grid_search_kernel(
     obs: np.ndarray ,
-    mod: np.ndarray, 
+    mod: np.ndarray,
     tol: int ,
-    a_grid: np.ndarray, 
+    a_grid: np.ndarray,
     b_grid: np.ndarray,
     c_grid: np.ndarray
 ) -> Tuple[float, float, float]:

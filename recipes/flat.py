@@ -10,8 +10,8 @@ from .visualize import genfig, plt
 
 
 @command("flat", "Build flat, dark, and profile images.", requires=[], produces=["flat"])
-@arg("--profile_width", type=int, default=10, help="Width of the spectral profile in pixels.")
-@arg("--bad_thres", type=float, default=5.0, help="Sigma threshold for bad pixel detection.")
+@arg("--profile-width", type=int, default=10, help="Width of the spectral profile in pixels.")
+@arg("--bad-thresh", type=float, default=5.0, help="Sigma threshold for bad pixel detection.")
 def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     """
     Creates Dark map, Bad Pixel map, Flat map, and traces spectral profiles.
@@ -28,7 +28,7 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
 
     # bad_map = compute_bad_map_gravi(dark_map, dark_std, flat_cubes,
     #                                 bad_dark_factor=20)
-    bad_map = compute_bad_map(dark_cube, threshold=kwargs["bad_thres"])
+    bad_map = compute_bad_map(dark_cube, threshold=kwargs["bad_thresh"])
 
     flat_maps = [img.mean(axis=0) - dark_map for img in flat_cubes]
     flat_map = np.mean(flat_maps, axis=0)

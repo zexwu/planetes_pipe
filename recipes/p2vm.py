@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Tuple
 
 import numpy as np
 from scipy.optimize import minimize
@@ -11,7 +11,7 @@ from .visualize import genfig, plt
 @command("p2vm", "Calculate P2VM matrix.",
          requires=["flat", "wave", ("preproc", "p2vm")],
          produces=["p2vm"])
-@arg("--phase_correction", type=int, default=1, help="Apply phase correction using WAVE,SC data.")
+@arg("--phase-correction", type=int, default=1, help="Apply phase correction using WAVE,SC data.")
 def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
     """
     Computes the Pixel-to-Visibility Matrix.

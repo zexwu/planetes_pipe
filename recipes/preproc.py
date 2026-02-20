@@ -9,9 +9,9 @@ from . import PipelineContext, arg, command, log
 @command("preproc", "Preprocessing data cubes.",
          requires=["flat", "wave"], produces=["preproc"])
 @arg("--object", type=str, default="p2vm", help="target to preprocess (p2vm or object name)")
-@arg("--n_wave", type=int, default=201, help="number of wavelength points for interpolation")
-@arg("--min_wave", type=float, default=1.1, help="minimum wavelength")
-@arg("--max_wave", type=float, default=1.3, help="maximum wavelength")
+@arg("--nwave", type=int, default=201, help="number of wavelength points for interpolation")
+@arg("--min-wave", type=float, default=1.1, help="minimum wavelength")
+@arg("--max-wave", type=float, default=1.3, help="maximum wavelength")
 def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     """
     Extracts flux for P2VM and Flat data, Re-interpolate onto a common wavelength grid.
@@ -35,7 +35,7 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     # wavelength grid for interpolation
     wl_grid = np.linspace(kwargs["min_wave"],
                           kwargs["max_wave"],
-                          kwargs["n_wave"])
+                          kwargs["n-wave"])
 
     _spec_flat  = extract_spec_sparse(flat_map[None, :, :], profile_ys, profile_xs)
     _spec_flat = np.clip(_spec_flat, a_min=1e-8, a_max=None)
