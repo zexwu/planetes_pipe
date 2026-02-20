@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Optional
 import numpy as np
 
@@ -16,7 +17,6 @@ class OI_VIS(HDUModel):
         ("VISPHI", False), ("VISPHIERR", False),
     ]
 
-    extver: int
     mjd: np.ndarray
 
     sta_index: np.ndarray

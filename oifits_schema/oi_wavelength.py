@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Optional
 import numpy as np
 
@@ -10,7 +11,6 @@ class OI_WAVELENGTH(HDUModel):
         ("EFF_WAVE", True),
         ("EFF_BAND", False),
     ]
-    extver: int
 
     eff_wave: np.ndarray
     eff_band: Optional[np.ndarray]

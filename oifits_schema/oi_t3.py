@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Any, Optional
 import numpy as np
 from .base import HDUModel
@@ -15,7 +16,6 @@ class OI_T3(HDUModel):
         ("T3AMP", False), ("T3AMPERR", False),
     ]
 
-    extver: int
     mjd: np.ndarray
 
     sta_index: np.ndarray

@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Optional
 import numpy as np
 
@@ -10,10 +11,9 @@ class OI_FLUX(HDUModel):
         ("STA_INDEX", True),
         ("MJD", True),
         ("FLAG", True),
-        ("FLUXDATA", True), ("FLUXERR", True),
+        ("FLUX", True), ("FLUXERR", True),
     ]
 
-    extver: int
     mjd: np.ndarray
 
     sta_index: np.ndarray
