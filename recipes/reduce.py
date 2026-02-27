@@ -13,6 +13,9 @@ from . import PipelineContext, arg, command, log
 from .preproc import run_preproc
 from .visualize import colored_text, summary_plot
 
+from .oifits import OI_VIS, OI_FLUX, OI_WAVELENGTH
+from astropy.io.fits import HDUList, PrimaryHDU
+
 
 @command(
     "reduce",
@@ -57,7 +60,9 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
 
         log.info(f"Applying P2VM to extract visibility for {cobj}...")
         p2vmred = np.einsum("box,ofx->fbx", p2vm_map, spec)
+        n_dit = len(p2vmred)
 
+        fluxdata = p2vmred[:, :ctx.n_tel, :]
         # Extract visibility data
         visdata = p2vmred[:, ctx.sl_real, :] + 1j * p2vmred[:, ctx.sl_imag, :]
 
@@ -80,6 +85,7 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
 
         # Save results
         product_data: Dict[str, Any] = {
+            "fluxdata": fluxdata,
             "visdata": visdata,
             "p2vmred": p2vmred,
             "wl_grid": wl_grid,
@@ -88,6 +94,34 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
             "bsl_to_reg": bsl_to_reg,
             "bsl_to_tel": bsl_to_tel,
         }
+
+        _sta_idx = np.array([int(i) for i in ctx.telescopes])
+        sta_idx_tel = np.stack([_sta_idx] * n_dit, axis=0)
+        sta_idx_bsl = []
+        for bsl in range(ctx.n_bsl):
+            tel1, tel2 = bsl_to_tel[bsl]
+            sta_idx_bsl += [[_sta_idx[tel1], _sta_idx[tel2]]]
+        sta_idx_bsl = np.array(sta_idx_bsl)
+        sta_idx_bsl = np.stack([sta_idx_bsl] * n_dit, axis=0)
+
+
+        strict = False
+        meta = {"insname": None, "arrname": "BENCH", "strict": strict}
+        oi_wav = OI_WAVELENGTH.from_attrs(eff_wave=wl_grid, **meta)
+        oi_vis = OI_VIS.from_attrs(visdata=visdata.reshape(n_dit * ctx.n_bsl, -1),
+                                   mjd=visdata.reshape(n_dit * ctx.n_bsl, -1),
+                                   sta_index=sta_idx_bsl.reshape(n_dit * ctx.n_bsl, -1),
+                                   **meta)
+        oi_flux = OI_FLUX.from_attrs(fluxdata=fluxdata.reshape(n_dit * ctx.n_tel, -1),
+                                     mjd=fluxdata.reshape(n_dit * ctx.n_tel, -1),
+                                     sta_index=sta_idx_tel.reshape(n_dit * ctx.n_tel, -1),
+                                     **meta)
+
+        hdul = HDUList([PrimaryHDU(),
+                        oi_wav.to_hdu(strict=strict),
+                        oi_vis.to_hdu(strict=strict),
+                        oi_flux.to_hdu(strict=strict)])
+        hdul.writeto(ctx.output_dir / f"{object_name}_reduced.oifits", overwrite=True)
 
         ctx.save_product(("reduced", object_name), **product_data)
         log.info(f"Reduction for {cobj} completed.")

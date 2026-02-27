@@ -5,7 +5,7 @@ frames: [0, 512]
 xrange: [0, 2048]
 yrange: [0, 1024]
 output_dir: ./reduced/
-data_dir: ../bench/data_reduction/
+data_dir: /Users/zexwu/data/bench/data_reduction/
 log_level: DEBUG
 
 # some debug options

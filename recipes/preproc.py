@@ -35,7 +35,7 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     # wavelength grid for interpolation
     wl_grid = np.linspace(kwargs["min_wave"],
                           kwargs["max_wave"],
-                          kwargs["n-wave"])
+                          kwargs["nwave"])
 
     _spec_flat  = extract_spec_sparse(flat_map[None, :, :], profile_ys, profile_xs)
     _spec_flat = np.clip(_spec_flat, a_min=1e-8, a_max=None)
