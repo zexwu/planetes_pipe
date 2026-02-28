@@ -3,3 +3,4 @@ reduced
 *__pycache__*
 requirements.txt
 .aider*
+oifits/*
