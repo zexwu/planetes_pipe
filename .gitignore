@@ -3,4 +3,6 @@ reduced
 *__pycache__*
 requirements.txt
 .aider*
-./recipes/oifits
+recipes/oifits
+AGENT.md
+2026_02_05
