@@ -83,7 +83,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
     peak_pos_mean, _ = find_peaks(spec_mean, height=thresh(spec_mean), distance=5)
     matched_ind_mean, pixel_to_wl_mean =\
-    match_lines(line_pos, peak_pos_mean, tol=3, n_iter=kwargs["n-iter"])
+    match_lines(line_pos, peak_pos_mean, tol=3, n_iter=kwargs["niter"])
     log.info("Matched mean spectrum peaks to known lines: "
              f"{len(peak_pos_mean)} peaks -> {len(matched_ind_mean)} matches.")
 
