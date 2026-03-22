@@ -35,7 +35,7 @@ calib:
 
 object:
   sci: ./2026_02_05/sci2/sci.fits
-  test: ./2026_02_05/p2vm2/bsl32.fits
+  test: ./2026_02_05/p2vm2/bsl43.fits
 
 products:
   flat: "flat.npz"

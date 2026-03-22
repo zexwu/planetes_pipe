@@ -2,10 +2,12 @@ from typing import Any, List, Optional
 
 import numpy as np
 from numba import njit
+from numpy.typing import NDArray
 from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, medfilt
 
 from . import PipelineContext, arg, command, log
+from .products import FLAT_PRODUCT
 from .visualize import genfig, plt
 
 
@@ -38,7 +40,7 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     h_half = h // ctx.n_reg // 2
 
     # Find peaks in the collapsed spatial direction
-    spatial_profile = flat_map.mean(axis=1)
+    spatial_profile = flat_map.sum(axis=1)
     thresh = np.percentile(spatial_profile, 75)
     ref_ys, props = find_peaks(spatial_profile, distance=h_half, height=thresh)
     log.debug(f"Found {len(ref_ys)} Peaks with THRESH {thresh:.0f}...")
@@ -47,7 +49,7 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     top_indices = np.argsort(props["peak_heights"])[-ctx.n_reg :]
     ref_ys = np.sort(ref_ys[top_indices])
 
-    profile_map = np.empty((ctx.n_reg, h, w))
+    profile_map = np.zeros((ctx.n_reg, h, w), dtype=np.uint8)
     xs_list, ys_list, ys_raw_list, ys_err_list = [], [], [], []
     profile_xs = []
     profile_ys = []
@@ -89,11 +91,13 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     # 3. Save Results
     ctx.save_product(
         "flat",
-        # profile_map=profile_map,
+        schema=FLAT_PRODUCT,
+        profile_map=profile_map,
         profile_xs=profile_xs,
         profile_ys=profile_ys,
         flat_map=flat_map,
         dark_map=dark_map,
+        bad_map=bad_map,
         xs=xs_list,
         ys=ys_list,
     )
@@ -151,10 +155,10 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     return
 
 
-def compute_bad_map_gravi(dark_map: np.ndarray,
-                          dark_std: np.ndarray,
-                          flats: Optional[List[np.ndarray]] = None,
-                          bad_dark_factor: float = 30) -> np.ndarray:
+def compute_bad_map_gravi(dark_map: NDArray,
+                          dark_std: NDArray,
+                          flats: Optional[List[NDArray]] = None,
+                          bad_dark_factor: float = 30) -> NDArray:
     BADPIX_DARK = 1
     BADPIX_RMS = 2
     BADPIX_FLAT = 4
@@ -207,13 +211,13 @@ def compute_bad_map_gravi(dark_map: np.ndarray,
         bad_map += bad_flat.astype(np.int32) * BADPIX_FLAT
         count_flat = bad_flat.sum()
 
-    qc = dict(
-        QC_BADPIX_SC=int(np.count_nonzero(bad_map)),
-        QC_BADPIX_DARK_SC=int(bad_dark.sum()),
-        QC_BADPIX_RMS_SC=int(bad_rms.sum()),
-        QC_BADPIX_FLAT_SC=int(count_flat),
-        FRACTION_BADPIX_SC=100 * np.count_nonzero(bad_map) / (nx * ny),
-    )
+    # qc = dict(
+    #     QC_BADPIX_SC=int(np.count_nonzero(bad_map)),
+    #     QC_BADPIX_DARK_SC=int(bad_dark.sum()),
+    #     QC_BADPIX_RMS_SC=int(bad_rms.sum()),
+    #     QC_BADPIX_FLAT_SC=int(count_flat),
+    #     FRACTION_BADPIX_SC=100 * np.count_nonzero(bad_map) / (nx * ny),
+    # )
 
     return bad_map
 
@@ -342,16 +346,16 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
     return y_centers, y_errs
 
 
-def compute_bad_map(dark_cube: np.ndarray, threshold: float = 5.0) -> np.ndarray:
+def compute_bad_map(dark_cube: NDArray, threshold: float = 5.0) -> NDArray:
     """
-    Creates a bad pixel map from a dark cube using statistical outliers.
+    Build a simple bad-pixel map from dark-frame statistics.
 
     Args:
-        dark_cube (np.ndarray): Cube of dark frames (frames, y, x).
-        bad_threshold (float): Sigma threshold for detecting bad pixels.
+        dark_cube (NDArray): Dark cube with shape `(n_frame, ny, nx)`.
+        threshold (float): Sigma threshold used for hot, dead, and noisy pixels.
 
     Returns:
-        np.ndarray: 2D integer map with flags:
+        NDArray: Integer bad-pixel map with flags:
             1: Hot pixel (Mean > threshold)
             2: Dead pixel (Mean < threshold)
             4: Noisy pixel (StdDev > threshold)

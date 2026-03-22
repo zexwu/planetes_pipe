@@ -1,9 +1,10 @@
 from typing import Any, Tuple
 
 import numpy as np
-from scipy.optimize import minimize
+from numpy.typing import NDArray
 
 from . import PipelineContext, arg, command, log
+from .products import P2VM_PRODUCT, PREPROC_CALIB_PRODUCT
 from .reduce import compute_gdelay
 from .visualize import genfig, plt
 
@@ -19,7 +20,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
     log.info("--- Step: P2VM ---")
 
     # Load Data
-    with ctx.load_product(("preproc", "p2vm")) as d:
+    with ctx.load_product(("preproc", "p2vm"), schema=PREPROC_CALIB_PRODUCT) as d:
         spec_tel = d["spec_tel"]
         spec_bsl = d["spec_bsl"]
         spec_wavesc = d["spec_wavesc"]
@@ -38,6 +39,8 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
     v2pm = np.zeros((ctx.n_reg, ctx.n_data, n_wave))
     cmat = np.zeros((ctx.n_reg, ctx.n_bsl, n_wave))
     ellipse_results = []
+    opd_per_baseline = np.zeros((ctx.n_bsl, n_frame), dtype=float)
+    gd_per_baseline = np.zeros((ctx.n_bsl, n_frame), dtype=float)
 
     if ctx.conf.get("plot_to_pdf", False):
         pdf = ctx.plot_ctx("p2vm.pdf")
@@ -66,40 +69,19 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         # Assume OPD=0 <-> GD=0; remove OPD zero-point
         slope, opd0 = np.polyfit(gd, opd, 1)
         opd -= opd0
+        opd_per_baseline[bsl] = opd
+        gd_per_baseline[bsl] = gd
         log.debug(f"    Removing zero-point {opd0=:.2f} um...")
 
         if ctx.conf.get("plot_to_pdf", False):
-            fig, axs = genfig(2, 3,
-                              xlabel="C-A (transformed)", ylabel="D-B (transformed)")
-            for i, ax in enumerate(axs):
-                iw = n_wave // 6 * i
-                visdata = visamp[:, iw] * np.exp(1j * phase[:, iw])
-                ax.scatter(visdata.real, visdata.imag, s=5, alpha=0.5)
-                circ = plt.Circle((0, 0), 1, color='r', fill=False)
-                ax.add_artist(circ)
-                ax.set_xlim(-1.2, 1.2)
-                ax.set_ylim(-1.2, 1.2)
-                ax.text(0.5, 0.5, f"Wavelength Index {iw}",
-                        transform=ax.transAxes, va="center", ha="center")
-            fig.suptitle(f"Baseline {ctx.baselines[bsl]} Ellipse Fits")
-            pdf.savefig(fig); plt.close(fig)
-
-            fig, axs = genfig(2, 3,
-                              xlabel="C-A (transformed)", ylabel="D-B (transformed)")
-            for i, ax in enumerate(axs):
-                id = n_frame // 6 * i
-                c = np.linspace(0, 1, n_wave)
-                visdata = visamp[id, :] * np.exp(1j * phase[id, :])
-                ax.scatter(visdata.real, visdata.imag,
-                           s=5, c=c, cmap="rainbow", alpha=0.5)
-                circ = plt.Circle((0, 0), 1, color='k', fill=False)
-                ax.add_artist(circ)
-                ax.set_xlim(-1.2, 1.2)
-                ax.set_ylim(-1.2, 1.2)
-                ax.text(0.5, 0.5, f"#Frame {id}",
-                        transform=ax.transAxes, va="center", ha="center")
-            fig.suptitle(f"Baseline {ctx.baselines[bsl]} Ellipse Fits")
-            pdf.savefig(fig); plt.close(fig)
+            _plot_p2vm_ellipse_diagnostics(
+                pdf=pdf,
+                baseline_name=ctx.baselines[bsl],
+                visamp=visamp,
+                phase=phase,
+                n_wave=n_wave,
+                n_frame=n_frame,
+            )
 
         # 2. Fit P2VM Coefficients
         # Reconstruct phase for fitting
@@ -124,69 +106,28 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
             cmat[:, bsl, iw] = c
 
             if ctx.conf.get("plot_to_pdf", False):
-                if iw % (n_wave // 6): continue
-                fig, axs = genfig(2, 4, xlabel="#Frame", ylabel="Flux [adu]",
-                                  sharey=False, sharex=False)
-                regs = bsl_to_reg[bsl]
-                labels = ["A", "C", "B", "D"]
-                for i in range(4):
-                    axs[i].plot(spec[regs[i], :, iw] / spec_flat[regs[i], :, iw])
-                    axs[i].plot(mat @ coeff[regs[i]] / spec_flat[regs[i], :, iw], ls="--")
-                    axs[i].set_title(f"OUTPUT {regs[i]}-{labels[i]}")
-                    axs[i].sharey(axs[0])
+                if iw % (n_wave // 6):
+                    continue
+                _plot_p2vm_fit_slice(
+                    pdf=pdf,
+                    baseline_name=ctx.baselines[bsl],
+                    regs=bsl_to_reg[bsl],
+                    spec=spec,
+                    spec_flat=spec_flat,
+                    coeff=coeff,
+                    mat=mat,
+                    iw=iw,
+                )
 
-                for i in range(4):
-                    res = spec[regs[i], :, iw] / spec_flat[regs[i], :, iw] - \
-                          mat @ coeff[regs[i]] / spec_flat[regs[i], :, iw]
-                    axs[4+i].plot(res, "o-", markersize=3, alpha=0.5, c="gray")
-                    axs[4+i].set_ylim(-1, 1)
-                axs[4].set_yticks([-1, 0, 1])
-                axs[4].set_ylabel("Residual [adu]")
-                fig.suptitle(f"Baseline {ctx.baselines[bsl]} Wavelength Index {iw}; P2VM Fit")
-                pdf.savefig(fig); plt.close(fig)
-
-                if False:
-                    # --- refining the wavelength ---
-                    fig, axs = genfig(2, 2, xlabel="#Frame", ylabel="Flux [adu]")
-                    regs = bsl_to_reg[bsl]
-                    labels = ["A", "C", "B", "D"]
-                    for i in range(4):
-
-                        def model(a, b, c, f):
-                            return c + a * np.cos(phi[:, iw] * f) + b * np.sin(phi[:, iw] * f)
-                        def chi2(theta):
-                            a, b, c, f = theta
-                            mod = model(a, b, c, f)
-                            return np.sum((spec[regs[i], :, iw] - mod) ** 2)
-                        res = minimize(chi2, x0=[a[i], b[i], c[i], 1.0], method="Powell",
-                                    bounds=[(None, None), (None, None), (None, None), (0.7, 1.3)])
-                        _f = res.x[3]
-
-                        _mat = np.ones((len(phi), 3))
-                        _mat[:, 1] = np.sin(phi[:, iw] * _f)
-                        _mat[:, 2] = np.cos(phi[:, iw] * _f)
-                        _coeff = np.einsum("if,of->oi", np.linalg.pinv(_mat), spec[..., iw])
-
-                        axs[i].plot(spec[regs[i], :, iw] / spec_flat[regs[i], :, iw])
-                        axs[i].plot(_mat @ _coeff[regs[i]] / spec_flat[regs[i], :, iw], ls="--")
-                        axs[i].set_title(f"OUTPUT {regs[i]}-{labels[i]}; f={_f:.3f}")
-
-                    fig.suptitle(f"Baseline {ctx.baselines[bsl]} Wavelength Index {iw}; P2VM Fit")
-                    pdf.savefig(fig); plt.close(fig)
 
         if ctx.conf.get("plot_to_pdf", False):
-            # Also plot the raw spectra for this baseline (normalized by flat)
-            _spec = spec / spec_flat
-            fig, axs = genfig(2, 2,
-                              xlabel="Wavelength Index", ylabel="Normalized Flux")
-            regs = bsl_to_reg[bsl]
-            colors = plt.cm.viridis(np.linspace(0, 1, n_frame))
-            for i in range(4):
-                axs[i].set_prop_cycle(color=colors)
-                axs[i].plot(_spec[regs[i], :, :].T, alpha=0.3, lw=0.3)
-                axs[i].set_title(f"OUTPUT {regs[i]}-{['A','C','B','D'][i]}")
-            fig.suptitle(f"Baseline {ctx.baselines[bsl]} Extracted Spectra")
-            pdf.savefig(fig); plt.close(fig)
+            _plot_p2vm_spectra_summary(
+                pdf=pdf,
+                baseline_name=ctx.baselines[bsl],
+                regs=bsl_to_reg[bsl],
+                spec=spec,
+                spec_flat=spec_flat,
+            )
 
     # --- B. Process Telescopes (Photometric Terms) ---
     for tel in range(ctx.n_tel):
@@ -223,7 +164,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
     coh = v2pm[:, ctx.sl_real, :]
     phase = v2pm[:, ctx.sl_imag, :]
 
-    def phase_corr(phase: np.ndarray, visdata: np.ndarray) -> np.ndarray:
+    def phase_corr(phase: NDArray, visdata: NDArray) -> NDArray:
         phase = phase.copy()
         opl = np.zeros((len(visdata), 4))
         wave0 = len(wl_grid) // 2
@@ -285,58 +226,142 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         for iw in range(n_wave):
             p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
 
-    to_save = ["p2vm", "v2pm", "opd", "wl_grid",
+    to_save = ["p2vm", "v2pm", "opd_per_baseline", "gd_per_baseline", "wl_grid",
                "bsl_to_reg", "bsl_to_tel", "ellipse_results"]
-    ctx.save_product("p2vm", **{k: locals()[k] for k in to_save})
+    ctx.save_product("p2vm", schema=P2VM_PRODUCT, **{k: locals()[k] for k in to_save})
     log.info("--- Step: P2VM [DONE] ---")
     log.info("")
 
     if ctx.conf.get("plot_to_pdf", False):
-        fig, axs = genfig(2, 3, xlabel="Wavelength index", ylabel="Phase [deg]")
-        phase = v2pm[:, ctx.sl_imag, :]
-        for bsl in range(6):
-            regs = bsl_to_reg[bsl]
-            phase[regs, bsl, :] -= phase[regs[0], bsl, :]
-        phase = np.unwrap(phase, period=2 * np.pi)
-        phase *= 180 / np.pi
-        for bsl in range(6):
-            regs = bsl_to_reg[bsl]
-            for reg, lb in zip(regs, ["A", "C", "B", "D"]):
-                axs[bsl].plot(phase[reg, bsl, :], label=lb)
-            axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
-        fig.suptitle("V2PM Phase [deg]")
-        pdf.savefig(fig); plt.close(fig)
-
-
-        fig, axs = genfig(2, 3, xlabel="Wavelength index", ylabel="Coherence")
-        for bsl in range(6):
-            regs = bsl_to_reg[bsl]
-            tels = bsl_to_tel[bsl]
-            t1t2 = 2 * abs(v2pm[:, tels[0], :] * v2pm[:, tels[1], :]) ** 0.5
-            for reg, lb in zip(regs, ["A", "C", "B", "D"]):
-                axs[bsl].plot(coh[reg, bsl, :] / t1t2[reg], label=lb)
-            axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
-        fig.suptitle("V2PM Coherence")
-        pdf.savefig(fig); plt.close(fig)
+        _plot_p2vm_summary(
+            pdf=pdf,
+            ctx=ctx,
+            v2pm=v2pm,
+            coh=coh,
+            bsl_to_reg=bsl_to_reg,
+            bsl_to_tel=bsl_to_tel,
+        )
         pdf.close()
     return
 
 
+def _plot_p2vm_ellipse_diagnostics(
+    pdf,
+    baseline_name: str,
+    visamp: NDArray,
+    phase: NDArray,
+    n_wave: int,
+    n_frame: int,
+) -> None:
+    fig, axs = genfig(2, 3, xlabel="C-A (transformed)", ylabel="D-B (transformed)")
+    for i, ax in enumerate(axs):
+        iw = n_wave // 6 * i
+        visdata = visamp[:, iw] * np.exp(1j * phase[:, iw])
+        ax.scatter(visdata.real, visdata.imag, s=5, alpha=0.5)
+        circ = plt.Circle((0, 0), 1, color="r", fill=False)
+        ax.add_artist(circ)
+        ax.set_xlim(-1.2, 1.2)
+        ax.set_ylim(-1.2, 1.2)
+        ax.text(0.5, 0.5, f"Wavelength Index {iw}", transform=ax.transAxes, va="center", ha="center")
+    fig.suptitle(f"Baseline {baseline_name} Ellipse Fits")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, axs = genfig(2, 3, xlabel="C-A (transformed)", ylabel="D-B (transformed)")
+    for i, ax in enumerate(axs):
+        frame_id = n_frame // 6 * i
+        colors = np.linspace(0, 1, n_wave)
+        visdata = visamp[frame_id, :] * np.exp(1j * phase[frame_id, :])
+        ax.scatter(visdata.real, visdata.imag, s=5, c=colors, cmap="rainbow", alpha=0.5)
+        circ = plt.Circle((0, 0), 1, color="k", fill=False)
+        ax.add_artist(circ)
+        ax.set_xlim(-1.2, 1.2)
+        ax.set_ylim(-1.2, 1.2)
+        ax.text(0.5, 0.5, f"#Frame {frame_id}", transform=ax.transAxes, va="center", ha="center")
+    fig.suptitle(f"Baseline {baseline_name} Ellipse Fits")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def _plot_p2vm_fit_slice(pdf, baseline_name: str, regs, spec, spec_flat, coeff, mat, iw: int) -> None:
+    fig, axs = genfig(2, 4, xlabel="#Frame", ylabel="Flux [adu]", sharey=False, sharex=False)
+    labels = ["A", "C", "B", "D"]
+    for i in range(4):
+        axs[i].plot(spec[regs[i], :, iw] / spec_flat[regs[i], :, iw])
+        axs[i].plot(mat @ coeff[regs[i]] / spec_flat[regs[i], :, iw], ls="--")
+        axs[i].set_title(f"OUTPUT {regs[i]}-{labels[i]}")
+        axs[i].sharey(axs[0])
+
+    for i in range(4):
+        res = spec[regs[i], :, iw] / spec_flat[regs[i], :, iw] - mat @ coeff[regs[i]] / spec_flat[regs[i], :, iw]
+        axs[4 + i].plot(res, "o-", markersize=3, alpha=0.5, c="gray")
+        axs[4 + i].set_ylim(-1, 1)
+    axs[4].set_yticks([-1, 0, 1])
+    axs[4].set_ylabel("Residual [adu]")
+    fig.suptitle(f"Baseline {baseline_name} Wavelength Index {iw}; P2VM Fit")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def _plot_p2vm_spectra_summary(pdf, baseline_name: str, regs, spec, spec_flat) -> None:
+    spectra = spec / spec_flat
+    n_frame = spectra.shape[1]
+    fig, axs = genfig(2, 2, xlabel="Wavelength Index", ylabel="Normalized Flux")
+    colors = plt.cm.viridis(np.linspace(0, 1, n_frame))
+    for i in range(4):
+        axs[i].set_prop_cycle(color=colors)
+        axs[i].plot(spectra[regs[i], :, :].T, alpha=0.3, lw=0.3)
+        axs[i].set_title(f"OUTPUT {regs[i]}-{['A','C','B','D'][i]}")
+    fig.suptitle(f"Baseline {baseline_name} Extracted Spectra")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def _plot_p2vm_summary(pdf, ctx: PipelineContext, v2pm, coh, bsl_to_reg, bsl_to_tel) -> None:
+    fig, axs = genfig(2, 3, xlabel="Wavelength index", ylabel="Phase [deg]")
+    phase = v2pm[:, ctx.sl_imag, :].copy()
+    for bsl in range(ctx.n_bsl):
+        regs = bsl_to_reg[bsl]
+        phase[regs, bsl, :] -= phase[regs[0], bsl, :]
+    phase = np.unwrap(phase, period=2 * np.pi)
+    phase *= 180 / np.pi
+    for bsl in range(ctx.n_bsl):
+        regs = bsl_to_reg[bsl]
+        for reg, label in zip(regs, ["A", "C", "B", "D"]):
+            axs[bsl].plot(phase[reg, bsl, :], label=label)
+        axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
+    fig.suptitle("V2PM Phase [deg]")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, axs = genfig(2, 3, xlabel="Wavelength index", ylabel="Coherence")
+    for bsl in range(ctx.n_bsl):
+        regs = bsl_to_reg[bsl]
+        tels = bsl_to_tel[bsl]
+        t1t2 = 2 * abs(v2pm[:, tels[0], :] * v2pm[:, tels[1], :]) ** 0.5
+        for reg, label in zip(regs, ["A", "C", "B", "D"]):
+            axs[bsl].plot(coh[reg, bsl, :] / t1t2[reg], label=label)
+        axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
+    fig.suptitle("V2PM Coherence")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 # @njit(parallel=True, fastmath=True, cache=True)
 def fit_ellipse_linear(
-    spec: np.ndarray, envs: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+    spec: NDArray, envs: NDArray
+) -> Tuple[NDArray, NDArray]:
     """
-    Extracts phase and visibility from ABCD beam combiner data by fitting ellipses.
+    Estimate phase and visibility amplitude from ABCD outputs via ellipse fitting.
 
     Args:
-        spec (np.ndarray): ABCD flux (4, n_frames, n_wave).
-        envs (np.ndarray): Envelope coherence factors (n_frames, n_wave).
+        spec (NDArray): ABCD flux with shape `(4, n_frame, n_wave)`.
+        envs (NDArray): Envelope weights with shape `(n_frame, n_wave)`.
 
     Returns:
-        tuple:
-            - phase (np.ndarray): Extracted phase in radians (n_frames, n_wave).
-            - visamp (np.ndarray): Visibility amplitude (n_frames, n_wave).
+        Tuple[NDArray, NDArray]:
+            Phase in radians with shape `(n_frame, n_wave)`, and visibility
+            amplitude with the same shape.
     """
     _, n_frames, n_wave = spec.shape
 

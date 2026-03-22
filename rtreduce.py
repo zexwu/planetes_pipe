@@ -1,11 +1,15 @@
 import numpy as np
 from numba import njit, prange
+from numpy.typing import NDArray
+from pathlib import Path
+
 import recipes
+
 
 @njit(parallel=True, fastmath=True, cache=True, boundscheck=False)
 def extract_spec_sparse_single(
-    img: np.ndarray, ys: np.ndarray, xs: np.ndarray
-) -> np.ndarray:
+    img: NDArray, ys: NDArray, xs: NDArray
+) -> NDArray:
     """
     Sparse spectral extraction from a 2D detector image.
 
@@ -38,21 +42,21 @@ def extract_spec_sparse_single(
 
 @njit(parallel=True, cache=True, boundscheck=False)
 def twopx_interp_single(
-    spec: np.ndarray, wn_map: np.ndarray, wn_grid: np.ndarray
-) -> np.ndarray:
+    spec: NDArray, wn_map: NDArray, wn_grid: NDArray
+) -> NDArray:
     """
     Resamples spectra from pixel space to a uniform wavenumber grid.
 
     Args:
-        spec (np.ndarray): Input spectra (n_reg, n_pixels).
-        wn_map (np.ndarray): wavenumber at each pixel (n_reg, n_pixels).
-        wn_grid (np.ndarray): Target wavenumber grid.
+        spec (NDArray): Input spectra `(n_reg, n_pixels)`.
+        wn_map (NDArray): Wavenumber at each pixel `(n_reg, n_pixels)`.
+        wn_grid (NDArray): Target wavenumber grid.
 
     Returns:
-        np.ndarray: Resampled spectra (n_reg, n_wave_out).
+        NDArray: Resampled spectra `(n_reg, n_wave_out)`.
     """
     n_reg, _ = spec.shape
-    n_wave = len(wl_grid)
+    n_wave = len(wn_grid)
 
     out = np.zeros((n_reg, n_wave))
 
@@ -66,23 +70,24 @@ def twopx_interp_single(
 
 # Pre-load all calibration data
 # -----------------------------------------------------------
-with np.load("./reduced/flat.npz") as d:
+reduced_dir = Path("reduced")
+with np.load(reduced_dir / "flat.npz") as d:
     profile_ys = np.array(d["profile_ys"])
     profile_xs = np.array(d["profile_xs"])
     flat_map = d["flat_map"]
 
 # Pixel-to-visibility matrix
-with np.load("./reduced/p2vm.npz", allow_pickle=True) as d:
+with np.load(reduced_dir / "p2vm.npz", allow_pickle=True) as d:
     p2vm = d["p2vm"]
     wl_grid = d["wl_grid"]
     bsl_to_tel = d["bsl_to_tel"][()]
 bsl_to_tel = np.array([list(bsl_to_tel[i]) for i in range(6)])
 
 # Wavelength calibration: map pixel coordinates to wavenumber (1/micron)
-with np.load("./reduced/wave.npz") as d:
+with np.load(reduced_dir / "wave.npz") as d:
     wave_map = d["wave_map"]
-wn_map = 1 / wave_map # units of 1/micron
-wn_grid = 1 / wl_grid # units of 1/micron
+wn_map = 1 / wave_map  # units of 1/micron
+wn_grid = 1 / wl_grid  # units of 1/micron
 
 
 spec_flat = extract_spec_sparse_single(flat_map, profile_ys, profile_xs)
@@ -90,7 +95,8 @@ spec_flat = np.clip(spec_flat, a_min=1e-8, a_max=None)
 spec_flat_aligned = twopx_interp_single(1 / spec_flat, wn_map, wn_grid)
 # -----------------------------------------------------------
 
-def reduce_single(img):
+
+def reduce_single(img: NDArray) -> NDArray:
     # -------------------------------------------------------
     # 1. Sparse extraction from detector frame
     # -------------------------------------------------------
@@ -130,18 +136,21 @@ def reduce_single(img):
 
     return visamp
 
+
 # -----------------------------------------------------------
 
-ctx = recipes.PipelineContext("./conf.yaml")
-cube = ctx.load_fits("./2026_02_05/sci2/sci.fits")
-dark = ctx.load_fits("./2026_02_05/sci2/sci_dark.fits")
+ctx = recipes.PipelineContext(Path("conf.yaml"))
+cube = ctx.load_fits(Path("./2026_02_05/sci2/sci.fits"))
+dark = ctx.load_fits(Path("./2026_02_05/sci2/sci_dark.fits"))
 cube -= dark.mean(axis=0)[None, ...]
 
 import timeit
+
 t = timeit.timeit(lambda: reduce_single(cube[0]), number=10000)
 print(f"Time per DIT: {t/10000 * 1e3:.3f} ms")
 
 import matplotlib.pyplot as plt
+
 plt.rcParams["figure.dpi"] = 100
 fig, axs = plt.subplots(2, 3, figsize=(8, 6))
 axs = axs.flatten()

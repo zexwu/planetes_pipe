@@ -2,8 +2,10 @@ from typing import Any
 
 import numpy as np
 from numba import njit, prange
+from numpy.typing import NDArray
 
 from . import PipelineContext, arg, command, log
+from .products import PREPROC_CALIB_PRODUCT, PREPROC_OBJECT_PRODUCT, FLAT_PRODUCT, WAVE_PRODUCT
 
 
 @command("preproc", "Preprocessing data cubes.",
@@ -21,7 +23,7 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     if not obj: return
 
     # Load flat & profile maps
-    with ctx.load_product("flat") as d:
+    with ctx.load_product("flat", schema=FLAT_PRODUCT) as d:
         dark_map = d["dark_map"]
         # profile_map = d["profile_map"]
         profile_ys = d["profile_ys"]
@@ -29,7 +31,7 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         flat_map = d["flat_map"]
 
     # Load wavelength map
-    with ctx.load_product("wave") as d:
+    with ctx.load_product("wave", schema=WAVE_PRODUCT) as d:
         wave_map = d["wave_map"]
 
     # wavelength grid for interpolation
@@ -41,7 +43,7 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     _spec_flat = np.clip(_spec_flat, a_min=1e-8, a_max=None)
     spec_flat = 1 / twopx_interp(1 / _spec_flat, wave_map, wl_grid)
 
-    def _extract(fname: str) -> np.ndarray:
+    def _extract(fname: str) -> NDArray:
         """Helper to process extraction."""
         log.info(f"    Extracting spectra from {fname}...")
         data = ctx.load_fits(fname) - dark_map
@@ -112,34 +114,22 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         to_save = ["spec_tel", "spec_bsl", "spec_wavesc", "spec_flat",
                    "tel_regs", "bsl_regs", "bsl_to_reg", "bsl_to_tel",
                    "wl_grid"]
-        ctx.save_product(("preproc", obj), **{k: locals()[k] for k in to_save})
+        ctx.save_product(("preproc", obj), schema=PREPROC_CALIB_PRODUCT, **{k: locals()[k] for k in to_save})
         log.info("Preprocessed P2VM and FLAT data saved.")
     else:
         obj_list = ctx.conf["object"] if obj == "all" else [obj]
         to_save = ["spec", "spec_flat", "wl_grid"]
         for obj in obj_list:
             spec = _extract(ctx.conf["object"][obj])
-            ctx.save_product(("preproc", obj), **{k: locals()[k] for k in to_save})
+            ctx.save_product(("preproc", obj), schema=PREPROC_OBJECT_PRODUCT, **{k: locals()[k] for k in to_save})
         log.info(f"Preprocessed objects: {', '.join(obj_list)}")
     log.info("--- Step: PREPROC [DONE] ---")
     log.info("")
     return
 
 
-if False:
-    # GPU-accelerated version using PyTorch
-    import torch
-    def extract_spec_gpu(cube: np.ndarray, profile_map: np.ndarray) -> np.ndarray:
-        device = torch.device("mps") # NOTE: "cuda" for NVIDIA, "mps" for Apple Silicon
-
-        cube_t = torch.tensor(cube, device=device, dtype=torch.float32)
-        profile_t = torch.tensor(profile_map, device=device, dtype=torch.float32)
-        out_t = torch.einsum('fyx,oyx->ofx', cube_t, profile_t)
-        return out_t.cpu().numpy()
-
-
 @njit(parallel=True, fastmath=True, cache=True)
-def extract_spec_cpu(cube: np.ndarray, profile_map: np.ndarray) -> np.ndarray:
+def extract_spec_cpu(cube: NDArray, profile_map: NDArray) -> NDArray:
     F, Y, X = cube.shape
     O = profile_map.shape[0]
 
@@ -157,17 +147,17 @@ def extract_spec_cpu(cube: np.ndarray, profile_map: np.ndarray) -> np.ndarray:
 
 
 @njit(parallel=True, fastmath=True, cache=True)
-def extract_spec_sparse(cube: np.ndarray, ys: np.ndarray, xs: np.ndarray) -> np.ndarray:
+def extract_spec_sparse(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
     """
-    Extracts spectra from a data cube using sparse indices for each output.
+    Extract spectra from a cube using sparse pixel indices per output channel.
 
     Args:
-        cube (np.ndarray): Input data cube of shape (n_frame, ny, nx).
-        ys (np.ndarray): Array of shape (n_reg, ...) containing Y indices for each output.
-        xs (np.ndarray): Array of shape (n_reg, ...) containing X indices for each output.
-    Returns:
-        output (np.ndarray): Extracted spectra of shape (n_reg, n_frame, nx).
+        cube (NDArray): Input cube with shape `(n_frame, ny, nx)`.
+        ys (NDArray): Per-output Y indices.
+        xs (NDArray): Per-output X indices.
 
+    Returns:
+        NDArray: Extracted spectra with shape `(n_reg, n_frame, nx)`.
     """
     n_frame, _, nx = cube.shape
     n_reg = len(ys)
@@ -185,18 +175,18 @@ def extract_spec_sparse(cube: np.ndarray, ys: np.ndarray, xs: np.ndarray) -> np.
 
 @njit(parallel=True, cache=True)
 def twopx_interp(
-    spec: np.ndarray, wave_map: np.ndarray, wl_grid: np.ndarray
-) -> np.ndarray:
+    spec: NDArray, wave_map: NDArray, wl_grid: NDArray
+) -> NDArray:
     """
-    Resamples spectra from pixel space to a uniform wavelength grid.
+    Resample spectra from detector pixels onto a uniform wavelength grid.
 
     Args:
-        spec (np.ndarray): Input spectra (n_reg, n_frame, n_pixels).
-        wave_map (np.ndarray): Wavelength at each pixel (n_reg, n_pixels).
-        wl_grid (np.ndarray): Target wavelength grid (n_wave).
+        spec (NDArray): Input spectra with shape `(n_reg, n_frame, n_pixels)`.
+        wave_map (NDArray): Wavelength at each detector pixel with shape `(n_reg, n_pixels)`.
+        wl_grid (NDArray): Target wavelength grid with shape `(n_wave,)`.
 
     Returns:
-        np.ndarray: Resampled spectra (n_reg, n_frames, n_wave).
+        NDArray: Resampled spectra with shape `(n_reg, n_frame, n_wave)`.
     """
     n_reg, n_frame, _ = spec.shape
     n_wave = len(wl_grid)

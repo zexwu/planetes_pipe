@@ -1,10 +1,12 @@
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Tuple
 
 import numpy as np
 from numba import njit
+from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
 from . import PipelineContext, arg, command, log
+from .products import FLAT_PRODUCT, WAVE_PRODUCT
 from .visualize import genfig, plt
 from .preproc import extract_spec_sparse
 
@@ -22,7 +24,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     log.info("--- Step: WAVE ---")
 
     # Load flat Data
-    with ctx.load_product("flat") as d:
+    with ctx.load_product("flat", schema=FLAT_PRODUCT) as d:
         profile_xs = d["profile_xs"]
         profile_ys = d["profile_ys"]
         flat_map = d["flat_map"]
@@ -76,7 +78,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     spec_mean = wave_spec[-4:].mean(axis=0)
 
     # line detection threshold: median + 5*MAD
-    def thresh(_spec: np.ndarray) -> np.floating[Any]:
+    def thresh(_spec: NDArray) -> np.floating[Any]:
         med = np.median(_spec)
         mad = np.median(abs(_spec - med))
         return med + kwargs["sigma"] * mad
@@ -89,10 +91,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
     if ctx.conf.get("plot_to_pdf", False):
         pdf = ctx.plot_ctx("wave.pdf")
-        fig, ax = plt.subplots()
-        ax.imshow(wave_img, vmax=np.percentile(wave_img, 99), vmin=0)
-        ax.set_xlabel("X [px]"); ax.set_ylabel("Y [px]")
-        pdf.savefig(fig); plt.close(fig)
+        _plot_wave_input(pdf, wave_img)
 
     for reg in range(ctx.n_reg):
         spec = wave_spec[reg]
@@ -157,11 +156,11 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     ht_flat = np.concatenate(y_heights)
 
     # helper function to build the design matrix for 2D polynomial fitting
-    def dmat_arr(x, y, max_deg: int = 3) -> np.ndarray:
+    def dmat_arr(x, y, max_deg: int = 3) -> NDArray:
         terms = [x ** (d - i) * y**i for d in range(max_deg + 1) for i in range(d + 1)]
         return np.array(terms)
 
-    def dmat(x, y, max_deg: int = 3) -> np.ndarray:
+    def dmat(x, y, max_deg: int = 3) -> NDArray:
         terms = [x ** (d - i) * y**i for d in range(max_deg + 1) for i in range(d + 1)]
         return np.column_stack(terms)
 
@@ -199,146 +198,43 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     det_y_coords = y_trace
     full_design_matrix = dmat_arr(det_x_coords, det_y_coords)
     wavemap = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix)
-    ctx.save_product("wave", wave_map=wavemap)
+
+    ctx.save_product(
+        "wave",
+        schema=WAVE_PRODUCT,
+        wave_map=wavemap,
+    )
     log.info("Saved full wavemap")
 
     if ctx.conf.get("plot_to_pdf", False):
         log.info("Generating diagnostic plots...")
-        fig, ax = plt.subplots()
-        norm = plt.Normalize(vmin=wl_flat.min(), vmax=wl_flat.max())
-        ax.scatter(x_flat, y_flat, c=wl_flat, cmap="viridis", s=15, norm=norm)
-        cbar = plt.colorbar(ax.collections[0], ax=ax)
-        cbar.set_label("Wavelength (um)")
-        ax.set_xlabel("X [px]")
-        ax.set_ylabel("Y [px]")
-        ax.set_title("True Wavelengths (um)")
-        pdf.savefig(fig); plt.close(fig)
-
-        fig, ax = plt.subplots()
-        im = ax.imshow(wavemap, norm=norm, cmap="viridis")
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label("Wavelength (um)")
-        ax.set_xlabel("X [px]")
-        ax.set_ylabel("OUTPUT")
-        ax.set_title("Fitted Wavemap (um)")
-        pdf.savefig(fig); plt.close(fig)
-
-        fig, ax = plt.subplots()
-        x_coords = np.repeat(np.arange(nx)[None, :], ny, axis=0)
-        y_coords = np.repeat(np.arange(ny)[:, None], nx, axis=1)
-
-        full_design_matrix = dmat_arr(x_coords, y_coords)
-        _wavemap = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix) * 1e3
-        dwavemap = _wavemap - _wavemap.mean(axis=0)[None, :]
-        ddwavemap = dwavemap - dwavemap.mean(axis=1)[:, None]
-
-        norm = plt.Normalize(vmin=-5 * std * 1e3, vmax=5 * std * 1e3)
-        im = ax.imshow(ddwavemap, norm=norm, cmap="viridis")
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label("dWavelength (nm)")
-        ax.set_xlabel("X [px]")
-        ax.set_ylabel("Y [px]")
-        ax.set_title("Aberration Map:= Fitted Wavemap - (a*X+b*Y)")
-        pdf.savefig(fig); plt.close(fig)
-
-        fig, ax = plt.subplots()
-        norm = plt.Normalize(vmin=-5e3 * std, vmax=5e3 * std)
-        ax.scatter(x_flat, y_flat,
-                   c="lime", marker="x", label="All Points",
-                   lw=0.3, s=10, alpha=0.5)
-        ax.scatter(x_flat[reject], y_flat[reject],
-                   ec="r", fc="none", label="Rejected Outliers",
-                   lw=0.7, s=30)
-        ax.imshow(wave_img, vmax=np.percentile(wave_img, 99.5), vmin=1)
-        ax.set_xlabel("X [px]")
-        ax.set_ylabel("Y [px]")
-        ax.set_title("Wavelength Residuals (nm)")
-        ax.legend()
-        pdf.savefig(fig); plt.close(fig)
-
-        fig, ax = plt.subplots()
-        ax.hist(residuals[~reject] * 1e3,
-                histtype="step", bins=50, label="All Points")
-        ax.hist(residuals[reject] * 1e3,
-                histtype="step", bins=50, label="Rejected Outliers")
-        ax.text(0.5, 0.8, f"Std Dev: {1e3 * std:.3f} nm",
-                color="C0", transform=ax.transAxes, ha="center")
-        ax.set_xlabel("Fitted Residuals (nm)")
-        pdf.savefig(fig); plt.close(fig)
-
-        fig, axs = plt.subplots(1, 2)
-        ax = axs[0]
-        norm = plt.Normalize(vmin=y_flat.min(), vmax=y_flat.max())
-        ax.scatter(x_flat, residuals * 1e3, s=15,
-                   c=y_flat, cmap="viridis", norm=norm, label="All Points")
-        ax.scatter(x_flat[reject], residuals[reject] * 1e3, s=50,
-                   ec="r", fc="none", lw=0.7, label="Rejected Outliers")
-        ax.set_xlabel("X [px]")
-        ax.set_ylabel("Fitted Residuals (nm)")
-        cbar = plt.colorbar(ax.collections[0], ax=ax)
-        cbar.set_label("Y Position (px)")
-        ax.set_ylim(-1e4 * std, 1e4 * std)
-
-        ax = axs[1]
-        norm = plt.Normalize(vmin=x_flat.min(), vmax=x_flat.max())
-        ax.scatter(y_flat, residuals * 1e3, s=15,
-                   c=y_flat, cmap="viridis", norm=norm, label="All Points")
-        ax.scatter(y_flat[reject], residuals[reject] * 1e3, s=50,
-                   ec="r", fc="none", lw=0.7, label="Rejected Outliers")
-        ax.set_xlabel("Y [px]")
-        cbar = plt.colorbar(ax.collections[0], ax=ax)
-        cbar.set_label("X Position (px)")
-        ax.set_ylim(-1e4 * std, 1e4 * std)
-        ax.legend()
-        pdf.savefig(fig); plt.close(fig)
-
-        for reg in range(ctx.n_reg):
-            if reg % 4 == 0:
-                fig, axs =\
-                genfig(4, 1, xlabel="X [px]", ylabel="Intensity [adu]", sharey=False)
-
-            ax = axs[reg % 4]
-            trans = trans_all[reg]
-            spec = wave_spec[reg]
-            ax.plot(spec, color="k", lw=0.3)
-            for _i, _l in enumerate(x_centroids[reg]):
-                ax.axvline(_l, color="r", ls="-", alpha=0.5, lw=0.3)
-                if _i in outliers[reg]:
-                    ax.text(_l, spec.max() * 0.8, "OUTLIER",
-                            alpha=0.7, rotation=90, fontsize=6, zorder=10,
-                            va="top", ha="center", color="red",
-                            bbox=dict(facecolor="white", edgecolor="none", pad=0))
-
-            for _i, _l in enumerate(line_pos):
-                # 1. transform form lines to mean_spec
-                # 2. transform from mean_spec to individual_spec
-                _l_tr1 = _l**2 * pixel_to_wl_mean[0] +\
-                         _l**1 * pixel_to_wl_mean[1] +\
-                         _l**0 * pixel_to_wl_mean[2]
-                _l_tr2 = _l_tr1**2 * trans[0] +\
-                         _l_tr1**1 * trans[1] +\
-                         _l_tr1**0 * trans[2]
-                if _l_tr2 < 0 or _l_tr2 > nx: continue
-                if _i in idx_wave:
-                    # Matched lines: blue dashed line + label
-                    ax.axvline(_l_tr2, color="b", ls="--", alpha=0.7, lw=0.3)
-                    ax.text(_l_tr2, spec.max() * 0.8, f"{_l:.4f}",
-                            va="top", ha="center", rotation=90,
-                            fontsize=6, color="blue",
-                            bbox=dict(facecolor="white", edgecolor="none", pad=0))
-                else:
-                    # Unmatched lines: gray solid line + label
-                    ax.axvline(_l_tr2, color="k", ls="-", alpha=0.2, lw=0.3)
-                    ax.text(_l_tr2, spec.max() * 0.8, f"{_l:.4f}",
-                            alpha=0.5, rotation=90, fontsize=6,
-                            va="top", ha="center", color="gray",
-                            bbox=dict(facecolor="white", edgecolor="none", pad=0))
-            ax.set_xlim(0, nx)
-            nmatch = len(matched_ind_all[reg])
-            ax.text(0.1, 0.8, f"OUTPUT{reg}: matched {nmatch} lines",
-                    transform=ax.transAxes, c="b")
-            if (reg + 1) % 4 == 0:
-                pdf.savefig(fig); plt.close(fig)
+        _plot_wave_fit_diagnostics(
+            pdf=pdf,
+            wave_img=wave_img,
+            wavemap=wavemap,
+            wavemap_coeffs=wavemap_coeffs,
+            x_flat=x_flat,
+            y_flat=y_flat,
+            wl_flat=wl_flat,
+            residuals=residuals,
+            reject=reject,
+            std=std,
+            ny=ny,
+            nx=nx,
+            dmat_arr=dmat_arr,
+        )
+        _plot_wave_region_diagnostics(
+            pdf=pdf,
+            ctx=ctx,
+            wave_spec=wave_spec,
+            trans_all=trans_all,
+            x_centroids=x_centroids,
+            outliers=outliers,
+            matched_ind_all=matched_ind_all,
+            line_pos=line_pos,
+            pixel_to_wl_mean=pixel_to_wl_mean,
+            nx=nx,
+        )
 
     # --- 6. Build wavemap using Aberration Model ---
 
@@ -380,7 +276,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     # fit a 2D polynomial to the deviations from the mean spec for the aberrations
     log.info("Fitting 2D polynomial f(x,y) to aberration Δx...")
     log.debug("Kernel used for aberration fit: ")
-    aber_deg = kwargs["deg"]
+    aber_deg = kwargs["aber_deg"]
     ker = [f"x{d-i}y{i}" for d in range(aber_deg+1) for i in range(d + 1)]
     log.debug(", ".join(ker))
     aber_design_matrix = dmat(x_flat, y_flat, max_deg=aber_deg)
@@ -403,7 +299,12 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
 
     # Apply the 1D wl solution to get the final wavemap with aberration correction
     wavemap_aber = np.polyval(pixel_to_wl_coeffs, det_x_coords - aber_offset)
-    ctx.save_product("wave_aberr", wavemap=wavemap_aber)
+
+    ctx.save_product(
+        "wave_aberr",
+        schema=WAVE_PRODUCT,
+        wave_map=wavemap_aber,
+    )
     log.info("Saved aberration wavemap")
 
 
@@ -411,70 +312,278 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     log.info("")
 
     if ctx.conf.get("plot_to_pdf", False):
-        fig, ax = plt.subplots()
-        norm = plt.Normalize(vmin=wl_flat.min(), vmax=wl_flat.max())
-        ax.scatter(x_flat, y_flat,
-                   c=wl_flat, cmap="viridis", s=15, norm=norm)
-        ax.set_xlabel("X [px]")
-        ax.set_ylabel("Y [px]")
-        pdf.savefig(fig); plt.close(fig)
-
-        fig, ax = plt.subplots()
-        ax.hist(residuals * 1e3, histtype="step", bins=50, label="Fit Residuals")
-        ax.set_xlabel("Wavelength Error (nm)")
-        pdf.savefig(fig); plt.close(fig)
-
-        fig, ax = plt.subplots()
-        norm = plt.Normalize(vmin=y_flat.min(), vmax=y_flat.max())
-        ax.scatter(x_flat, residuals * 1e3,
-                   c=y_flat, cmap="viridis", s=15, norm=norm)
-        ax.set_xlabel("X [px]")
-        ax.set_ylabel("Wavelength Residual (nm)")
-        ax.set_ylim(-1e4 * std, 1e4 * std)
-        pdf.savefig(fig); plt.close(fig)
-
-        fig, ax = plt.subplots()
-        norm = plt.Normalize(vmin=x_flat.min(), vmax=x_flat.max())
-        ax.scatter(y_flat, residuals * 1e3,
-                   c=x_flat, cmap="viridis", s=15, norm=norm)
-        ax.set_xlabel("Y [px]")
-        ax.set_ylabel("Wavelength Residual (nm)")
-        ax.set_ylim(-1e4 * std, 1e4 * std)
-        pdf.savefig(fig); plt.close(fig)
-
-        x_coords = np.repeat(np.arange(nx)[None, :], ny, axis=0)
-        y_coords = np.repeat(np.arange(ny)[:, None], nx, axis=1)
-        full_aber_design_matrix = dmat_arr(x_coords, y_coords, max_deg=aber_deg)
-        dx_fit = np.einsum("i,iyx->yx", aber_coeffs, full_aber_design_matrix)
-        _wavemap_aber =\
-        np.polyval(pixel_to_wl_coeffs, x_coords - dx_fit) * 1e3
-
-        dwavemap_aber = _wavemap_aber - _wavemap_aber.mean(axis=0)[None, :]
-        ddwavemap_aber = dwavemap_aber - dwavemap_aber.mean(axis=1)[:, None]
-
-        fig, ax = plt.subplots()
-        norm = plt.Normalize(vmin=-5 * std0 * 1e3, vmax=5 * std0 * 1e3)
-        im = ax.imshow(ddwavemap_aber, norm=norm, cmap="viridis")
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label("dWavelength (nm)")
-        ax.set_xlabel("X [px]")
-        ax.set_ylabel("Y [px]")
-        pdf.savefig(fig); plt.close(fig)
-
-        fig, ax = plt.subplots()
-        norm = plt.Normalize(vmin=-0.3, vmax=0.3)
-        im = ax.imshow(_wavemap - _wavemap_aber, norm=norm, cmap="coolwarm")
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label("Wavelength Difference (nm)")
-        ax.set_xlabel("X [px]")
-        ax.set_ylabel("Y [px]")
-        ax.set_title("Wavemap(method1) - Wavemap(method2)")
-        pdf.savefig(fig); plt.close(fig)
+        _plot_wave_aberration_diagnostics(
+            pdf=pdf,
+            x_flat=x_flat,
+            y_flat=y_flat,
+            wl_flat=wl_flat,
+            residuals=residuals,
+            std=std,
+            std0=std0,
+            nx=nx,
+            ny=ny,
+            aber_deg=aber_deg,
+            aber_coeffs=aber_coeffs,
+            pixel_to_wl_coeffs=pixel_to_wl_coeffs,
+            dmat_arr=dmat_arr,
+            wavemap_coeffs=wavemap_coeffs,
+        )
 
     if ctx.conf.get("plot_to_pdf", False):
         pdf.close()
 
     return
+
+
+def _plot_wave_input(pdf, wave_img: NDArray) -> None:
+    fig, ax = plt.subplots()
+    ax.imshow(wave_img, vmax=np.percentile(wave_img, 99), vmin=0)
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("Y [px]")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def _plot_wave_fit_diagnostics(
+    pdf,
+    wave_img: NDArray,
+    wavemap: NDArray,
+    wavemap_coeffs: NDArray,
+    x_flat: NDArray,
+    y_flat: NDArray,
+    wl_flat: NDArray,
+    residuals: NDArray,
+    reject: NDArray,
+    std: float,
+    ny: int,
+    nx: int,
+    dmat_arr,
+) -> None:
+    norm = plt.Normalize(vmin=wl_flat.min(), vmax=wl_flat.max())
+
+    fig, ax = plt.subplots()
+    ax.scatter(x_flat, y_flat, c=wl_flat, cmap="viridis", s=15, norm=norm)
+    cbar = plt.colorbar(ax.collections[0], ax=ax)
+    cbar.set_label("Wavelength (um)")
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("Y [px]")
+    ax.set_title("True Wavelengths (um)")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, ax = plt.subplots()
+    im = ax.imshow(wavemap, norm=norm, cmap="viridis")
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label("Wavelength (um)")
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("OUTPUT")
+    ax.set_title("Fitted Wavemap (um)")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    x_coords = np.repeat(np.arange(nx)[None, :], ny, axis=0)
+    y_coords = np.repeat(np.arange(ny)[:, None], nx, axis=1)
+    full_design_matrix = dmat_arr(x_coords, y_coords)
+    wavemap_full = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix) * 1e3
+    dwavemap = wavemap_full - wavemap_full.mean(axis=0)[None, :]
+    ddwavemap = dwavemap - dwavemap.mean(axis=1)[:, None]
+
+    fig, ax = plt.subplots()
+    resid_norm = plt.Normalize(vmin=-5 * std * 1e3, vmax=5 * std * 1e3)
+    im = ax.imshow(ddwavemap, norm=resid_norm, cmap="viridis")
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label("dWavelength (nm)")
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("Y [px]")
+    ax.set_title("Aberration Map:= Fitted Wavemap - (a*X+b*Y)")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, ax = plt.subplots()
+    ax.scatter(x_flat, y_flat, c="lime", marker="x", label="All Points", lw=0.3, s=10, alpha=0.5)
+    ax.scatter(
+        x_flat[reject],
+        y_flat[reject],
+        ec="r",
+        fc="none",
+        label="Rejected Outliers",
+        lw=0.7,
+        s=30,
+    )
+    ax.imshow(wave_img, vmax=np.percentile(wave_img, 99.5), vmin=1)
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("Y [px]")
+    ax.set_title("Wavelength Residuals (nm)")
+    ax.legend()
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, ax = plt.subplots()
+    ax.hist(residuals[~reject] * 1e3, histtype="step", bins=50, label="All Points")
+    ax.hist(residuals[reject] * 1e3, histtype="step", bins=50, label="Rejected Outliers")
+    ax.text(0.5, 0.8, f"Std Dev: {1e3 * std:.3f} nm", color="C0", transform=ax.transAxes, ha="center")
+    ax.set_xlabel("Fitted Residuals (nm)")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, axs = plt.subplots(1, 2)
+    ax = axs[0]
+    norm = plt.Normalize(vmin=y_flat.min(), vmax=y_flat.max())
+    ax.scatter(x_flat, residuals * 1e3, s=15, c=y_flat, cmap="viridis", norm=norm, label="All Points")
+    ax.scatter(x_flat[reject], residuals[reject] * 1e3, s=50, ec="r", fc="none", lw=0.7, label="Rejected Outliers")
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("Fitted Residuals (nm)")
+    cbar = plt.colorbar(ax.collections[0], ax=ax)
+    cbar.set_label("Y Position (px)")
+    ax.set_ylim(-1e4 * std, 1e4 * std)
+
+    ax = axs[1]
+    norm = plt.Normalize(vmin=x_flat.min(), vmax=x_flat.max())
+    ax.scatter(y_flat, residuals * 1e3, s=15, c=y_flat, cmap="viridis", norm=norm, label="All Points")
+    ax.scatter(y_flat[reject], residuals[reject] * 1e3, s=50, ec="r", fc="none", lw=0.7, label="Rejected Outliers")
+    ax.set_xlabel("Y [px]")
+    cbar = plt.colorbar(ax.collections[0], ax=ax)
+    cbar.set_label("X Position (px)")
+    ax.set_ylim(-1e4 * std, 1e4 * std)
+    ax.legend()
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
+def _plot_wave_region_diagnostics(
+    pdf,
+    ctx: PipelineContext,
+    wave_spec: NDArray,
+    trans_all,
+    x_centroids,
+    outliers,
+    matched_ind_all,
+    line_pos: NDArray,
+    pixel_to_wl_mean,
+    nx: int,
+) -> None:
+    for reg in range(ctx.n_reg):
+        if reg % 4 == 0:
+            fig, axs = genfig(4, 1, xlabel="X [px]", ylabel="Intensity [adu]", sharey=False)
+
+        ax = axs[reg % 4]
+        trans = trans_all[reg]
+        spec = wave_spec[reg]
+        ax.plot(spec, color="k", lw=0.3)
+        for idx, x_line in enumerate(x_centroids[reg]):
+            ax.axvline(x_line, color="r", ls="-", alpha=0.5, lw=0.3)
+            if idx in outliers[reg]:
+                ax.text(
+                    x_line,
+                    spec.max() * 0.8,
+                    "OUTLIER",
+                    alpha=0.7,
+                    rotation=90,
+                    fontsize=6,
+                    zorder=10,
+                    va="top",
+                    ha="center",
+                    color="red",
+                    bbox=dict(facecolor="white", edgecolor="none", pad=0),
+                )
+
+        idx_wave = set(matched_ind_all[reg][:, 0])
+        for idx, wave in enumerate(line_pos):
+            line_mean = wave**2 * pixel_to_wl_mean[0] + wave * pixel_to_wl_mean[1] + pixel_to_wl_mean[2]
+            line_reg = line_mean**2 * trans[0] + line_mean * trans[1] + trans[2]
+            if line_reg < 0 or line_reg > nx:
+                continue
+            color = "b" if idx in idx_wave else "k"
+            alpha = 0.7 if idx in idx_wave else 0.2
+            linestyle = "--" if idx in idx_wave else "-"
+            ax.axvline(line_reg, color=color, ls=linestyle, alpha=alpha, lw=0.3)
+
+        ax.set_xlim(0, nx)
+        ax.text(0.1, 0.8, f"OUTPUT{reg}: matched {len(matched_ind_all[reg])} lines", transform=ax.transAxes, c="b")
+        if (reg + 1) % 4 == 0:
+            pdf.savefig(fig)
+            plt.close(fig)
+
+
+def _plot_wave_aberration_diagnostics(
+    pdf,
+    x_flat: NDArray,
+    y_flat: NDArray,
+    wl_flat: NDArray,
+    residuals: NDArray,
+    std: float,
+    std0: float,
+    nx: int,
+    ny: int,
+    aber_deg: int,
+    aber_coeffs: NDArray,
+    pixel_to_wl_coeffs: NDArray,
+    dmat_arr,
+    wavemap_coeffs: NDArray,
+) -> None:
+    fig, ax = plt.subplots()
+    norm = plt.Normalize(vmin=wl_flat.min(), vmax=wl_flat.max())
+    ax.scatter(x_flat, y_flat, c=wl_flat, cmap="viridis", s=15, norm=norm)
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("Y [px]")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, ax = plt.subplots()
+    ax.hist(residuals * 1e3, histtype="step", bins=50, label="Fit Residuals")
+    ax.set_xlabel("Wavelength Error (nm)")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, ax = plt.subplots()
+    norm = plt.Normalize(vmin=y_flat.min(), vmax=y_flat.max())
+    ax.scatter(x_flat, residuals * 1e3, c=y_flat, cmap="viridis", s=15, norm=norm)
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("Wavelength Residual (nm)")
+    ax.set_ylim(-1e4 * std, 1e4 * std)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, ax = plt.subplots()
+    norm = plt.Normalize(vmin=x_flat.min(), vmax=x_flat.max())
+    ax.scatter(y_flat, residuals * 1e3, c=x_flat, cmap="viridis", s=15, norm=norm)
+    ax.set_xlabel("Y [px]")
+    ax.set_ylabel("Wavelength Residual (nm)")
+    ax.set_ylim(-1e4 * std, 1e4 * std)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    x_coords = np.repeat(np.arange(nx)[None, :], ny, axis=0)
+    y_coords = np.repeat(np.arange(ny)[:, None], nx, axis=1)
+    full_aber_design_matrix = dmat_arr(x_coords, y_coords, max_deg=aber_deg)
+    dx_fit = np.einsum("i,iyx->yx", aber_coeffs, full_aber_design_matrix)
+    wavemap_aber = np.polyval(pixel_to_wl_coeffs, x_coords - dx_fit) * 1e3
+
+    full_design_matrix = dmat_arr(x_coords, y_coords)
+    wavemap_ref = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix) * 1e3
+    dwavemap_aber = wavemap_aber - wavemap_aber.mean(axis=0)[None, :]
+    ddwavemap_aber = dwavemap_aber - dwavemap_aber.mean(axis=1)[:, None]
+
+    fig, ax = plt.subplots()
+    norm = plt.Normalize(vmin=-5 * std0 * 1e3, vmax=5 * std0 * 1e3)
+    im = ax.imshow(ddwavemap_aber, norm=norm, cmap="viridis")
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label("dWavelength (nm)")
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("Y [px]")
+    pdf.savefig(fig)
+    plt.close(fig)
+
+    fig, ax = plt.subplots()
+    norm = plt.Normalize(vmin=-0.3, vmax=0.3)
+    im = ax.imshow(wavemap_ref - wavemap_aber, norm=norm, cmap="coolwarm")
+    cbar = plt.colorbar(im, ax=ax)
+    cbar.set_label("Wavelength Difference (nm)")
+    ax.set_xlabel("X [px]")
+    ax.set_ylabel("Y [px]")
+    ax.set_title("Wavemap(method1) - Wavemap(method2)")
+    pdf.savefig(fig)
+    plt.close(fig)
 
 
 def match_lines(
@@ -483,7 +592,7 @@ def match_lines(
     tol: float = 2.0,
     min_inliers: int = 5,
     n_iter: int = 10000,
-) -> Tuple[np.ndarray, Tuple[float, ...]]:
+) -> Tuple[NDArray, Tuple[float, ...]]:
 
     # 1. Setup Data
     obs = np.sort(np.asarray(obs_peaks, dtype=np.float64))
@@ -532,7 +641,7 @@ def match_lines_grid(
     slope_bounds: Tuple[float, float] = (0.98, 1.02),
     curve_limit: float = 1e-3,
     steps_per_unit: float = 2.0,  # Density of search. Higher = more robust but slower.
-) -> Tuple[np.ndarray, Tuple[float, ...]]:
+) -> Tuple[NDArray, Tuple[float, ...]]:
     # 1. Prepare Data
     obs = np.sort(np.ascontiguousarray(obs_peaks, dtype=np.float64))
     mod = np.sort(np.ascontiguousarray(theoretical_lines, dtype=np.float64))
@@ -593,7 +702,7 @@ def match_lines_grid(
 
 
 @njit(fastmath=True, cache=True)
-def _ransac_kernel(obs: np.ndarray, mod: np.ndarray,
+def _ransac_kernel(obs: NDArray, mod: NDArray,
                    n_iter: int, tol: float, n_mod: int,
                    n_obs: int) -> Tuple[float, float, float]:
     """
@@ -698,12 +807,12 @@ def _ransac_kernel(obs: np.ndarray, mod: np.ndarray,
 
 @njit(fastmath=True, cache=True)
 def _grid_search_kernel(
-    obs: np.ndarray ,
-    mod: np.ndarray,
+    obs: NDArray ,
+    mod: NDArray,
     tol: int ,
-    a_grid: np.ndarray,
-    b_grid: np.ndarray,
-    c_grid: np.ndarray
+    a_grid: NDArray,
+    b_grid: NDArray,
+    c_grid: NDArray
 ) -> Tuple[float, float, float]:
     """
     Scans the parameter grid and returns the best (a,b,c) parameters.

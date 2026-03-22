@@ -1,7 +1,8 @@
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
 
 from . import PipelineContext, arg, command, log
+from .products import PREPROC_OBJECT_PRODUCT, REDUCED_PRODUCT
 
 pltkwargs = {
     "font.size": 12,
@@ -41,7 +42,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
     log.info(f"--- Step: PLOTTING {obj} ---")
     plt.rcParams["font.size"] = 14
 
-    with ctx.load_product(("reduced", obj)) as d:
+    with ctx.load_product(("reduced", obj), schema=REDUCED_PRODUCT) as d:
         p2vmred = d["p2vmred"]
         visdata = d["visdata"]
         visphi = d["visphi"]
@@ -51,6 +52,8 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
 
     pdf = ctx.plot_ctx(f"{obj}.pdf")
     mean_flux = p2vmred[:, :ctx.n_tel, :].mean(axis=-1)
+    frame_samples = np.arange(0, visphi.shape[0], 10)
+    wave_samples = np.arange(0, visphi.shape[-1], 10)
 
     def plot_flux():
         fig, axs = genfig(ctx.n_tel//2, 2,
@@ -103,7 +106,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
         pdf.savefig(fig); plt.close(fig)
 
     def plot_visphi():
-        for dit in np.arange(0, visphi.shape[0]-1, 10):
+        for dit in frame_samples:
             fig, axs = genfig(2, ctx.n_bsl//2,
                               xlabel="Wavelength Index", ylabel="Phase [deg]")
             for bsl in range(ctx.n_bsl):
@@ -115,7 +118,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
             pdf.savefig(fig); plt.close(fig)
 
     def plot_gdelay_visphi():
-        for iwl in np.arange(0, visphi.shape[-1]-1, 100):
+        for iwl in wave_samples:
             fig, axs = genfig(2, ctx.n_bsl//2,
                               xlabel="Group Delay [um]",
                               ylabel="Phase [deg]",
@@ -146,7 +149,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
 
 
     def plot_ABCD():
-        with ctx.load_product(("preproc", obj)) as d:
+        with ctx.load_product(("preproc", obj), schema=PREPROC_OBJECT_PRODUCT) as d:
             spec = d["spec"]
             spec_flat = d["spec_flat"]
         spec /= spec_flat
@@ -155,11 +158,10 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
             fig, axs = genfig(2, 2,
                               xlabel="Wavelength Index", ylabel="Normalized Flux")
             regs = bsl_to_reg[bsl]
-            n_dit = spec.shape[1]
-            colors = plt.cm.viridis(np.linspace(0, 1, n_dit))
+            colors = plt.cm.viridis(np.linspace(0, 1, len(frame_samples)))
             for i in range(4):
                 axs[i].set_prop_cycle(color=colors)
-                axs[i].plot(spec[regs[i], :, :].T, alpha=0.5, lw=0.3)
+                axs[i].plot(spec[regs[i], frame_samples, :].T, alpha=0.5, lw=0.3)
                 axs[i].set_title(f"OUTPUT {regs[i]}-{['A','C','B','D'][i]}")
             fig.suptitle(f"{ctx.conf['object'][obj]}\n"\
                          f"Baseline {ctx.baselines[bsl]} Extracted Spectra")
@@ -171,8 +173,6 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
 
     return
 
-def bold(text):
-    return f"\033[1m{text}\033[0m"
 
 def colored_text(text: str, color: str="white", bold: bool=False) -> str:
     # Dictionary mapping color names to ANSI codes

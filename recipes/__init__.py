@@ -14,13 +14,15 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import colorlog
 import numpy as np
 import yaml
 from astropy.io import fits
-from matplotlib.backends.backend_pdf import PdfPages
+from numpy.typing import NDArray
+
+from .products import validate_product_keys
 
 # --- 0. Setup Logging ---
 log = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ FMT = "[%(filename)-12s:%(lineno)-4s %(log_color)s%(levelname)5s%(reset)s] %(mes
 formatter = colorlog.ColoredFormatter(FMT)
 handler.setFormatter(formatter)
 log.addHandler(handler)
+log.setLevel(logging.INFO)
 
 
 # --- 1. Configuration & Context ---
@@ -46,7 +49,7 @@ class PipelineContext:
         telescopes: List of telescope identifiers
     """
 
-    conf_path: Union[str, Path]
+    conf_path: Path
     data_dir: Path = field(default_factory=Path)
     output_dir: Path = field(default=Path("output"))
 
@@ -57,7 +60,7 @@ class PipelineContext:
 
     def __post_init__(self) -> None:
         """Load configuration and setup paths."""
-        self.conf_path = Path(self.conf_path)
+        self.conf_path = Path(self.conf_path).expanduser().resolve()
         if not self.conf_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {self.conf_path}")
 
@@ -66,9 +69,9 @@ class PipelineContext:
 
         # Allow config to override output directory
         if "output_dir" in self.conf:
-            self.output_dir = Path(self.conf["output_dir"])
+            self.output_dir = self._resolve_path(self.conf["output_dir"])
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.data_dir = Path(self.conf["data_dir"])
+        self.data_dir = self._resolve_path(self.conf["data_dir"])
 
         # Populate core lists
         self.baselines = self.conf.get("baselines", [])
@@ -149,7 +152,16 @@ class PipelineContext:
         path = self.output_dir / self._get_filename(product_id)
         return path.exists()
 
-    def load_fits(self, filename: str, **kwargs) -> np.ndarray:
+    def _resolve_path(self, path: Path) -> Path:
+        """
+        Resolve a path relative to the configuration file directory.
+        """
+        path = Path(path).expanduser()
+        if path.is_absolute():
+            return path
+        return (self.conf_path.parent / path).resolve()
+
+    def load_fits(self, filename: Path, **kwargs) -> NDArray:
         """
         Load FITS file and apply data slice.
 
@@ -160,39 +172,58 @@ class PipelineContext:
         Returns:
             Numpy array containing the data
         """
-        path = self.data_dir / filename
+        path = self._resolve_path(self.data_dir / filename)
         if not path.exists():
             raise FileNotFoundError(f"FITS file not found: {path}")
 
         data = fits.getdata(path, **kwargs)
         return data[self.sl_data].astype(np.float32)
 
-    def save_product(self, product_id: str, **kwargs) -> None:
+    def save_product(
+        self,
+        product_id: Union[str, Tuple[str, str]],
+        *,
+        schema: Optional[Sequence[str]] = None,
+        **kwargs,
+    ) -> None:
         """
         Save pipeline product to disk.
 
         Args:
             product_id: Product identifier
+            schema: Explicit schema for saved keys
             **kwargs: Data to save (key-value pairs)
         """
         filename = self._get_filename(product_id)
+        if schema is not None:
+            validate_product_keys(kwargs.keys(), schema, filename)
         np.savez(self.output_dir / filename, **kwargs)
 
-    def load_product(self, product_id: str, **kwargs) -> Dict[str, Any]:
+    def load_product(
+        self,
+        product_id: Union[str, Tuple[str, str]],
+        *,
+        schema: Optional[Sequence[str]] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
         """
         Load pipeline product from disk.
 
         Args:
             product_id: Product identifier
+            schema: Explicit schema for expected keys
             **kwargs: Additional arguments to pass to np.load
 
         Returns:
             Dictionary containing the loaded data
         """
         filename = self._get_filename(product_id)
-        return np.load(self.output_dir / filename, allow_pickle=True, **kwargs)
+        data = np.load(self.output_dir / filename, allow_pickle=True, **kwargs)
+        if schema is not None:
+            validate_product_keys(data.files, schema, filename)
+        return data
 
-    def plot_ctx(self, filename: str) -> Union[PdfPages, nullcontext]:
+    def plot_ctx(self, filename: str) -> Any:
         """
         Create a plotting context for PDF output.
 
@@ -203,6 +234,7 @@ class PipelineContext:
             PDF context manager or null context
         """
         if self.conf.get("plot_to_pdf", False):
+            from matplotlib.backends.backend_pdf import PdfPages
             return PdfPages(self.output_dir / filename)
         return nullcontext()
 
@@ -330,6 +362,6 @@ for loader, recipe_name, is_pkg in pkgutil.walk_packages(__path__):
     try:
         # Dynamically import the module using its name
         importlib.import_module(f".{recipe_name}", package=__name__)
-        log.info(f"Loaded recipe: {recipe_name}")
+        # log.info(f"Loaded recipe: {recipe_name}")
     except Exception as e:
         log.warning(f"Failed to load recipe '{recipe_name}': {e}")

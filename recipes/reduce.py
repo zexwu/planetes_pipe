@@ -8,13 +8,12 @@ visibility extraction, group delay computation, and phase calculation.
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from . import PipelineContext, arg, command, log
+from .products import P2VM_PRODUCT, PREPROC_OBJECT_PRODUCT, REDUCED_PRODUCT
 from .preproc import run_preproc
 from .visualize import colored_text, summary_plot
-
-from .oifits import OI_VIS, OI_FLUX, OI_WAVELENGTH
-from astropy.io.fits import HDUList, PrimaryHDU
 
 
 @command(
@@ -40,7 +39,7 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
     log.info("--- Step: REDUCE ---")
 
     # --- 1. Load P2VM ---
-    with ctx.load_product("p2vm") as d:
+    with ctx.load_product("p2vm", schema=P2VM_PRODUCT) as d:
         p2vm_map = d["p2vm"]
         wl_grid = d["wl_grid"]
         bsl_to_reg = d["bsl_to_reg"][()]
@@ -55,7 +54,7 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
             gd_range: Search range for group delay computation
         """
         # Load preprocessed spectra
-        spec = ctx.load_product(("preproc", object_name))["spec"]
+        spec = ctx.load_product(("preproc", object_name), schema=PREPROC_OBJECT_PRODUCT)["spec"]
         cobj = colored_text(object_name, color="green", bold=True)
 
         log.info(f"Applying P2VM to extract visibility for {cobj}...")
@@ -96,6 +95,7 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
         }
 
         _sta_idx = np.array([int(i) for i in ctx.telescopes])
+
         sta_idx_tel = np.stack([_sta_idx] * n_dit, axis=0)
         sta_idx_bsl = []
         for bsl in range(ctx.n_bsl):
@@ -104,26 +104,25 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
         sta_idx_bsl = np.array(sta_idx_bsl)
         sta_idx_bsl = np.stack([sta_idx_bsl] * n_dit, axis=0)
 
+        # strict = False
+        # meta = {"insname": None, "arrname": "BENCH", "strict": strict}
+        # oi_wav = OI_WAVELENGTH.from_attrs(eff_wave=wl_grid, **meta)
+        # oi_vis = OI_VIS.from_attrs(visdata=visdata.reshape(n_dit * ctx.n_bsl, -1),
+        #                            mjd=visdata.reshape(n_dit * ctx.n_bsl, -1),
+        #                            sta_index=sta_idx_bsl.reshape(n_dit * ctx.n_bsl, -1),
+        #                            **meta)
+        # oi_flux = OI_FLUX.from_attrs(fluxdata=fluxdata.reshape(n_dit * ctx.n_tel, -1),
+        #                              mjd=fluxdata.reshape(n_dit * ctx.n_tel, -1),
+        #                              sta_index=sta_idx_tel.reshape(n_dit * ctx.n_tel, -1),
+        #                              **meta)
+        #
+        # hdul = HDUList([PrimaryHDU(),
+        #                 oi_wav.to_hdu(strict=strict),
+        #                 oi_vis.to_hdu(strict=strict),
+        #                 oi_flux.to_hdu(strict=strict)])
+        # hdul.writeto(ctx.output_dir / f"{object_name}_reduced.oifits", overwrite=True)
 
-        strict = False
-        meta = {"insname": None, "arrname": "BENCH", "strict": strict}
-        oi_wav = OI_WAVELENGTH.from_attrs(eff_wave=wl_grid, **meta)
-        oi_vis = OI_VIS.from_attrs(visdata=visdata.reshape(n_dit * ctx.n_bsl, -1),
-                                   mjd=visdata.reshape(n_dit * ctx.n_bsl, -1),
-                                   sta_index=sta_idx_bsl.reshape(n_dit * ctx.n_bsl, -1),
-                                   **meta)
-        oi_flux = OI_FLUX.from_attrs(fluxdata=fluxdata.reshape(n_dit * ctx.n_tel, -1),
-                                     mjd=fluxdata.reshape(n_dit * ctx.n_tel, -1),
-                                     sta_index=sta_idx_tel.reshape(n_dit * ctx.n_tel, -1),
-                                     **meta)
-
-        hdul = HDUList([PrimaryHDU(),
-                        oi_wav.to_hdu(strict=strict),
-                        oi_vis.to_hdu(strict=strict),
-                        oi_flux.to_hdu(strict=strict)])
-        hdul.writeto(ctx.output_dir / f"{object_name}_reduced.oifits", overwrite=True)
-
-        ctx.save_product(("reduced", object_name), **product_data)
+        ctx.save_product(("reduced", object_name), schema=REDUCED_PRODUCT, **product_data)
         log.info(f"Reduction for {cobj} completed.")
 
     # Process objects
@@ -147,11 +146,11 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
 
 
 def compute_gdelay(
-    visdata: np.ndarray,
-    wl: np.ndarray,
+    visdata: NDArray,
+    wl: NDArray,
     search_range: Tuple[float, float] = (-30, 30),
     n_newton: int = 5
-) -> np.ndarray:
+) -> NDArray:
     """
     Compute group delay for a batch of visibilities.
 
