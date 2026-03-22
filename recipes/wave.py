@@ -11,10 +11,10 @@ from .visualize import genfig, plt
 from .preproc import extract_spec_sparse
 
 
-@command("wave", "Wavelength calibration step",
+@command("wave", "Wavelength calibration",
          requires=["flat"],
          produces=["wave"])
-@arg("--sigma", type=int, default=5, help="Line detection threshold")
+@arg("--sigma", type=int, default=3, help="Line detection threshold")
 @arg("--deg", type=int, default=3, help="Degree of polynomial for wavemap fit")
 @arg("--aber-deg", type=int, default=3, help="Degree of polynomial for aberration fit")
 @arg("--disp-deg", type=int, default=3, help="Degree of polynomial for pixel-to-wavelength fit")
@@ -81,7 +81,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     def thresh(_spec: NDArray) -> np.floating[Any]:
         med = np.median(_spec)
         mad = np.median(abs(_spec - med))
-        return med + kwargs["sigma"] * mad
+        return med + kwargs["sigma"] * mad * 1.4826
 
     peak_pos_mean, _ = find_peaks(spec_mean, height=thresh(spec_mean), distance=5)
     matched_ind_mean, pixel_to_wl_mean =\
@@ -120,8 +120,8 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
         # to filter out spurious detections
         matched_ind, trans = match_lines_grid(
             peak_pos_mean, peak_pos, tol=1,
-            offset_limit=15, curve_limit=1e-3, slope_bounds=(0.99, 1.01),
-            steps_per_unit=4,
+            offset_limit=15, curve_limit=1e-3, slope_bounds=(0.98, 1.02),
+            steps_per_unit=5,
         )
 
         both = list(set(matched_ind[:, 0]) & set(matched_ind_mean[:, 1]))

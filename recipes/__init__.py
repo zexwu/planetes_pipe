@@ -31,7 +31,6 @@ FMT = "[%(filename)-12s:%(lineno)-4s %(log_color)s%(levelname)5s%(reset)s] %(mes
 formatter = colorlog.ColoredFormatter(FMT)
 handler.setFormatter(formatter)
 log.addHandler(handler)
-log.setLevel(logging.INFO)
 
 
 # --- 1. Configuration & Context ---

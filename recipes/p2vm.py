@@ -7,6 +7,7 @@ from . import PipelineContext, arg, command, log
 from .products import P2VM_PRODUCT, PREPROC_CALIB_PRODUCT
 from .reduce import compute_gdelay
 from .visualize import genfig, plt
+plt.style.use("~/zexwu_lib/zexwu.mplstyle")
 
 
 @command("p2vm", "Calculate P2VM matrix.",
@@ -236,6 +237,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         _plot_p2vm_summary(
             pdf=pdf,
             ctx=ctx,
+            wl_grid=wl_grid,
             v2pm=v2pm,
             coh=coh,
             bsl_to_reg=bsl_to_reg,
@@ -317,30 +319,31 @@ def _plot_p2vm_spectra_summary(pdf, baseline_name: str, regs, spec, spec_flat) -
     plt.close(fig)
 
 
-def _plot_p2vm_summary(pdf, ctx: PipelineContext, v2pm, coh, bsl_to_reg, bsl_to_tel) -> None:
-    fig, axs = genfig(2, 3, xlabel="Wavelength index", ylabel="Phase [deg]")
+def _plot_p2vm_summary(pdf, ctx: PipelineContext, wl_grid, v2pm, coh, bsl_to_reg, bsl_to_tel) -> None:
+    fig, axs = genfig(2, 3, xlabel="Wavelength [um]", ylabel="Phase [deg]")
     phase = v2pm[:, ctx.sl_imag, :].copy()
     for bsl in range(ctx.n_bsl):
         regs = bsl_to_reg[bsl]
         phase[regs, bsl, :] -= phase[regs[0], bsl, :]
     phase = np.unwrap(phase, period=2 * np.pi)
     phase *= 180 / np.pi
+    phase = phase % 360
     for bsl in range(ctx.n_bsl):
         regs = bsl_to_reg[bsl]
         for reg, label in zip(regs, ["A", "C", "B", "D"]):
-            axs[bsl].plot(phase[reg, bsl, :], label=label)
+            axs[bsl].plot(wl_grid, phase[reg, bsl, :], label=label)
         axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
     fig.suptitle("V2PM Phase [deg]")
     pdf.savefig(fig)
     plt.close(fig)
 
-    fig, axs = genfig(2, 3, xlabel="Wavelength index", ylabel="Coherence")
+    fig, axs = genfig(2, 3, xlabel="Wavelength [um]", ylabel="Coherence")
     for bsl in range(ctx.n_bsl):
         regs = bsl_to_reg[bsl]
         tels = bsl_to_tel[bsl]
         t1t2 = 2 * abs(v2pm[:, tels[0], :] * v2pm[:, tels[1], :]) ** 0.5
         for reg, label in zip(regs, ["A", "C", "B", "D"]):
-            axs[bsl].plot(coh[reg, bsl, :] / t1t2[reg], label=label)
+            axs[bsl].plot(wl_grid, coh[reg, bsl, :] / t1t2[reg], label=label)
         axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
     fig.suptitle("V2PM Coherence")
     pdf.savefig(fig)

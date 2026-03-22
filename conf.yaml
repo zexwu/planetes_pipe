@@ -9,7 +9,7 @@ data_dir: ./
 log_level: DEBUG
 
 # some debug options
-plot_to_pdf: True
+plot_to_pdf: False
 
 # Pixel data are ordered as [flux(telescopes), real(baselines), imag(baselines)]
 telescopes: ["4", "3", "2", "1"]
@@ -20,6 +20,7 @@ calib:
   wave: ./2026_02_05/p2vm2/wave.fits
   wave_dark: ./2026_02_05/p2vm2/wave_dark.fits
   wavesc: ./2026_02_05/sci2/sci.fits
+  wavesc_dark: ./2026_02_05/sci2/sci_dark.fits
   flat:
     - ./2026_02_05/p2vm2/tel4.fits
     - ./2026_02_05/p2vm2/tel3.fits

@@ -1,4 +1,4 @@
-# Bench Data Reduction Pipeline 
+# Bench Data Reduction Pipeline
 
 ## Setup
 
@@ -25,7 +25,6 @@ calib:
   dark: /path/to/dark.fits
   wave: /path/to/wave.fits
   wave_dark: /path/to/wave_dark.fits
-  science_dark: /path/to/science_dark.fits # optional realtime helper
   flat: [/path/to/tel4.fits, /path/to/tel3.fits, ...]
   p2vm: [/path/to/bsl34.fits, /path/to/bsl24.fits, ...]
 
@@ -45,7 +44,7 @@ products:
 
 Run the steps sequentially using the CLI.
 
-### 1. Run calibration sequence 
+### 1. Run calibration sequence
 - flat-fielding & spectra extraction
 - wavelength calibration
 - p2vm calibration

@@ -23,7 +23,7 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     # 1. Load and Compute Maps
     dark_cube = ctx.load_fits(ctx.conf["calib"]["dark"])
     dark_map = dark_cube.mean(axis=0)
-    dark_std = dark_cube.std(axis=0)
+    # dark_std = dark_cube.std(axis=0)
 
     flat_files = ctx.conf["calib"]["flat"]
     flat_cubes = [ctx.load_fits(f) for f in flat_files]

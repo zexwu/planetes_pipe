@@ -11,8 +11,8 @@ from .products import PREPROC_CALIB_PRODUCT, PREPROC_OBJECT_PRODUCT, FLAT_PRODUC
 @command("preproc", "Preprocessing data cubes.",
          requires=["flat", "wave"], produces=["preproc"])
 @arg("--object", type=str, default="p2vm", help="target to preprocess (p2vm or object name)")
-@arg("--nwave", type=int, default=201, help="number of wavelength points for interpolation")
-@arg("--min-wave", type=float, default=1.1, help="minimum wavelength")
+@arg("--nwave", type=int, default=151, help="number of wavelength points for interpolation")
+@arg("--min-wave", type=float, default=1.15, help="minimum wavelength")
 @arg("--max-wave", type=float, default=1.3, help="maximum wavelength")
 def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     """
@@ -43,10 +43,10 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     _spec_flat = np.clip(_spec_flat, a_min=1e-8, a_max=None)
     spec_flat = 1 / twopx_interp(1 / _spec_flat, wave_map, wl_grid)
 
-    def _extract(fname: str) -> NDArray:
+    def _extract(fname: str, dark=dark_map) -> NDArray:
         """Helper to process extraction."""
         log.info(f"    Extracting spectra from {fname}...")
-        data = ctx.load_fits(fname) - dark_map
+        data = ctx.load_fits(fname) - dark
         spec = extract_spec_sparse(data, profile_ys, profile_xs)
 
         # NOTE:
@@ -65,7 +65,9 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         spec_tel = [_extract(_) for _ in calib_files["flat"]]
         spec_wavesc = None
         if "wavesc" in calib_files:
-            spec_wavesc = _extract(calib_files["wavesc"])
+            dark_wavesc = ctx.load_fits(calib_files["wavesc_dark"])
+            dark_wavesc = np.median(dark_wavesc, axis=0)  # collapse frames
+            spec_wavesc = _extract(calib_files["wavesc"], dark=dark_wavesc)
 
         # ---------------------------------------------------------
         # Match Baselines to Detector Regions
