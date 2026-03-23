@@ -1,52 +1,70 @@
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence, Union
+from typing import Iterable, Sequence, Tuple, Union
+
+ProductId = Union[str, Tuple[str, str]]
 
 
-FLAT_PRODUCT = (
-    "profile_map",
-    "profile_xs",
-    "profile_ys",
-    "flat_map",
-    "dark_map",
-    "bad_map",
-    "xs",
-    "ys",
+@dataclass(frozen=True)
+class ProductSpec:
+    product_id: ProductId
+    schema: Sequence[str]
+
+
+FLAT_PRODUCT = ProductSpec(
+    "flat",
+    (
+        "profile_map",
+        "profile_xs",
+        "profile_ys",
+        "flat_map",
+        "dark_map",
+        "bad_map",
+        "xs",
+        "ys",
+    ),
 )
 
-WAVE_PRODUCT = (
-    "wave_map",
-)
+WAVE_PRODUCT = ProductSpec("wave", ("wave_map",))
 
-P2VM_PRODUCT = (
+WAVE_ABERR_PRODUCT = ProductSpec("wave_aberr", WAVE_PRODUCT.schema)
+
+P2VM_PRODUCT = ProductSpec(
     "p2vm",
-    "v2pm",
-    "opd_per_baseline",
-    "gd_per_baseline",
-    "wl_grid",
-    "bsl_to_reg",
-    "bsl_to_tel",
-    "ellipse_results",
+    (
+        "p2vm",
+        "v2pm",
+        "opd_per_baseline",
+        "gd_per_baseline",
+        "wl_grid",
+        "bsl_to_reg",
+        "bsl_to_tel",
+        "ellipse_results",
+    ),
 )
 
-PREPROC_CALIB_PRODUCT = (
-    "spec_tel",
-    "spec_bsl",
-    "spec_wavesc",
-    "spec_flat",
-    "tel_regs",
-    "bsl_regs",
-    "bsl_to_reg",
-    "bsl_to_tel",
-    "wl_grid",
+PREPROC_P2VM_PRODUCT = ProductSpec(
+    ("preproc", "p2vm"),
+    (
+        "spec_tel",
+        "spec_bsl",
+        "spec_wavesc",
+        "spec_flat",
+        "tel_regs",
+        "bsl_regs",
+        "bsl_to_reg",
+        "bsl_to_tel",
+        "wl_grid",
+    ),
 )
 
-PREPROC_OBJECT_PRODUCT = (
+PREPROC_OBJECT_SCHEMA = (
     "spec",
     "spec_flat",
     "wl_grid",
 )
 
-REDUCED_PRODUCT = (
+REDUCED_SCHEMA = (
     "fluxdata",
     "visdata",
     "p2vmred",
@@ -56,6 +74,28 @@ REDUCED_PRODUCT = (
     "bsl_to_reg",
     "bsl_to_tel",
 )
+
+
+def preproc_product(name: str) -> ProductSpec:
+    if name == "p2vm":
+        return PREPROC_P2VM_PRODUCT
+    return ProductSpec(("preproc", name), PREPROC_OBJECT_SCHEMA)
+
+
+def reduced_product(name: str) -> ProductSpec:
+    return ProductSpec(("reduced", name), REDUCED_SCHEMA)
+
+
+def get_product_id(product: Union[ProductId, ProductSpec]) -> ProductId:
+    if isinstance(product, ProductSpec):
+        return product.product_id
+    return product
+
+
+def get_product_schema(product: Union[ProductId, ProductSpec]) -> Sequence[str] | None:
+    if isinstance(product, ProductSpec):
+        return product.schema
+    return None
 
 
 def validate_product_keys(
@@ -78,4 +118,6 @@ def validate_product_keys(
             details.append(f"missing keys: {missing}")
         if unexpected:
             details.append(f"unexpected keys: {unexpected}")
-        raise ValueError(f"Invalid product schema for {product_name}: " + "; ".join(details))
+        raise ValueError(
+            f"Invalid product schema for {product_name}: " + "; ".join(details)
+        )

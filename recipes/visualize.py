@@ -2,8 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from . import PipelineContext, arg, command, log
-from .products import PREPROC_OBJECT_PRODUCT, REDUCED_PRODUCT
-
+from .products import preproc_product, reduced_product
 pltkwargs = {
     "font.size": 12,
     "figure.figsize": (12, 8),
@@ -42,7 +41,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
     log.info(f"--- Step: PLOTTING {obj} ---")
     plt.rcParams["font.size"] = 14
 
-    with ctx.load_product(("reduced", obj), schema=REDUCED_PRODUCT) as d:
+    with ctx.load_product(reduced_product(obj)) as d:
         p2vmred = d["p2vmred"]
         visdata = d["visdata"]
         visphi = d["visphi"]
@@ -149,7 +148,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
 
 
     def plot_ABCD():
-        with ctx.load_product(("preproc", obj), schema=PREPROC_OBJECT_PRODUCT) as d:
+        with ctx.load_product(preproc_product(obj)) as d:
             spec = d["spec"]
             spec_flat = d["spec_flat"]
         spec /= spec_flat

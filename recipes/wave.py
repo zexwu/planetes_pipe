@@ -6,7 +6,7 @@ from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
 from . import PipelineContext, arg, command, log
-from .products import FLAT_PRODUCT, WAVE_PRODUCT
+from .products import FLAT_PRODUCT, WAVE_ABERR_PRODUCT, WAVE_PRODUCT
 from .visualize import genfig, plt
 from .preproc import extract_spec_sparse
 
@@ -24,7 +24,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     log.info("--- Step: WAVE ---")
 
     # Load flat Data
-    with ctx.load_product("flat", schema=FLAT_PRODUCT) as d:
+    with ctx.load_product(FLAT_PRODUCT) as d:
         profile_xs = d["profile_xs"]
         profile_ys = d["profile_ys"]
         flat_map = d["flat_map"]
@@ -199,11 +199,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     full_design_matrix = dmat_arr(det_x_coords, det_y_coords)
     wavemap = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix)
 
-    ctx.save_product(
-        "wave",
-        schema=WAVE_PRODUCT,
-        wave_map=wavemap,
-    )
+    ctx.save_product(WAVE_PRODUCT, wave_map=wavemap)
     log.info("Saved full wavemap")
 
     if ctx.conf.get("plot_to_pdf", False):
@@ -300,11 +296,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     # Apply the 1D wl solution to get the final wavemap with aberration correction
     wavemap_aber = np.polyval(pixel_to_wl_coeffs, det_x_coords - aber_offset)
 
-    ctx.save_product(
-        "wave_aberr",
-        schema=WAVE_PRODUCT,
-        wave_map=wavemap_aber,
-    )
+    ctx.save_product(WAVE_ABERR_PRODUCT, wave_map=wavemap_aber)
     log.info("Saved aberration wavemap")
 
 

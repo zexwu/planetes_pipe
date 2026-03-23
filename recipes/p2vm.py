@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from . import PipelineContext, arg, command, log
-from .products import P2VM_PRODUCT, PREPROC_CALIB_PRODUCT
+from .products import P2VM_PRODUCT, PREPROC_P2VM_PRODUCT
 from .reduce import compute_gdelay
 from .visualize import genfig, plt
 plt.style.use("~/zexwu_lib/zexwu.mplstyle")
@@ -21,7 +21,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
     log.info("--- Step: P2VM ---")
 
     # Load Data
-    with ctx.load_product(("preproc", "p2vm"), schema=PREPROC_CALIB_PRODUCT) as d:
+    with ctx.load_product(PREPROC_P2VM_PRODUCT) as d:
         spec_tel = d["spec_tel"]
         spec_bsl = d["spec_bsl"]
         spec_wavesc = d["spec_wavesc"]
@@ -229,7 +229,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
 
     to_save = ["p2vm", "v2pm", "opd_per_baseline", "gd_per_baseline", "wl_grid",
                "bsl_to_reg", "bsl_to_tel", "ellipse_results"]
-    ctx.save_product("p2vm", schema=P2VM_PRODUCT, **{k: locals()[k] for k in to_save})
+    ctx.save_product(P2VM_PRODUCT, **{k: locals()[k] for k in to_save})
     log.info("--- Step: P2VM [DONE] ---")
     log.info("")
 

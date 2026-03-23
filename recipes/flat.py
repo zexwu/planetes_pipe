@@ -90,8 +90,7 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
 
     # 3. Save Results
     ctx.save_product(
-        "flat",
-        schema=FLAT_PRODUCT,
+        FLAT_PRODUCT,
         profile_map=profile_map,
         profile_xs=profile_xs,
         profile_ys=profile_ys,

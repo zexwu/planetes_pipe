@@ -22,7 +22,7 @@ import yaml
 from astropy.io import fits
 from numpy.typing import NDArray
 
-from .products import validate_product_keys
+from .products import ProductSpec, get_product_id, get_product_schema, validate_product_keys
 
 # --- 0. Setup Logging ---
 log = logging.getLogger(__name__)
@@ -122,33 +122,34 @@ class PipelineContext:
         return np.s_[self.n_tel + self.n_bsl : self.n_tel + 2 * self.n_bsl]
 
     # --- IO Helpers ---
-    def _get_filename(self, product_id: Union[str, Tuple[str, str]]) -> str:
+    def _get_filename(self, product: Union[str, Tuple[str, str], ProductSpec]) -> str:
         """
         Look up filename for a product ID.
 
         Args:
-            product_id: Product identifier (string or tuple)
+            product: Product identifier (string, tuple, or spec)
 
         Returns:
             Filename for the product
         """
+        product_id = get_product_id(product)
         fn_dict = self.conf.get("products", {})
         if isinstance(product_id, tuple):
             template = fn_dict.get(product_id[0], f"{product_id}.npz")
             return template.format(product_id[1])
         return fn_dict.get(product_id, f"{product_id}.npz")
 
-    def product_exists(self, product_id: str) -> bool:
+    def product_exists(self, product: Union[str, Tuple[str, str], ProductSpec]) -> bool:
         """
         Check if a product file exists.
 
         Args:
-            product_id: Product identifier
+            product: Product identifier
 
         Returns:
             True if the product file exists
         """
-        path = self.output_dir / self._get_filename(product_id)
+        path = self.output_dir / self._get_filename(product)
         return path.exists()
 
     def _resolve_path(self, path: Path) -> Path:
@@ -180,7 +181,7 @@ class PipelineContext:
 
     def save_product(
         self,
-        product_id: Union[str, Tuple[str, str]],
+        product: Union[str, Tuple[str, str], ProductSpec],
         *,
         schema: Optional[Sequence[str]] = None,
         **kwargs,
@@ -189,18 +190,19 @@ class PipelineContext:
         Save pipeline product to disk.
 
         Args:
-            product_id: Product identifier
+            product: Product identifier
             schema: Explicit schema for saved keys
             **kwargs: Data to save (key-value pairs)
         """
-        filename = self._get_filename(product_id)
+        filename = self._get_filename(product)
+        schema = schema or get_product_schema(product)
         if schema is not None:
             validate_product_keys(kwargs.keys(), schema, filename)
         np.savez(self.output_dir / filename, **kwargs)
 
     def load_product(
         self,
-        product_id: Union[str, Tuple[str, str]],
+        product: Union[str, Tuple[str, str], ProductSpec],
         *,
         schema: Optional[Sequence[str]] = None,
         **kwargs,
@@ -209,15 +211,16 @@ class PipelineContext:
         Load pipeline product from disk.
 
         Args:
-            product_id: Product identifier
+            product: Product identifier
             schema: Explicit schema for expected keys
             **kwargs: Additional arguments to pass to np.load
 
         Returns:
             Dictionary containing the loaded data
         """
-        filename = self._get_filename(product_id)
+        filename = self._get_filename(product)
         data = np.load(self.output_dir / filename, allow_pickle=True, **kwargs)
+        schema = schema or get_product_schema(product)
         if schema is not None:
             validate_product_keys(data.files, schema, filename)
         return data

@@ -151,8 +151,7 @@ print(f"Time per DIT: {t/10000 * 1e3:.3f} ms")
 
 import matplotlib.pyplot as plt
 
-plt.rcParams["figure.dpi"] = 100
-fig, axs = plt.subplots(2, 3, figsize=(8, 6))
+fig, axs = plt.subplots(2, 3, figsize=(8, 6), sharey=True, sharex=True)
 axs = axs.flatten()
 n_frame = len(cube)
 visamps = np.zeros((n_frame, 6, len(wl_grid)))
@@ -162,5 +161,8 @@ for i in range(n_frame):
 colors = plt.cm.viridis(np.linspace(0, 1, n_frame))
 for bsl in range(6):
     axs[bsl].set_prop_cycle(color=colors)
-    axs[bsl].plot(visamps[:, bsl, :].T, alpha=0.05, lw=0.3)
+    axs[bsl].plot(wl_grid, visamps[:, bsl, :].T, alpha=0.05, lw=0.3)
+    axs[bsl].set_ylabel("VISAMP")
+    axs[bsl].set_xlabel("Wavelength [um]")
+    axs[bsl].label_outer()
 plt.show()

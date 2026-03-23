@@ -5,9 +5,7 @@ from numba import njit, prange
 from numpy.typing import NDArray
 
 from . import PipelineContext, arg, command, log
-from .products import PREPROC_CALIB_PRODUCT, PREPROC_OBJECT_PRODUCT, FLAT_PRODUCT, WAVE_PRODUCT
-
-
+from .products import FLAT_PRODUCT, WAVE_PRODUCT, preproc_product
 @command("preproc", "Preprocessing data cubes.",
          requires=["flat", "wave"], produces=["preproc"])
 @arg("--object", type=str, default="p2vm", help="target to preprocess (p2vm or object name)")
@@ -23,7 +21,7 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     if not obj: return
 
     # Load flat & profile maps
-    with ctx.load_product("flat", schema=FLAT_PRODUCT) as d:
+    with ctx.load_product(FLAT_PRODUCT) as d:
         dark_map = d["dark_map"]
         # profile_map = d["profile_map"]
         profile_ys = d["profile_ys"]
@@ -31,7 +29,7 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         flat_map = d["flat_map"]
 
     # Load wavelength map
-    with ctx.load_product("wave", schema=WAVE_PRODUCT) as d:
+    with ctx.load_product(WAVE_PRODUCT) as d:
         wave_map = d["wave_map"]
 
     # wavelength grid for interpolation
@@ -65,9 +63,9 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         spec_tel = [_extract(_) for _ in calib_files["flat"]]
         spec_wavesc = None
         if "wavesc" in calib_files:
-            dark_wavesc = ctx.load_fits(calib_files["wavesc_dark"])
-            dark_wavesc = np.median(dark_wavesc, axis=0)  # collapse frames
-            spec_wavesc = _extract(calib_files["wavesc"], dark=dark_wavesc)
+            # dark_wavesc = ctx.load_fits(calib_files["wavesc_dark"])
+            # dark_wavesc = np.median(dark_wavesc, axis=0)  # collapse frames
+            spec_wavesc = _extract(calib_files["wavesc"])
 
         # ---------------------------------------------------------
         # Match Baselines to Detector Regions
@@ -116,14 +114,14 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         to_save = ["spec_tel", "spec_bsl", "spec_wavesc", "spec_flat",
                    "tel_regs", "bsl_regs", "bsl_to_reg", "bsl_to_tel",
                    "wl_grid"]
-        ctx.save_product(("preproc", obj), schema=PREPROC_CALIB_PRODUCT, **{k: locals()[k] for k in to_save})
+        ctx.save_product(preproc_product(obj), **{k: locals()[k] for k in to_save})
         log.info("Preprocessed P2VM and FLAT data saved.")
     else:
         obj_list = ctx.conf["object"] if obj == "all" else [obj]
         to_save = ["spec", "spec_flat", "wl_grid"]
         for obj in obj_list:
             spec = _extract(ctx.conf["object"][obj])
-            ctx.save_product(("preproc", obj), schema=PREPROC_OBJECT_PRODUCT, **{k: locals()[k] for k in to_save})
+            ctx.save_product(preproc_product(obj), **{k: locals()[k] for k in to_save})
         log.info(f"Preprocessed objects: {', '.join(obj_list)}")
     log.info("--- Step: PREPROC [DONE] ---")
     log.info("")

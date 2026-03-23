@@ -11,7 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from . import PipelineContext, arg, command, log
-from .products import P2VM_PRODUCT, PREPROC_OBJECT_PRODUCT, REDUCED_PRODUCT
+from .products import P2VM_PRODUCT, preproc_product, reduced_product
 from .preproc import run_preproc
 from .visualize import colored_text, summary_plot
 
@@ -39,7 +39,7 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
     log.info("--- Step: REDUCE ---")
 
     # --- 1. Load P2VM ---
-    with ctx.load_product("p2vm", schema=P2VM_PRODUCT) as d:
+    with ctx.load_product(P2VM_PRODUCT) as d:
         p2vm_map = d["p2vm"]
         wl_grid = d["wl_grid"]
         bsl_to_reg = d["bsl_to_reg"][()]
@@ -54,7 +54,7 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
             gd_range: Search range for group delay computation
         """
         # Load preprocessed spectra
-        spec = ctx.load_product(("preproc", object_name), schema=PREPROC_OBJECT_PRODUCT)["spec"]
+        spec = ctx.load_product(preproc_product(object_name))["spec"]
         cobj = colored_text(object_name, color="green", bold=True)
 
         log.info(f"Applying P2VM to extract visibility for {cobj}...")
@@ -122,7 +122,7 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
         #                 oi_flux.to_hdu(strict=strict)])
         # hdul.writeto(ctx.output_dir / f"{object_name}_reduced.oifits", overwrite=True)
 
-        ctx.save_product(("reduced", object_name), schema=REDUCED_PRODUCT, **product_data)
+        ctx.save_product(reduced_product(object_name), **product_data)
         log.info(f"Reduction for {cobj} completed.")
 
     # Process objects
