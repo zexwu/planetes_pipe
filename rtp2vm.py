@@ -2,10 +2,12 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Dict, List, Optional
 
 import numpy as np
-from numpy.typing import NDArray
 from numba import njit, prange
+
+NDArray = np.ndarray
 
 
 @njit(parallel=True, fastmath=True, cache=True, boundscheck=False)
@@ -39,7 +41,7 @@ def twopx_interp_single(spec: NDArray, wn_map: NDArray, wn_grid: NDArray) -> NDA
     return out
 
 
-@dataclass(slots=True)
+@dataclass
 class P2VMReductionResult:
     """Reduced visibility products for one detector frame."""
 
@@ -48,7 +50,7 @@ class P2VMReductionResult:
     spec_aligned: NDArray
 
 
-@dataclass(slots=True)
+@dataclass
 class P2VMReducer:
     """Load calibration products once and reduce individual camera frames."""
 
@@ -56,12 +58,12 @@ class P2VMReducer:
     profile_ys: NDArray = field(init=False, repr=False)
     profile_xs: NDArray = field(init=False, repr=False)
     flat_map: NDArray = field(init=False, repr=False)
-    dark_map: NDArray | None = field(init=False, repr=False)
-    profile_x_positions: NDArray | None = field(init=False, repr=False)
-    profile_y_positions: NDArray | None = field(init=False, repr=False)
+    dark_map: Optional[NDArray] = field(init=False, repr=False)
+    profile_x_positions: Optional[NDArray] = field(init=False, repr=False)
+    profile_y_positions: Optional[NDArray] = field(init=False, repr=False)
     p2vm: NDArray = field(init=False, repr=False)
     wl_grid: NDArray = field(init=False, repr=False)
-    bsl_to_reg: dict[int, list[int]] = field(init=False, repr=False)
+    bsl_to_reg: Dict[int, List[int]] = field(init=False, repr=False)
     bsl_to_tel: NDArray = field(init=False, repr=False)
     wave_map: NDArray = field(init=False, repr=False)
     wn_map: NDArray = field(init=False, repr=False)
@@ -118,7 +120,7 @@ class P2VMReducer:
         self,
         img: NDArray,
         subtract_dark: bool = False,
-        dark: NDArray | None = None,
+        dark: Optional[NDArray] = None,
     ) -> P2VMReductionResult:
         """Reduce one detector frame to normalized visibility amplitudes."""
         frame = np.asarray(img, dtype=np.float32)
