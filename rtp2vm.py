@@ -114,10 +114,17 @@ class P2VMReducer:
         """Number of detector output regions."""
         return len(self.profile_ys)
 
-    def reduce(self, img: NDArray, subtract_dark: bool = False) -> P2VMReductionResult:
+    def reduce(
+        self,
+        img: NDArray,
+        subtract_dark: bool = False,
+        dark: NDArray | None = None,
+    ) -> P2VMReductionResult:
         """Reduce one detector frame to normalized visibility amplitudes."""
         frame = np.asarray(img, dtype=np.float32)
-        if subtract_dark and self.dark_map is not None:
+        if dark is not None:
+            frame = frame - np.asarray(dark, dtype=np.float32)
+        elif subtract_dark and self.dark_map is not None:
             frame = frame - self.dark_map
 
         spec = extract_spec_sparse_single(frame, self.profile_ys, self.profile_xs)
@@ -132,7 +139,8 @@ class P2VMReducer:
         imag = p2vmred[10:16]
         visamp = np.sqrt(real**2 + imag**2)
 
-        f1f2 = (flux[self.bsl_to_tel[:, 0]] * flux[self.bsl_to_tel[:, 1]]) ** 0.5
+        flux_product = flux[self.bsl_to_tel[:, 0]] * flux[self.bsl_to_tel[:, 1]]
+        f1f2 = np.sqrt(np.clip(flux_product, a_min=1e-8, a_max=None))
         visamp /= np.clip(f1f2, a_min=1e-8, a_max=None)
 
         return P2VMReductionResult(visamp=visamp, flux=flux, spec_aligned=spec_aligned)
