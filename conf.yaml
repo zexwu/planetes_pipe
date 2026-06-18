@@ -9,7 +9,7 @@ data_dir: ./
 log_level: DEBUG
 
 # some debug options
-plot_to_pdf: False
+plot_to_pdf: True
 
 # Pixel data are ordered as [flux(telescopes), real(baselines), imag(baselines)]
 telescopes: ["4", "3", "2", "1"]
