@@ -18,11 +18,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import colorlog
 import numpy as np
-import yaml
 from astropy.io import fits
 from numpy.typing import NDArray
 
-from .config import validate_config
+from .config import PipelineConfig
 from .fits import CubeSelection, iter_cube
 from .io import write_npz_atomic
 from .manifest import ManifestStore
@@ -58,6 +57,7 @@ class PipelineContext:
     output_dir: Path = field(default=Path("output"))
 
     # Internal configuration state
+    config: PipelineConfig = field(init=False, repr=False)
     conf: Dict[str, Any] = field(init=False, repr=False)
     baselines: List[str] = field(init=False)
     telescopes: List[str] = field(init=False)
@@ -72,18 +72,13 @@ class PipelineContext:
         if not self.conf_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {self.conf_path}")
 
-        with open(self.conf_path, "r") as f:
-            loaded = yaml.safe_load(f)
-        if not isinstance(loaded, dict):
-            raise ValueError("Configuration root must be a YAML mapping")
-        self.conf = loaded
-        validate_config(self.conf)
+        self.config = PipelineConfig.from_yaml(self.conf_path)
+        self.conf = self.config.legacy_mapping()
 
-        # Allow config to override output directory
-        if "output_dir" in self.conf:
-            self.output_dir = self._resolve_path(self.conf["output_dir"])
+        # Transitional compatibility while recipes move off PipelineContext.
+        self.output_dir = self.config.output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.data_dir = self._resolve_path(self.conf.get("data_dir", "."))
+        self.data_dir = self.config.data_dir
 
         # Populate core lists
         self.baselines = self.conf.get("baselines", [])
