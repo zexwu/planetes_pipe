@@ -1,6 +1,8 @@
+from importlib.resources import as_file, files
 from typing import Any, List, Tuple
 
 import numpy as np
+from astropy.table import Table
 from matplotlib.backends.backend_pdf import PdfPages
 from numba import njit
 from numpy.typing import NDArray
@@ -13,6 +15,14 @@ from ..numerics import frame_mean
 from ..product import FlatProduct, WaveProduct, read_product, write_product
 from .preproc import extract_spec_sparse
 from .plotting import genfig, plt
+
+
+def load_wavelength_lines() -> NDArray:
+    """Load the versioned wavelength reference in micrometres."""
+    resource = files("planetes").joinpath("data/wavelength_lines.ecsv")
+    with as_file(resource) as path:
+        table = Table.read(path, format="ascii.ecsv")
+    return np.asarray(table["wavelength_nm"], dtype=float) / 1e3
 
 
 def run_wave(config: PipelineConfig) -> tuple[WaveProduct, WaveProduct]:
@@ -62,40 +72,11 @@ def run_wave(config: PipelineConfig) -> tuple[WaveProduct, WaveProduct]:
 
 
     # --- 2. Identify and match lines in the mean spectrum ---
-    # Known laboratory emission lines and their relative intensities
-
-    # fmt: off
-    line_height=np.array([10, 20, 6, 12, 42, 8,
-                          10, 33, 8, 12, 16, 29,
-                          25, 21, 58, 29, 83, 8,
-                          25, 8, 100, 7, 7, 10])
-    line_pos = np.array([ 965.78, 1047.01, 1148.81, 1211.23,
-                         1243.93, 1270.23, 1280.27, 1295.67,
-                         1300.83, 1321.40, 1322.81, 1323.09,
-                         1327.26, 1331.32, 1336.71, 1340.65,
-                         1350.42, 1359.93, 1362.27, 1367.86,
-                         1371.86, 1382.57, 1390.75, 1409.37])
-
-    # NOTE: the following lines are added based on the NIST database
-    add = [ 978.450, 1067.357, 1166.871, 1213.974,
-           1234.339, 1240.283, 1245.612, 1248.766]
-    # fmt: on
-
-    # NOTE: the lines at 1322.81 and 1323.09 are removed
-    line_height = line_height[~np.isin(line_pos, [1322.81, 1323.09])]
-    line_pos = line_pos[~np.isin(line_pos, [1322.81, 1323.09])]
-
-    line_pos = np.concatenate([line_pos, add]) / 1e3  # nm -> um
-    line_pos.sort()
-
-    # lines in 2.0-2.4 um range; for GRAVITY data
-    # line_height = np.array([60, 160, 90, 1800, 50, 30, 30, 1500, 130, 510, 240, 169, 64, 73]) # fmt: skip
-    # line_pos = np.array([1.982291, 1.997118, 2.032256, 2.062186, 2.065277, 2.073922, 2.081672, 2.099184, 2.133871, 2.154009, 2.208321, 2.313952, 2.385154, 2.397306]) # fmt: skip
+    line_pos = load_wavelength_lines()
 
     matched_ind_all = []
     x_centroids = []  # To store x-centroids for all lines
     y_centroids = []  # To store y-centroids for all lines
-    y_heights = []  # To store line heights for weighting
     wl_truth = []  # To store wavelengths for all matched lines
     trans_all = []  # To store transformations for all regions
     spec_mean = wave_spec[-4:].mean(axis=0)
@@ -141,9 +122,6 @@ def run_wave(config: PipelineConfig) -> tuple[WaveProduct, WaveProduct]:
         p_shift[good] = 0.5 * (_pp1 - _pn1)[good] / (2 * _pct - _pp1 - _pn1)[good]
         peak_pos = 1.0 * peak_pos + p_shift
 
-        peak_height = pct
-        peak_height[good] = (_pct * np.exp(0.25 * (_pn1 - _pp1) * p_shift))[good]
-
         # match the observed peaks to the mean spectrum peaks
         # to filter out spurious detections
         matched_ind, trans = match_lines_grid(
@@ -171,7 +149,6 @@ def run_wave(config: PipelineConfig) -> tuple[WaveProduct, WaveProduct]:
         _x = peak_pos[idx_peak]
         x_centroids.append(_x)
         y_centroids.append(np.interp(_x, x_trace[reg], y_trace[reg]))
-        y_heights.append(peak_height[idx_peak])
         wl_truth.append(line_pos[idx_wave])
         trans_all.append(trans)
 
@@ -181,7 +158,6 @@ def run_wave(config: PipelineConfig) -> tuple[WaveProduct, WaveProduct]:
     idx2reg = np.hstack([[i] * len(c) for i, c in enumerate(x_centroids)])
     reg_offsets = np.cumsum([0] + [len(c) for c in x_centroids])
     wl_flat = np.concatenate(wl_truth)
-    ht_flat = np.concatenate(y_heights)
 
     # helper function to build the design matrix for 2D polynomial fitting
     def dmat_arr(x, y, max_deg: int = 3) -> NDArray:

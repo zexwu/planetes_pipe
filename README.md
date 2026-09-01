@@ -107,6 +107,7 @@ Select another configuration with `planetes --conf path/to/config.yaml ...`.
 - `cube.py`: chunked reading of raw detector FITS cubes.
 - `numerics.py`: reusable array-to-array reductions.
 - `product.py`: typed products and stateless serialization.
+- `data/wavelength_lines.ecsv`: versioned wavelength-calibration reference.
 - `recipes/`: explicit scientific stages and plotting.
 - `recipes/calibration.py`: the four-line linear calibration sequence.
 - `main.py`: explicit argparse commands dispatched with `match`.

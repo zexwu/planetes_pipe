@@ -86,7 +86,7 @@ Implemented in [planetes/recipes/wavelength.py](/Users/zexwu/zexwu_lib/planetes_
    - detect peaks above `median + sigma * MAD`
 
 4. Match detected peaks to a laboratory line list:
-   - a list of known line wavelengths is hardcoded in the recipe
+   - known line wavelengths are loaded from `planetes/data/wavelength_lines.ecsv`
    - a quadratic wavelength-to-pixel mapping is estimated with a RANSAC-like search
    - this provides a reference mapping between known wavelengths and mean-spectrum peaks
 

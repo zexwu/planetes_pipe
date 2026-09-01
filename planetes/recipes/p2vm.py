@@ -64,7 +64,7 @@ def run_p2vm(config: PipelineConfig) -> P2VMProduct:
         gd = compute_gdelay(_visdata[:, w_start:w_end], wl_grid[w_start:w_end])
 
         # Assume OPD=0 <-> GD=0; remove OPD zero-point
-        slope, opd0 = np.polyfit(gd, opd, 1)
+        _, opd0 = np.polyfit(gd, opd, 1)
         opd -= opd0
         opd_per_baseline[bsl] = opd
         gd_per_baseline[bsl] = gd

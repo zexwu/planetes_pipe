@@ -20,3 +20,6 @@ planetes = "main:main"
 [tool.setuptools]
 packages = ["planetes", "planetes.recipes"]
 py-modules = ["main", "rtp2vm", "rtreduce"]
+
+[tool.setuptools.package-data]
+planetes = ["data/*.ecsv"]

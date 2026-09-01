@@ -9,7 +9,7 @@ from planetes.config import FlatParameters
 from planetes.recipes.flat import build_flat_product
 from planetes.recipes.preproc import extract_spec_sparse, order_abcd_regions
 from planetes.recipes.reduction import normalize_visibility
-from planetes.recipes.wavelength import match_lines_grid
+from planetes.recipes.wavelength import load_wavelength_lines, match_lines_grid
 from rtp2vm import extract_spec_sparse_single
 
 
@@ -87,6 +87,13 @@ class CorrectnessTests(unittest.TestCase):
             steps_per_unit=2,
         )
         self.assertEqual(len(matches), len(np.unique(matches[:, 1])))
+
+    def test_wavelength_reference_is_sorted_and_versioned(self) -> None:
+        lines = load_wavelength_lines()
+        self.assertEqual(len(lines), 30)
+        self.assertTrue(np.all(np.diff(lines) > 0))
+        self.assertAlmostEqual(lines[0], 0.965780)
+        self.assertAlmostEqual(lines[-1], 1.409370)
 
     def test_visibility_normalization_flags_invalid_flux_products(self) -> None:
         coherent_flux = np.array([[[6 + 8j, 1 + 0j]]])
