@@ -22,7 +22,7 @@ from .visualize import colored_text, summary_plot
     requires=["flat", "wave", "p2vm"],
     produces=["preproc", "reduced"]
 )
-@arg("--object", type=str, default=None, help="Target to reduce (object name)")
+@arg("--object", type=str, required=True, help="Target to reduce (object name)")
 def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
     """
     Reduce science target data.
@@ -33,8 +33,10 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
     """
     obj = kwargs.get("object", None)
     if not obj:
-        log.error("No object specified for reduction")
-        return
+        raise ValueError("An object name is required for reduction")
+    if obj != "all" and obj not in ctx.conf["object"]:
+        available = ", ".join(ctx.conf["object"])
+        raise ValueError(f"Unknown object {obj!r}; available objects: {available}")
 
     log.info("--- Step: REDUCE ---")
 

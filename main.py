@@ -38,14 +38,19 @@ def main() -> None:
 
         # Add the specific arguments defined by @arg decorator
         for args_list, kwargs_dict in reversed(func.meta.get("args", [])):
-            sub.add_argument(*args_list, **kwargs_dict)
+            arg_kwargs = dict(kwargs_dict)
+            arg_kwargs["default"] = argparse.SUPPRESS
+            sub.add_argument(*args_list, **arg_kwargs)
         sub.set_defaults(func=func)
 
     # Parse arguments
     args = parser.parse_args()
 
     # Initialize pipeline context
-    ctx = recipes.PipelineContext(args.conf)
+    try:
+        ctx = recipes.PipelineContext(args.conf)
+    except (FileNotFoundError, TypeError, ValueError) as exc:
+        parser.error(str(exc))
 
     # Configure logging level from config
     log_level = ctx.conf.get("log_level", "INFO")

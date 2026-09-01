@@ -55,7 +55,11 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     """
     log.info("--- Step: PREPROC ---")
     obj = kwargs.get("object", "p2vm")
-    if not obj: return
+    if not obj:
+        raise ValueError("An object name is required for preprocessing")
+    if obj not in {"p2vm", "all"} and obj not in ctx.conf["object"]:
+        available = ", ".join(ctx.conf["object"])
+        raise ValueError(f"Unknown object {obj!r}; available objects: {available}")
 
     # Load flat & profile maps
     with ctx.load_product(FLAT_PRODUCT) as d:

@@ -29,10 +29,14 @@ def genfig(m, n, xlabel, ylabel, **kwargs):
     return fig, axs
 
 @command("plot", "Summary plots for reduced data.")
-@arg("--object", type=str, default=None, help="target to reduce (object name)")
+@arg("--object", type=str, required=True, help="Target to plot (object name)")
 def summary_plot(ctx: PipelineContext, **kwargs):
     obj = kwargs.get("object", None)
-    if not obj: return
+    if not obj:
+        raise ValueError("An object name is required for plotting")
+    if obj != "all" and obj not in ctx.conf["object"]:
+        available = ", ".join(ctx.conf["object"])
+        raise ValueError(f"Unknown object {obj!r}; available objects: {available}")
     obj_list = ctx.conf["object"] if obj == "all" else [obj]
     for obj in obj_list:
         summary_plot_single(ctx, object=obj)

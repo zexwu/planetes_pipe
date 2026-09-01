@@ -22,6 +22,9 @@ import yaml
 from astropy.io import fits
 from numpy.typing import NDArray
 
+from .config import validate_config
+from .io import write_npz_atomic
+from .manifest import ManifestStore
 from .products import ProductSpec, get_product_id, get_product_schema, validate_product_keys
 
 # --- 0. Setup Logging ---
@@ -56,6 +59,10 @@ class PipelineContext:
     conf: Dict[str, Any] = field(init=False, repr=False)
     baselines: List[str] = field(init=False)
     telescopes: List[str] = field(init=False)
+    active_parameters: Dict[str, Dict[str, Any]] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    manifests: ManifestStore = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Load configuration and setup paths."""
@@ -64,17 +71,22 @@ class PipelineContext:
             raise FileNotFoundError(f"Configuration file not found: {self.conf_path}")
 
         with open(self.conf_path, "r") as f:
-            self.conf = yaml.safe_load(f)
+            loaded = yaml.safe_load(f)
+        if not isinstance(loaded, dict):
+            raise ValueError("Configuration root must be a YAML mapping")
+        self.conf = loaded
+        validate_config(self.conf)
 
         # Allow config to override output directory
         if "output_dir" in self.conf:
             self.output_dir = self._resolve_path(self.conf["output_dir"])
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.data_dir = self._resolve_path(self.conf["data_dir"])
+        self.data_dir = self._resolve_path(self.conf.get("data_dir", "."))
 
         # Populate core lists
         self.baselines = self.conf.get("baselines", [])
         self.telescopes = self.conf.get("telescopes", [])
+        self.manifests = ManifestStore(self)
 
     # --- Fixed Dimensions ---
     @property
@@ -150,7 +162,7 @@ class PipelineContext:
             True if the product file exists
         """
         path = self.output_dir / self._get_filename(product)
-        return path.exists()
+        return self.manifests.is_current(product, path)
 
     def _resolve_path(self, path: Path) -> Path:
         """
@@ -198,7 +210,9 @@ class PipelineContext:
         schema = schema or get_product_schema(product)
         if schema is not None:
             validate_product_keys(kwargs.keys(), schema, filename)
-        np.savez(self.output_dir / filename, **kwargs)
+        path = self.output_dir / filename
+        write_npz_atomic(path, kwargs)
+        self.manifests.write(product, path)
 
     def load_product(
         self,
@@ -345,8 +359,16 @@ def command(name: str, help_msg: str,
             defaults = m.get("defaults", {})
             dests = m.get("dests", set())
 
-            merged = {**defaults, **cli_kwargs}
+            configured = ctx.conf.get("parameters", {}).get(m["name"], {})
+            unknown = set(configured) - dests
+            if unknown:
+                raise ValueError(
+                    f"Unknown parameters for {m['name']}: {sorted(unknown)}"
+                )
+
+            merged = {**defaults, **configured, **cli_kwargs}
             filtered = {k: v for k, v in merged.items() if k in dests}
+            ctx.active_parameters[m["name"]] = dict(filtered)
 
             return func(ctx, **filtered)
 

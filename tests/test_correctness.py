@@ -20,6 +20,7 @@ class _FlatContext:
     }
 
     def __init__(self) -> None:
+        self.active_parameters: dict[str, dict] = {}
         self.saved: dict[str, np.ndarray] = {}
         self.dark_cube = np.zeros((4, 8, 128), dtype=np.float32)
         self.flat_cube = np.zeros_like(self.dark_cube)
