@@ -1,12 +1,12 @@
 """Stateless serialization for typed pipeline products."""
 
+import os
+import tempfile
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
 import numpy as np
-
-from .io import write_npz_atomic
 
 
 ProductT = TypeVar("ProductT")
@@ -31,7 +31,7 @@ def write_product(path: Path, product: object) -> None:
         raise TypeError("product must be a dataclass instance")
     path.parent.mkdir(parents=True, exist_ok=True)
     values = {field.name: getattr(product, field.name) for field in fields(product)}
-    write_npz_atomic(path, values)
+    _write_npz_atomic(path, values)
 
 
 def _unpack(value: Any) -> Any:
@@ -47,3 +47,19 @@ def _raise_schema_error(path: Path, expected: set[str], actual: set[str]) -> Non
     if extra := sorted(actual - expected):
         details.append(f"unexpected keys: {extra}")
     raise ValueError(f"Invalid product schema for {path.name}: " + "; ".join(details))
+
+
+def _write_npz_atomic(path: Path, values: dict[str, Any]) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            np.savez(stream, **values)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary_path.replace(path)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise

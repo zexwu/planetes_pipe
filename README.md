@@ -1,116 +1,137 @@
-# Bench Data Reduction Pipeline
+# PLANETES bench data reduction
 
-## Setup
+PLANETES is a small scientific reduction pipeline for detector calibration,
+wavelength calibration, P2VM construction, and visibility extraction. Raw FITS
+files are read-only; all cuts, dimensions, and scientific parameters are recorded
+in one YAML configuration.
 
-**Install dependencies:**
+## Install
+
 ```bash
 pip install -e .
 ```
 
-## Configuration (`conf.yaml`)
+## Configuration
 
-Create a `conf.yaml` file defining the paths.
+See [`conf.yaml`](./conf.yaml) for a complete working example. Its main structure is:
+
 ```yaml
-frames: [0, 512]         # DIT range [start, end]
-xrange: [0, 1024]        # Spectral crop [start, end]
-yrange: [0, 1024]        # Spatial crop [start, end]
-output_dir: ./reduced/   # Output path
-log_level: DEBUG
-io_chunk_frames: 16      # FITS frames processed per in-memory chunk
-plot_to_pdf: false       # automatic calibration/reduction plots
+schema_version: 1
+data_dir: .
+output_dir: ./reduced
+chunk_frames: 16
+automatic_plots: false
 
-parameters:
-  flat:
-    profile_width: 10
-    bad_thresh: 5.0
-  wave:
-    sigma: 3
-    deg: 3
-    aber_deg: 3
-    disp_deg: 3
-    niter: 1000000
-  preproc:
-    nwave: 151
-    min_wave: 1.15
-    max_wave: 1.30
-    object: p2vm
+crop:
+  x: [0, 2048]
+  y: [0, 1024]
+
+instrument:
+  telescopes: ["4", "3", "2", "1"]
+  baselines: ["43", "42", "41", "32", "31", "21"]
+  abcd_order: ["A", "C", "B", "D"]
+
+calibration:
+  frames: [0, 256]
+  dark: ./dark.fits
+  flats:
+    "4": ./tel4.fits
+    "3": ./tel3.fits
+    "2": ./tel2.fits
+    "1": ./tel1.fits
+  wavelength:
+    data: ./wave.fits
+    dark: ./wave_dark.fits
   p2vm:
-    phase_correction: true
-  plot:
-    full: false
+    "43": ./bsl43.fits
+    "42": ./bsl42.fits
+    # one named file per configured baseline
 
-telescopes: ["4", "3", "2", "1"] # names of telescopes
-baselines: ["43", "42", "41", "32", "31", "21"] # names of baselines
-abcd_order: ["A", "C", "B", "D"] # labels in ascending detector-region order
-
-calib:
-  dark: /path/to/dark.fits
-  wave: /path/to/wave.fits
-  wave_dark: /path/to/wave_dark.fits
-  flat: [/path/to/tel4.fits, /path/to/tel3.fits, ...]
-  p2vm: [/path/to/bsl34.fits, /path/to/bsl24.fits, ...]
-
-object:
+targets:
   my_target:
-    data: /path/to/science.fits
-    dark: /path/to/science_dark.fits
-
-  # A path alone remains valid when the calibration master dark applies.
-  another_target: /path/to/another_science.fits
-
-products:
-  flat: "flat.npz"
-  p2vm: "p2vm.npz"
-  wave: "wave.npz"
-  wave_aberr: "wave_aberr.npz"
-  preproc: "{}_preproc.npz"
-  reduced: "{}_reduced.npz"
+    data: ./science.fits
+    dark: ./science_dark.fits
+    frames: [0, 512]
 ```
 
-## Usage
+Telescope and baseline inputs are mappings rather than positional lists, so a
+file cannot silently move to a different instrument channel. Relative raw-data
+paths resolve against `data_dir`; `output_dir` resolves against the YAML file.
 
-Run the steps sequentially using the CLI. Recipe parameters come from
-`parameters` in the configuration; explicitly provided CLI options override them.
+All scientific settings live under `parameters`. The CLI deliberately has no
+threshold, polynomial-degree, wavelength-grid, phase-correction, or group-delay
+overrides. Every run writes the fully resolved configuration to
+`reduced/config_used.yaml`.
 
-### 1. Run calibration sequence
-- flat-fielding & spectra extraction
-- wavelength calibration
-- p2vm calibration
+## Run
+
+Run the full calibration:
 
 ```bash
-planetes calib # ~ 20 seconds
+planetes calib
+```
 
-# or manually step by step
+Or run its explicit stages:
+
+```bash
 planetes flat
 planetes wave
-planetes preproc
+planetes preproc p2vm
 planetes p2vm
 ```
 
-### 2. Apply P2VM to science data to get visibilities
+Reduce or plot one configured target:
 
 ```bash
-planetes reduce --object my_target # ~ 3 seconds
+planetes reduce my_target
+planetes plot my_target
 ```
 
-Generate a compact five-page summary explicitly with:
+Use `all` to process every configured target:
 
 ```bash
-planetes plot --object my_target
-
-# Include per-DIT, per-wavelength, and ABCD diagnostics.
-planetes plot --object my_target --full
+planetes reduce all
+planetes plot all
 ```
-## Output Files
 
+Select another configuration with `planetes --conf path/to/config.yaml ...`.
+
+## Code layout
+
+- `config.py`: YAML to immutable `PipelineConfig` dataclasses.
+- `fits.py`: chunked FITS cube reading only.
+- `numerics.py`: reusable array-to-array reductions.
+- `products.py`: typed in-memory scientific products.
+- `product_io.py`: stateless product serialization.
+- `flat.py`, `wave.py`, `preproc.py`, `p2vm.py`, `reduce.py`: explicit recipes.
+- `calib.py`: the four-line linear calibration sequence.
+- `main.py`: explicit argparse commands dispatched with `match`.
+
+There is no pipeline context/service object, command registry, dynamic recipe
+loading, DAG, or freshness manifest. A recipe receives `PipelineConfig`, reads
+the products it needs, performs the scientific calculation, and writes one typed
+product.
+
+## Current products
 
 | File | Content |
 | --- | --- |
-| `flat.npz` | bad map, flat map, profile map, and trace data |
-| `wave.npz` | wavelength map |
-| `wave_aberr.npz` | aberration-corrected wavelength map |
-| `p2vm.npz` | V2PM (phase, coherence & transmission) & P2VM matrix |
-| `*_preproc.npz` | pre-processed data|
-| `*_reduced.npz` | coherent flux, normalized `visamp`, `flag`, differential phase, and group delay |
-| `*.manifest.json` | effective parameters, source-file state, and code fingerprint |
-| `*.pdf` | Summary plots |
+| `config_used.yaml` | resolved configuration and scientific parameters |
+| `flat.npz` | dark/bad/flat maps and sparse traces |
+| `wave.npz` | detector wavelength map |
+| `wave_aberr.npz` | alternate aberration-model wavelength map |
+| `p2vm_preproc.npz` | extracted calibration spectra and output mapping |
+| `p2vm.npz` | V2PM, P2VM, OPD/GD diagnostics, and mapping |
+| `<target>_preproc.npz` | resampled target spectra |
+| `<target>_reduced.npz` | flux, coherent flux, visibility, flags, phase, and GD |
+| `<target>.pdf` | optional diagnostic plots |
+
+NPZ is currently the internal product carrier. Recipes only see the product
+dataclasses, so replacing this serializer with schema-driven ESO-compatible FITS
+does not require rewriting the numerical recipes.
+
+## Tests
+
+```bash
+python -m unittest discover -s tests -v
+```

@@ -4,7 +4,7 @@ This note summarizes the algorithms currently used by the calibration stages of 
 
 - `flat`
 - `wave`
-- `preproc --object p2vm`
+- `preproc p2vm`
 - `p2vm`
 
 The description follows the implementation in the codebase and is meant to explain what is actually computed, in what order, and with what assumptions.
@@ -15,8 +15,8 @@ Implemented in [planetes/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/
 
 ### Inputs
 
-- dark cube: `conf["calib"]["dark"]`
-- one flat cube per telescope: `conf["calib"]["flat"]`
+- dark cube: `calibration.dark`
+- one named flat cube per telescope: `calibration.flats`
 
 ### Procedure
 
@@ -70,8 +70,8 @@ Implemented in [planetes/wave.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/
 - `flat` product:
   - sparse extraction coordinates
   - traced output geometry
-- wave lamp cube: `conf["calib"]["wave"]`
-- wave dark cube: `conf["calib"]["wave_dark"]`
+- wave lamp cube: `calibration.wavelength.data`
+- wave dark cube: `calibration.wavelength.dark`
 
 ### Procedure
 
@@ -109,12 +109,8 @@ Implemented in [planetes/wave.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/
 
 ### Products
 
-- `wave.npz`
-  - `wave_map`
-  - QC summary and region match counts
-- `wave_aberr.npz`
-  - alternate `wave_map`
-  - QC summary and region match counts
+- `wave.npz`: `wave_map`
+- `wave_aberr.npz`: alternate `wave_map`
 
 ### Main assumptions
 
@@ -122,7 +118,7 @@ Implemented in [planetes/wave.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/
 - line ordering is preserved across outputs
 - the aberration term is a smooth low-order correction to a dominant 1D dispersion law
 
-## 3. `preproc --object p2vm`: extraction and common-grid interpolation
+## 3. `preproc p2vm`: extraction and common-grid interpolation
 
 Implemented in [planetes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/preproc.py).
 
@@ -137,7 +133,7 @@ Implemented in [planetes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/planet
 - calibration cubes:
   - one P2VM cube per baseline
   - one photometric flat cube per telescope
-  - optional `wavesc` cube
+  - optional `phase_reference` cube
 
 ### Procedure
 
@@ -192,7 +188,7 @@ Implemented in [planetes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/
 
 ### Inputs
 
-- `preproc("p2vm")` product:
+- `p2vm_preproc.npz` product:
   - `spec_tel`
   - `spec_bsl`
   - optional `spec_wavesc`
@@ -272,7 +268,7 @@ The calibration steps are chained as follows:
    - detector background, bad pixels, and output traces
 2. `wave`
    - detector-coordinate to wavelength mapping
-3. `preproc --object p2vm`
+3. `preproc p2vm`
    - extract and interpolate all calibration cubes onto a common spectral grid
 4. `p2vm`
    - derive the visibility-to-pixel model and its inverse

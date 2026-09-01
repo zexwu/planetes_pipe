@@ -129,7 +129,13 @@ class FlatParameters:
     bad_threshold: float = 5.0
 
     def __post_init__(self) -> None:
-        if self.profile_width <= 0 or self.bad_threshold <= 0:
+        if (
+            isinstance(self.profile_width, bool)
+            or not isinstance(self.profile_width, int)
+            or self.profile_width <= 0
+            or not isinstance(self.bad_threshold, (int, float))
+            or self.bad_threshold <= 0
+        ):
             raise ValueError("flat profile width and bad-pixel threshold must be positive")
 
 
@@ -143,7 +149,14 @@ class WavelengthParameters:
 
     def __post_init__(self) -> None:
         degrees = self.surface_degree, self.aberration_degree, self.dispersion_degree
-        if self.detection_sigma <= 0 or min(degrees) < 0 or self.ransac_iterations <= 0:
+        integers = (*degrees, self.ransac_iterations)
+        if (
+            not isinstance(self.detection_sigma, (int, float))
+            or self.detection_sigma <= 0
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in integers)
+            or min(degrees) < 0
+            or self.ransac_iterations <= 0
+        ):
             raise ValueError("invalid wavelength calibration parameter")
 
 
@@ -154,9 +167,16 @@ class ResamplingParameters:
     wavelength_channels: int = 151
 
     def __post_init__(self) -> None:
-        if self.wavelength_max_um <= self.wavelength_min_um:
+        if not all(
+            isinstance(value, (int, float))
+            for value in (self.wavelength_min_um, self.wavelength_max_um)
+        ) or self.wavelength_max_um <= self.wavelength_min_um:
             raise ValueError("resampling wavelength maximum must exceed the minimum")
-        if self.wavelength_channels < 2:
+        if (
+            isinstance(self.wavelength_channels, bool)
+            or not isinstance(self.wavelength_channels, int)
+            or self.wavelength_channels < 2
+        ):
             raise ValueError("resampling needs at least two wavelength channels")
 
 
@@ -164,10 +184,31 @@ class ResamplingParameters:
 class P2VMParameters:
     phase_correction: bool = True
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.phase_correction, bool):
+            raise ValueError("p2vm.phase_correction must be true or false")
+
+
+@dataclass(frozen=True, slots=True)
+class ReductionParameters:
+    group_delay_min_um: float = -100.0
+    group_delay_max_um: float = 100.0
+
+    def __post_init__(self) -> None:
+        if not all(
+            isinstance(value, (int, float))
+            for value in (self.group_delay_min_um, self.group_delay_max_um)
+        ) or self.group_delay_max_um <= self.group_delay_min_um:
+            raise ValueError("group-delay maximum must exceed the minimum")
+
 
 @dataclass(frozen=True, slots=True)
 class PlotParameters:
     full: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.full, bool):
+            raise ValueError("plot.full must be true or false")
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +217,7 @@ class RecipeParameters:
     wavelength: WavelengthParameters
     resampling: ResamplingParameters
     p2vm: P2VMParameters
+    reduction: ReductionParameters
     plot: PlotParameters
 
 
@@ -197,9 +239,13 @@ class PipelineConfig:
     parameters: RecipeParameters
 
     def __post_init__(self) -> None:
-        if self.schema_version != 1:
+        if isinstance(self.schema_version, bool) or self.schema_version != 1:
             raise ValueError(f"Unsupported schema_version {self.schema_version}; expected 1")
-        if self.chunk_frames <= 0:
+        if (
+            isinstance(self.chunk_frames, bool)
+            or not isinstance(self.chunk_frames, int)
+            or self.chunk_frames <= 0
+        ):
             raise ValueError("chunk_frames must be positive")
         if not isinstance(self.automatic_plots, bool):
             raise ValueError("automatic_plots must be true or false")
@@ -302,7 +348,7 @@ class PipelineConfig:
         parameters_raw = _mapping(raw.get("parameters", {}), "parameters")
         _check_keys(
             parameters_raw,
-            {"flat", "wavelength", "resampling", "p2vm", "plot"},
+            {"flat", "wavelength", "resampling", "p2vm", "reduction", "plot"},
             "parameters",
         )
         parameters = RecipeParameters(
@@ -318,6 +364,11 @@ class PipelineConfig:
                 "parameters.resampling",
             ),
             p2vm=_build(P2VMParameters, parameters_raw.get("p2vm", {}), "parameters.p2vm"),
+            reduction=_build(
+                ReductionParameters,
+                parameters_raw.get("reduction", {}),
+                "parameters.reduction",
+            ),
             plot=_build(PlotParameters, parameters_raw.get("plot", {}), "parameters.plot"),
         )
 
@@ -346,72 +397,6 @@ class PipelineConfig:
         path.write_text(
             yaml.safe_dump(self.as_mapping(), sort_keys=False), encoding="utf-8"
         )
-
-    def legacy_mapping(self) -> dict[str, Any]:
-        """Return the old recipe mapping during the context-removal migration."""
-        calibration: dict[str, Any] = {
-            "dark": self.calibration.dark,
-            "wave": self.calibration.wavelength.data,
-            "wave_dark": self.calibration.wavelength.dark,
-            "flat": [self.calibration.flats[name] for name in self.instrument.telescopes],
-            "p2vm": [self.calibration.p2vm[name] for name in self.instrument.baselines],
-        }
-        if phase := self.calibration.phase_reference:
-            calibration["wavesc"] = phase.data
-            if phase.dark is not None:
-                calibration["wavesc_dark"] = phase.dark
-        targets = {
-            name: {
-                "data": target.data,
-                **({"dark": target.dark} if target.dark is not None else {}),
-            }
-            for name, target in self.targets.items()
-        }
-        return {
-            "frames": [self.calibration.frames.start, self.calibration.frames.stop],
-            "xrange": [self.crop.x.start, self.crop.x.stop],
-            "yrange": [self.crop.y.start, self.crop.y.stop],
-            "output_dir": self.output_dir,
-            "data_dir": self.data_dir,
-            "log_level": self.log_level,
-            "io_chunk_frames": self.chunk_frames,
-            "plot_to_pdf": self.automatic_plots,
-            "telescopes": list(self.instrument.telescopes),
-            "baselines": list(self.instrument.baselines),
-            "abcd_order": [label.value for label in self.instrument.abcd_order],
-            "calib": calibration,
-            "object": targets,
-            "products": {
-                "flat": "flat.npz",
-                "p2vm": "p2vm.npz",
-                "wave": "wave.npz",
-                "wave_aberr": "wave_aberr.npz",
-                "preproc": "{}_preproc.npz",
-                "reduced": "{}_reduced.npz",
-            },
-            "parameters": {
-                "flat": {
-                    "profile_width": self.parameters.flat.profile_width,
-                    "bad_thresh": self.parameters.flat.bad_threshold,
-                },
-                "wave": {
-                    "sigma": self.parameters.wavelength.detection_sigma,
-                    "deg": self.parameters.wavelength.surface_degree,
-                    "aber_deg": self.parameters.wavelength.aberration_degree,
-                    "disp_deg": self.parameters.wavelength.dispersion_degree,
-                    "niter": self.parameters.wavelength.ransac_iterations,
-                },
-                "preproc": {
-                    "nwave": self.parameters.resampling.wavelength_channels,
-                    "min_wave": self.parameters.resampling.wavelength_min_um,
-                    "max_wave": self.parameters.resampling.wavelength_max_um,
-                    "object": "p2vm",
-                },
-                "p2vm": {"phase_correction": self.parameters.p2vm.phase_correction},
-                "plot": {"full": self.parameters.plot.full},
-            },
-        }
-
 
 ConfigT = TypeVar("ConfigT")
 

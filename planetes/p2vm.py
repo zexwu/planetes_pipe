@@ -1,33 +1,32 @@
-from typing import Any, Tuple
+from typing import Tuple
 
 import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
 
-from . import PipelineContext, arg, command, log
-from .products import P2VM_PRODUCT, PREPROC_P2VM_PRODUCT
-from .reduce import compute_gdelay
+from . import log
+from .config import InstrumentConfig, PipelineConfig
+from .numerics import compute_gdelay
+from .product_io import read_product, write_product
+from .products import P2VMPreprocProduct, P2VMProduct
 from .visualize import genfig, plt
 
 
-@command("p2vm", "Calculate P2VM matrix.",
-         requires=["flat", "wave", ("preproc", "p2vm")],
-         produces=["p2vm"])
-@arg("--phase-correction", type=int, default=1, help="Apply phase correction using WAVE,SC data.")
-def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
-    """
-    Computes the Pixel-to-Visibility Matrix.
-    """
+def run_p2vm(config: PipelineConfig) -> P2VMProduct:
+    """Compute the pixel-to-visibility matrix."""
     log.info("--- Step: P2VM ---")
+    instrument = config.instrument
 
-    # Load Data
-    with ctx.load_product(PREPROC_P2VM_PRODUCT) as d:
-        spec_tel = d["spec_tel"]
-        spec_bsl = d["spec_bsl"]
-        spec_wavesc = d["spec_wavesc"]
-        bsl_to_reg = d["bsl_to_reg"][()]
-        bsl_to_tel = d["bsl_to_tel"][()]
-        spec_flat = d["spec_flat"]
-        wl_grid = d["wl_grid"]
+    preproc = read_product(
+        config.output_dir / "p2vm_preproc.npz", P2VMPreprocProduct
+    )
+    spec_tel = preproc.spec_tel
+    spec_bsl = preproc.spec_bsl
+    spec_wavesc = preproc.spec_wavesc
+    bsl_to_reg = preproc.bsl_to_reg
+    bsl_to_tel = preproc.bsl_to_tel
+    spec_flat = preproc.spec_flat
+    wl_grid = preproc.wl_grid
 
     reg_to_bsl = {reg: bsl for bsl, regs in bsl_to_reg.items() for reg in regs}
 
@@ -36,18 +35,17 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
 
     # Initialize matrices
     # v2pm: Visibility to Pixel Matrix
-    v2pm = np.zeros((ctx.n_reg, ctx.n_data, n_wave))
-    cmat = np.zeros((ctx.n_reg, ctx.n_bsl, n_wave))
+    v2pm = np.zeros((instrument.n_outputs, instrument.n_data, n_wave))
+    cmat = np.zeros((instrument.n_outputs, instrument.n_baselines, n_wave))
     ellipse_results = []
-    opd_per_baseline = np.zeros((ctx.n_bsl, n_frame), dtype=float)
-    gd_per_baseline = np.zeros((ctx.n_bsl, n_frame), dtype=float)
+    opd_per_baseline = np.zeros((instrument.n_baselines, n_frame), dtype=float)
+    gd_per_baseline = np.zeros((instrument.n_baselines, n_frame), dtype=float)
 
-    if ctx.conf.get("plot_to_pdf", False):
-        pdf = ctx.plot_ctx("p2vm.pdf")
+    pdf = PdfPages(config.output_dir / "p2vm.pdf") if config.automatic_plots else None
 
     # --- A. Process Baselines (Interference Terms) ---
-    for bsl in range(ctx.n_bsl):
-        log.info(f"Processing baseline {bsl+1}/{ctx.n_bsl}...")
+    for bsl in range(instrument.n_baselines):
+        log.info(f"Processing baseline {bsl+1}/{instrument.n_baselines}...")
 
         spec = spec_bsl[bsl]
         regs = bsl_to_reg[bsl]
@@ -73,10 +71,10 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         gd_per_baseline[bsl] = gd
         log.debug(f"    Removing zero-point {opd0=:.2f} um...")
 
-        if ctx.conf.get("plot_to_pdf", False):
+        if pdf is not None:
             _plot_p2vm_ellipse_diagnostics(
                 pdf=pdf,
-                baseline_name=ctx.baselines[bsl],
+                baseline_name=instrument.baselines[bsl],
                 visamp=visamp,
                 phase=phase,
                 n_wave=n_wave,
@@ -101,16 +99,16 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
             a, b, c = coeff[:, 2], coeff[:, 1], coeff[:, 0]
 
             # Store in V2PM
-            v2pm[:, ctx.sl_real, iw][:, bsl] = np.sqrt(a**2 + b**2) # Coherence Amp
-            v2pm[:, ctx.sl_imag, iw][:, bsl] = np.arctan2(b, a) # Phase
+            v2pm[:, instrument.real_slice, iw][:, bsl] = np.sqrt(a**2 + b**2) # Coherence Amp
+            v2pm[:, instrument.imag_slice, iw][:, bsl] = np.arctan2(b, a) # Phase
             cmat[:, bsl, iw] = c
 
-            if ctx.conf.get("plot_to_pdf", False):
+            if pdf is not None:
                 if iw % (n_wave // 6):
                     continue
                 _plot_p2vm_fit_slice(
                     pdf=pdf,
-                    baseline_name=ctx.baselines[bsl],
+                    baseline_name=instrument.baselines[bsl],
                     regs=bsl_to_reg[bsl],
                     spec=spec,
                     spec_flat=spec_flat,
@@ -120,18 +118,18 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
                 )
 
 
-        if ctx.conf.get("plot_to_pdf", False):
+        if pdf is not None:
             _plot_p2vm_spectra_summary(
                 pdf=pdf,
-                baseline_name=ctx.baselines[bsl],
+                baseline_name=instrument.baselines[bsl],
                 regs=bsl_to_reg[bsl],
                 spec=spec,
                 spec_flat=spec_flat,
             )
 
     # --- B. Process Telescopes (Photometric Terms) ---
-    for tel in range(ctx.n_tel):
-        log.info(f"Processing telescope {tel + 1}/{ctx.n_tel}...")
+    for tel in range(instrument.n_telescopes):
+        log.info(f"Processing telescope {tel + 1}/{instrument.n_telescopes}...")
         # Median transmission map
         trans_map = np.median(spec_tel[tel], axis=1)
         # Normalize sum to 1
@@ -140,29 +138,29 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
     # --- C. Normalization & Inversion ---
     log.info("P2VM Normalization...")
     log.info("    Phase normalization (A=0)...")
-    for bsl in range(ctx.n_bsl):
+    for bsl in range(instrument.n_baselines):
         regs = bsl_to_reg[bsl]
-        phase_A = v2pm[regs[0], ctx.sl_imag, :]
-        v2pm[regs, ctx.sl_imag, :] -= phase_A[None, :, :]
+        phase_A = v2pm[regs[0], instrument.imag_slice, :]
+        v2pm[regs, instrument.imag_slice, :] -= phase_A[None, :, :]
 
     log.info("    Transmission normalization (sum of 24 outputs -> 1)...")
-    v2pm[:, :ctx.n_tel, :] /= v2pm[:, :ctx.n_tel, :].mean(axis=0)[None, :, :]
+    v2pm[:, :instrument.n_telescopes, :] /= v2pm[:, :instrument.n_telescopes, :].mean(axis=0)[None, :, :]
 
     log.info("    Coherence normalization...")
-    for bsl in range(ctx.n_bsl):
+    for bsl in range(instrument.n_baselines):
         t1, t2 = bsl_to_tel[bsl]
         for iw in range(n_wave):
-            t_mat = v2pm[:, :ctx.n_tel, iw]
+            t_mat = v2pm[:, :instrument.n_telescopes, iw]
             c = cmat[:, bsl, iw]
 
             # Solve for intensities contributing to the DC term
             imat = np.linalg.pinv(t_mat) @ c
             f1f2 = np.sqrt(imat[t1] * imat[t2])
-            v2pm[:, ctx.n_tel + bsl, iw] /= f1f2
+            v2pm[:, instrument.n_telescopes + bsl, iw] /= f1f2
 
     # Convert Polar (Amp, Phase) to Cartesian (Cos, Sin) for final matrix
-    coh = v2pm[:, ctx.sl_real, :]
-    phase = v2pm[:, ctx.sl_imag, :]
+    coh = v2pm[:, instrument.real_slice, :]
+    phase = v2pm[:, instrument.imag_slice, :]
 
     def phase_corr(phase: NDArray, visdata: NDArray) -> NDArray:
         phase = phase.copy()
@@ -176,8 +174,8 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
                            2 * np.pi * _gd / wl_grid[wave0]
         opl -= opl.mean(axis=0)[None, :]
 
-        visphase = np.zeros((ctx.n_bsl, n_wave), dtype=complex)
-        for bsl in range(ctx.n_bsl):
+        visphase = np.zeros((instrument.n_baselines, n_wave), dtype=complex)
+        for bsl in range(instrument.n_baselines):
             tel1, tel2 = bsl_to_tel[bsl]
             x = opl[:, tel2] - opl[:, tel1]
             visphase[bsl, :] = (
@@ -190,23 +188,23 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         for base in [0, 1, 2]:
             ref[base + 1] = np.exp(2j * np.pi * gdelay[base] / wl_grid)
 
-        for bsl in range(ctx.n_bsl):
+        for bsl in range(instrument.n_baselines):
             tel1, tel2 = bsl_to_tel[bsl]
             visphase[bsl, :] *= ref[tel1] * ref[tel2].conj()
 
-        for reg in range(ctx.n_reg):
+        for reg in range(instrument.n_outputs):
             bsl = reg_to_bsl[reg]
             phi = np.exp(1j * phase[reg, bsl, :]) * visphase[bsl, :].conj()
             phase[reg, bsl, :] = np.angle(phi)
         return phase
 
     _v2pm = v2pm.copy()
-    _v2pm[:, ctx.sl_real, :] = coh * np.cos(phase)
-    _v2pm[:, ctx.sl_imag, :] = coh * np.sin(phase)
-    _v2pm /= ctx.n_reg
+    _v2pm[:, instrument.real_slice, :] = coh * np.cos(phase)
+    _v2pm[:, instrument.imag_slice, :] = coh * np.sin(phase)
+    _v2pm /= instrument.n_outputs
 
     log.info("V2PM -> P2VM")
-    p2vm = np.zeros((ctx.n_data, ctx.n_reg, n_wave))
+    p2vm = np.zeros((instrument.n_data, instrument.n_outputs, n_wave))
     for iw in range(n_wave):
         p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
 
@@ -216,33 +214,41 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         and spec_wavesc.ndim == 3
         and spec_wavesc.shape[1] > 0
     )
-    if has_wavesc and kwargs["phase_correction"]:
+    if has_wavesc and config.parameters.p2vm.phase_correction:
         log.info("Applying phase correction...")
         p2vmred_wave = np.einsum("dow,ofw->fdw", p2vm, spec_wavesc)
-        vis_ft = p2vmred_wave[:, ctx.sl_real, :] + 1j * p2vmred_wave[:, ctx.sl_imag, :]
+        vis_ft = p2vmred_wave[:, instrument.real_slice, :] + 1j * p2vmred_wave[:, instrument.imag_slice, :]
         phase = phase_corr(phase, vis_ft)
 
         _v2pm = v2pm.copy()
-        _v2pm[:, ctx.sl_real, :] = coh * np.cos(phase)
-        _v2pm[:, ctx.sl_imag, :] = coh * np.sin(phase)
-        _v2pm /= ctx.n_reg
+        _v2pm[:, instrument.real_slice, :] = coh * np.cos(phase)
+        _v2pm[:, instrument.imag_slice, :] = coh * np.sin(phase)
+        _v2pm /= instrument.n_outputs
 
-        p2vm = np.zeros((ctx.n_data, ctx.n_reg, n_wave))
+        p2vm = np.zeros((instrument.n_data, instrument.n_outputs, n_wave))
         for iw in range(n_wave):
             p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
-    elif kwargs["phase_correction"]:
+    elif config.parameters.p2vm.phase_correction:
         log.info("Skipping phase correction: no WAVE,SC calibration was provided.")
 
-    to_save = ["p2vm", "v2pm", "opd_per_baseline", "gd_per_baseline", "wl_grid",
-               "bsl_to_reg", "bsl_to_tel", "ellipse_results"]
-    ctx.save_product(P2VM_PRODUCT, **{k: locals()[k] for k in to_save})
+    product = P2VMProduct(
+        p2vm=p2vm,
+        v2pm=v2pm,
+        opd_per_baseline=opd_per_baseline,
+        gd_per_baseline=gd_per_baseline,
+        wl_grid=wl_grid,
+        bsl_to_reg=bsl_to_reg,
+        bsl_to_tel=bsl_to_tel,
+        ellipse_results=np.asarray(ellipse_results),
+    )
+    write_product(config.output_dir / "p2vm.npz", product)
     log.info("--- Step: P2VM [DONE] ---")
     log.info("")
 
-    if ctx.conf.get("plot_to_pdf", False):
+    if pdf is not None:
         _plot_p2vm_summary(
             pdf=pdf,
-            ctx=ctx,
+            instrument=instrument,
             wl_grid=wl_grid,
             v2pm=v2pm,
             coh=coh,
@@ -250,7 +256,7 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
             bsl_to_tel=bsl_to_tel,
         )
         pdf.close()
-    return
+    return product
 
 
 def _plot_p2vm_ellipse_diagnostics(
@@ -325,32 +331,40 @@ def _plot_p2vm_spectra_summary(pdf, baseline_name: str, regs, spec, spec_flat) -
     plt.close(fig)
 
 
-def _plot_p2vm_summary(pdf, ctx: PipelineContext, wl_grid, v2pm, coh, bsl_to_reg, bsl_to_tel) -> None:
+def _plot_p2vm_summary(
+    pdf,
+    instrument: InstrumentConfig,
+    wl_grid,
+    v2pm,
+    coh,
+    bsl_to_reg,
+    bsl_to_tel,
+) -> None:
     fig, axs = genfig(2, 3, xlabel="Wavelength [um]", ylabel="Phase [deg]")
-    phase = v2pm[:, ctx.sl_imag, :].copy()
-    for bsl in range(ctx.n_bsl):
+    phase = v2pm[:, instrument.imag_slice, :].copy()
+    for bsl in range(instrument.n_baselines):
         regs = bsl_to_reg[bsl]
         phase[regs, bsl, :] -= phase[regs[0], bsl, :]
     phase = np.unwrap(phase, period=2 * np.pi)
     phase *= 180 / np.pi
     phase = phase % 360
-    for bsl in range(ctx.n_bsl):
+    for bsl in range(instrument.n_baselines):
         regs = bsl_to_reg[bsl]
         for reg, label in zip(regs, ["A", "C", "B", "D"]):
             axs[bsl].plot(wl_grid, phase[reg, bsl, :], label=label)
-        axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
+        axs[bsl].set_title(f"Baseline {instrument.baselines[bsl]}")
     fig.suptitle("V2PM Phase [deg]")
     pdf.savefig(fig)
     plt.close(fig)
 
     fig, axs = genfig(2, 3, xlabel="Wavelength [um]", ylabel="Coherence")
-    for bsl in range(ctx.n_bsl):
+    for bsl in range(instrument.n_baselines):
         regs = bsl_to_reg[bsl]
         tels = bsl_to_tel[bsl]
         t1t2 = 2 * abs(v2pm[:, tels[0], :] * v2pm[:, tels[1], :]) ** 0.5
         for reg, label in zip(regs, ["A", "C", "B", "D"]):
             axs[bsl].plot(wl_grid, coh[reg, bsl, :] / t1t2[reg], label=label)
-        axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
+        axs[bsl].set_title(f"Baseline {instrument.baselines[bsl]}")
     fig.suptitle("V2PM Coherence")
     pdf.savefig(fig)
     plt.close(fig)

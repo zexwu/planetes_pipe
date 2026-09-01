@@ -6,11 +6,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 try:
-    from . import PipelineContext
     from .rtp2vm import P2VMReducer, extract_spec_sparse_single, twopx_interp_single
 except ImportError:
-    from planetes import PipelineContext
     from rtp2vm import P2VMReducer, extract_spec_sparse_single, twopx_interp_single
+
+from planetes.config import PipelineConfig
+from planetes.fits import CubeSelection, iter_cube
+from planetes.numerics import frame_mean
 
 
 def main() -> None:
@@ -18,10 +20,19 @@ def main() -> None:
     base_dir = Path(__file__).resolve().parent
     reducer = P2VMReducer(base_dir / "reduced")
 
-    ctx = PipelineContext(base_dir / "conf.yaml")
-    cube = ctx.load_fits(Path("./2026_02_05/sci2/sci.fits"))
-    dark = ctx.load_fits(Path("./2026_02_05/sci2/sci_dark.fits"))
-    cube -= dark.mean(axis=0)[None, ...]
+    config = PipelineConfig.from_yaml(base_dir / "conf.yaml")
+    target = config.targets["sci"]
+    selection = CubeSelection(
+        target.frames.slice,
+        config.crop.y.slice,
+        config.crop.x.slice,
+    )
+    cube = np.concatenate(
+        list(iter_cube(target.data, selection, config.chunk_frames)), axis=0
+    )
+    if target.dark is not None:
+        dark = frame_mean(iter_cube(target.dark, selection, config.chunk_frames))
+        cube -= dark[None, ...]
 
     import timeit
 

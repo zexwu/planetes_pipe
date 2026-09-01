@@ -1,39 +1,43 @@
 from typing import Any, List, Tuple
 
 import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
-from . import PipelineContext, arg, command, log
-from .products import FLAT_PRODUCT, WAVE_ABERR_PRODUCT, WAVE_PRODUCT
-from .visualize import genfig, plt
+from . import log
+from .config import PipelineConfig
+from .fits import CubeSelection, iter_cube
+from .numerics import frame_mean
 from .preproc import extract_spec_sparse
+from .product_io import read_product, write_product
+from .products import FlatProduct, WaveProduct
+from .visualize import genfig, plt
 
 
-@command("wave", "Wavelength calibration",
-         requires=["flat"],
-         produces=["wave"])
-@arg("--sigma", type=int, default=3, help="Line detection threshold")
-@arg("--deg", type=int, default=3, help="Degree of polynomial for wavemap fit")
-@arg("--aber-deg", type=int, default=3, help="Degree of polynomial for aberration fit")
-@arg("--disp-deg", type=int, default=3, help="Degree of polynomial for pixel-to-wavelength fit")
-@arg("--niter", type=int, default=int(1e6), help="Number of iterations for RANSAC line matching")
-def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
+def run_wave(config: PipelineConfig) -> tuple[WaveProduct, WaveProduct]:
+    """Build the detector wavelength maps."""
 
     log.info("--- Step: WAVE ---")
+    instrument = config.instrument
+    parameters = config.parameters.wavelength
 
-    # Load flat Data
-    with ctx.load_product(FLAT_PRODUCT) as d:
-        profile_xs = d["profile_xs"]
-        profile_ys = d["profile_ys"]
-        flat_map = d["flat_map"]
-        ny, nx = flat_map.shape
-        x_trace, y_trace = d["xs"], d["ys"]
+    flat = read_product(config.output_dir / "flat.npz", FlatProduct)
+    profile_xs = flat.profile_xs
+    profile_ys = flat.profile_ys
+    ny, nx = flat.flat_map.shape
+    x_trace, y_trace = flat.xs, flat.ys
 
+    wave_input = config.calibration.wavelength
+    selection = CubeSelection(
+        frames=wave_input.frames.slice,
+        y=config.crop.y.slice,
+        x=config.crop.x.slice,
+    )
     wave_img = (
-        ctx.mean_fits(ctx.conf["calib"]["wave"])
-        - ctx.mean_fits(ctx.conf["calib"]["wave_dark"])
+        frame_mean(iter_cube(wave_input.data, selection, config.chunk_frames))
+        - frame_mean(iter_cube(wave_input.dark, selection, config.chunk_frames))
     )
     wave_spec = extract_spec_sparse(wave_img[None, :, :],
                                     profile_ys, profile_xs)[:, 0, :]
@@ -82,19 +86,24 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     def thresh(_spec: NDArray) -> np.floating[Any]:
         med = np.median(_spec)
         mad = np.median(abs(_spec - med))
-        return med + kwargs["sigma"] * mad * 1.4826
+        return med + parameters.detection_sigma * mad * 1.4826
 
     peak_pos_mean, _ = find_peaks(spec_mean, height=thresh(spec_mean), distance=5)
     matched_ind_mean, pixel_to_wl_mean =\
-    match_lines(line_pos, peak_pos_mean, tol=3, n_iter=kwargs["niter"])
+    match_lines(
+        line_pos,
+        peak_pos_mean,
+        tol=3,
+        n_iter=parameters.ransac_iterations,
+    )
     log.info("Matched mean spectrum peaks to known lines: "
              f"{len(peak_pos_mean)} peaks -> {len(matched_ind_mean)} matches.")
 
-    if ctx.conf.get("plot_to_pdf", False):
-        pdf = ctx.plot_ctx("wave.pdf")
+    pdf = PdfPages(config.output_dir / "wave.pdf") if config.automatic_plots else None
+    if pdf is not None:
         _plot_wave_input(pdf, wave_img)
 
-    for reg in range(ctx.n_reg):
+    for reg in range(instrument.n_outputs):
         spec = wave_spec[reg]
 
         # Find peaks in the spectrum of individual region;
@@ -166,7 +175,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
         return np.column_stack(terms)
 
     # Fit the wl = f(x, y), using a 3rd order polynomial
-    deg = kwargs["deg"]
+    deg = parameters.surface_degree
     log.info("Fitted 2D wavelength solution.")
     design_matrix = dmat(x_flat, y_flat, max_deg=deg)
     terms = [f"x{d-i}y{i}" for d in range(deg+1) for i in range(d + 1)]
@@ -190,20 +199,21 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
         )
 
     # outliers at each region
-    outliers = [reject & (idx2reg == reg) for reg in range(ctx.n_reg)]
+    outliers = [reject & (idx2reg == reg) for reg in range(instrument.n_outputs)]
     outliers = [np.where(outliers[reg])[0] - reg_offsets[reg]
-                for reg in range(ctx.n_reg)]
+                for reg in range(instrument.n_outputs)]
 
     # --- 5. Build and save the full wavemap ---
-    det_x_coords = np.repeat(np.arange(nx)[None, :], ctx.n_reg, axis=0)
+    det_x_coords = np.repeat(np.arange(nx)[None, :], instrument.n_outputs, axis=0)
     det_y_coords = y_trace
     full_design_matrix = dmat_arr(det_x_coords, det_y_coords, max_deg=deg)
     wavemap = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix)
 
-    ctx.save_product(WAVE_PRODUCT, wave_map=wavemap)
+    wave_product = WaveProduct(wave_map=wavemap)
+    write_product(config.output_dir / "wave.npz", wave_product)
     log.info("Saved full wavemap")
 
-    if ctx.conf.get("plot_to_pdf", False):
+    if pdf is not None:
         log.info("Generating diagnostic plots...")
         _plot_wave_fit_diagnostics(
             pdf=pdf,
@@ -223,7 +233,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
         )
         _plot_wave_region_diagnostics(
             pdf=pdf,
-            ctx=ctx,
+            n_outputs=instrument.n_outputs,
             wave_spec=wave_spec,
             trans_all=trans_all,
             x_centroids=x_centroids,
@@ -258,14 +268,14 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     x_flat = np.concatenate(x_centroids_common)
     y_flat = np.concatenate(y_centroids_common)
     wl_grid = line_pos[common_indices]
-    wl_flat = np.tile(wl_grid, ctx.n_reg)
+    wl_flat = np.tile(wl_grid, instrument.n_outputs)
 
     # fit a 1D polynomial to the mean spec
     # to get the pixel-to-wavelength mapping
     # along the dispersion direction
     log.info("Fitting 1D pixel-to-wave mapping for the mean trace...")
     x_centroids_mean = x_centroids_common.mean(axis=0)
-    disp_deg = kwargs["disp_deg"]
+    disp_deg = parameters.dispersion_degree
     pixel_to_wl_coeffs = np.polyfit(x_centroids_mean, wl_grid, deg=disp_deg)
     disp_std = np.std(wl_grid - np.polyval(pixel_to_wl_coeffs, x_centroids_mean))
     px2wl_str = [
@@ -278,7 +288,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     # fit a 2D polynomial to the deviations from the mean spec for the aberrations
     log.info("Fitting 2D polynomial f(x,y) to aberration Δx...")
     log.debug("Kernel used for aberration fit: ")
-    aber_deg = kwargs["aber_deg"]
+    aber_deg = parameters.aberration_degree
     ker = [f"x{d-i}y{i}" for d in range(aber_deg+1) for i in range(d + 1)]
     log.debug(", ".join(ker))
     aber_design_matrix = dmat(x_flat, y_flat, max_deg=aber_deg)
@@ -302,14 +312,15 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     # Apply the 1D wl solution to get the final wavemap with aberration correction
     wavemap_aber = np.polyval(pixel_to_wl_coeffs, det_x_coords - aber_offset)
 
-    ctx.save_product(WAVE_ABERR_PRODUCT, wave_map=wavemap_aber)
+    aberration_product = WaveProduct(wave_map=wavemap_aber)
+    write_product(config.output_dir / "wave_aberr.npz", aberration_product)
     log.info("Saved aberration wavemap")
 
 
     log.info("--- Step: WAVE [DONE] ---")
     log.info("")
 
-    if ctx.conf.get("plot_to_pdf", False):
+    if pdf is not None:
         _plot_wave_aberration_diagnostics(
             pdf=pdf,
             x_flat=x_flat,
@@ -328,10 +339,10 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
             wavemap_deg=deg,
         )
 
-    if ctx.conf.get("plot_to_pdf", False):
+    if pdf is not None:
         pdf.close()
 
-    return
+    return wave_product, aberration_product
 
 
 def _plot_wave_input(pdf, wave_img: NDArray) -> None:
@@ -452,7 +463,7 @@ def _plot_wave_fit_diagnostics(
 
 def _plot_wave_region_diagnostics(
     pdf,
-    ctx: PipelineContext,
+    n_outputs: int,
     wave_spec: NDArray,
     trans_all,
     x_centroids,
@@ -462,7 +473,7 @@ def _plot_wave_region_diagnostics(
     pixel_to_wl_mean,
     nx: int,
 ) -> None:
-    for reg in range(ctx.n_reg):
+    for reg in range(n_outputs):
         if reg % 4 == 0:
             fig, axs = genfig(4, 1, xlabel="X [px]", ylabel="Intensity [adu]", sharey=False)
 

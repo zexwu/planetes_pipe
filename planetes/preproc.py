@@ -1,15 +1,28 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from . import PipelineContext, arg, command, log
-from .products import FLAT_PRODUCT, WAVE_PRODUCT, preproc_product
+from . import log
+from .config import FrameRange, PipelineConfig
+from .fits import CubeSelection, iter_cube
+from .numerics import frame_mean
+from .product_io import read_product, write_product
+from .products import FlatProduct, ObjectPreprocProduct, P2VMPreprocProduct, WaveProduct
 
 ABCD_ORDER = ("A", "C", "B", "D")
+
+
+@dataclass(frozen=True, slots=True)
+class _ExtractionModel:
+    flat: FlatProduct
+    wave_map: NDArray
+    detector_flat: NDArray
+    aligned_flat: NDArray
+    wavelength_grid: NDArray
 
 
 def order_abcd_regions(
@@ -30,155 +43,198 @@ def order_abcd_regions(
     return [region_by_label[label] for label in ABCD_ORDER]
 
 
-def resolve_object_entry(
-    entry: str | Path | Mapping[str, Any],
-) -> tuple[str | Path, str | Path | None]:
-    """Resolve a legacy object path or an explicit data/dark mapping."""
-    if isinstance(entry, (str, Path)):
-        return entry, None
-    if not isinstance(entry, Mapping):
-        raise TypeError(f"Object entry must be a path or mapping, got {type(entry).__name__}")
-    if "data" not in entry:
-        raise ValueError("Object mapping must contain a 'data' path")
-    return entry["data"], entry.get("dark")
+def run_preproc_p2vm(config: PipelineConfig) -> P2VMPreprocProduct:
+    """Extract and resample the P2VM calibration cubes."""
+    log.info("--- Step: PREPROC P2VM ---")
+    model = _extraction_model(config)
+    calibration = config.calibration
+    instrument = config.instrument
 
+    log.info("Preprocessing P2VM and FLAT files...")
+    spec_bsl = np.asarray(
+        [
+            _extract_cube(
+                config,
+                calibration.p2vm[name],
+                calibration.frames,
+                model.flat.dark_map,
+                model,
+            )
+            for name in instrument.baselines
+        ]
+    )
+    spec_tel = np.asarray(
+        [
+            _extract_cube(
+                config,
+                calibration.flats[name],
+                calibration.frames,
+                model.flat.dark_map,
+                model,
+            )
+            for name in instrument.telescopes
+        ]
+    )
 
-@command("preproc", "Preprocessing data cubes.",
-         requires=["flat", "wave"], produces=["preproc"])
-@arg("--object", type=str, default="p2vm", help="target to preprocess (p2vm or object name)")
-@arg("--nwave", type=int, default=151, help="number of wavelength points for interpolation")
-@arg("--min-wave", type=float, default=1.15, help="minimum wavelength")
-@arg("--max-wave", type=float, default=1.3, help="maximum wavelength")
-def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
-    """
-    Extracts flux for P2VM and Flat data, Re-interpolate onto a common wavelength grid.
-    """
-    log.info("--- Step: PREPROC ---")
-    obj = kwargs.get("object", "p2vm")
-    if not obj:
-        raise ValueError("An object name is required for preprocessing")
-    if obj not in {"p2vm", "all"} and obj not in ctx.conf["object"]:
-        available = ", ".join(ctx.conf["object"])
-        raise ValueError(f"Unknown object {obj!r}; available objects: {available}")
+    spec_wavesc = np.empty(
+        (instrument.n_outputs, 0, len(model.wavelength_grid)), dtype=np.float64
+    )
+    if phase_reference := calibration.phase_reference:
+        phase_dark = model.flat.dark_map
+        if phase_reference.dark is not None:
+            phase_dark = _mean_cube(config, phase_reference.dark, phase_reference.frames)
+        spec_wavesc = _extract_cube(
+            config,
+            phase_reference.data,
+            phase_reference.frames,
+            phase_dark,
+            model,
+        )
 
-    # Load flat & profile maps
-    with ctx.load_product(FLAT_PRODUCT) as d:
-        dark_map = d["dark_map"]
-        # profile_map = d["profile_map"]
-        profile_ys = d["profile_ys"]
-        profile_xs = d["profile_xs"]
-        flat_map = d["flat_map"]
+    tel_regs = {}
+    for telescope, flux in enumerate(spec_tel):
+        mean_flux = flux.mean(axis=(1, 2))
+        active = np.argsort(mean_flux)[-instrument.n_outputs // 2 :]
+        tel_regs[telescope] = np.sort(active).tolist()
 
-    # Load wavelength map
-    with ctx.load_product(WAVE_PRODUCT) as d:
-        wave_map = d["wave_map"]
+    bsl_regs = {}
+    for baseline, flux in enumerate(spec_bsl):
+        std_flux = flux.std(axis=1).mean(axis=-1)
+        active = np.argsort(std_flux)[-4:]
+        bsl_regs[baseline] = np.sort(active).tolist()
 
-    # wavelength grid for interpolation
-    wl_grid = np.linspace(kwargs["min_wave"],
-                          kwargs["max_wave"],
-                          kwargs["nwave"])
-
-    _spec_flat  = extract_spec_sparse(flat_map[None, :, :], profile_ys, profile_xs)
-    _spec_flat = np.clip(_spec_flat, a_min=1e-8, a_max=None)
-    spec_flat = 1 / twopx_interp(1 / _spec_flat, wave_map, wl_grid)
-
-    def _load_dark_map(filename: str | Path) -> NDArray:
-        log.info(f"    Building dark map from {filename}...")
-        return ctx.mean_fits(filename)
-
-    def _extract(fname: str | Path, dark: NDArray = dark_map) -> NDArray:
-        """Helper to process extraction."""
-        log.info(f"    Extracting spectra from {fname}...")
-        aligned_chunks = []
-        for data in ctx.iter_fits(fname):
-            spec = extract_spec_sparse(data - dark, profile_ys, profile_xs)
-
-            # Divide by flat before interpolation, then restore the interpolated
-            # flat response to preserve the original flux scale.
-            spec_aligned = twopx_interp(spec / _spec_flat, wave_map, wl_grid)
-            spec_aligned *= spec_flat
-            aligned_chunks.append(spec_aligned)
-
-        if not aligned_chunks:
-            raise ValueError(f"Selected FITS cube contains no frames: {fname}")
-        return np.concatenate(aligned_chunks, axis=1)
-
-    if obj == "p2vm":
-        log.info("Preprocessing P2VM and FLAT files...")
-        calib_files = ctx.conf["calib"]
-        spec_bsl = [_extract(_) for _ in calib_files["p2vm"]]
-        spec_tel = [_extract(_) for _ in calib_files["flat"]]
-        spec_wavesc = np.empty((ctx.n_reg, 0, len(wl_grid)), dtype=np.float64)
-        if "wavesc" in calib_files:
-            wavesc_dark = dark_map
-            if "wavesc_dark" in calib_files:
-                wavesc_dark = _load_dark_map(calib_files["wavesc_dark"])
-            spec_wavesc = _extract(calib_files["wavesc"], wavesc_dark)
-
-        # ---------------------------------------------------------
-        # Match Baselines to Detector Regions
-        # ---------------------------------------------------------
-
-        # Identify which regions belong to which Telescope (based on intensity)
-        tel_regs = {}
-        for tel_idx, flux in enumerate(spec_tel):
-            # Mean flux over frame and wavelength
-            mean_flux = flux.mean(axis=(1, 2))
-            # Top regions correspond to this telescope
-            active_regs = np.argsort(mean_flux)[-ctx.n_reg // 2 :]
-            tel_regs[tel_idx] = np.sort(active_regs).tolist()
-
-        # Identify which regions belong to which Baseline (based on modulation/std dev)
-        bsl_regs = {}
-        for bsl_idx, flux in enumerate(spec_bsl):
-            # High std deviation implies interference fringe presence
-            std_flux = flux.std(axis=1).mean(axis=-1)
-            active_regs = np.argsort(std_flux)[-4:]  # 4 outputs (ABCD) per baseline
-            bsl_regs[bsl_idx] = np.sort(active_regs).tolist()
-
-        # Map Baseline ID -> Region Indices and Telescope Pairs
-        bsl_to_reg = {}
-        bsl_to_tel = {}
-
-        detector_abcd_order = ctx.conf.get("abcd_order", ABCD_ORDER)
-        for t1 in range(ctx.n_tel):
-            for t2 in range(ctx.n_tel):
-                if t1 >= t2: continue  # Unique pairs only
-
-                bsl_name = ctx.telescopes[t1] + ctx.telescopes[t2]
-                bsl_idx = ctx.baselines.index(bsl_name)
-
-                # intersection of the two telescopes -> regions for baseline
-                # should match regions_from_data for consistency
-                regions_from_tels = set(tel_regs[t1]) & set(tel_regs[t2])
-                regions_from_data = set(bsl_regs[bsl_idx])
-                if regions_from_tels != regions_from_data:
-                    log.error(f"    Mismatch in region mapping for {bsl_name}: "\
-                              f"{regions_from_tels} vs {regions_from_data}")
-                    raise ValueError("Baseline mapping consistency check failed.")
-
-                bsl_to_reg[bsl_idx] = order_abcd_regions(
-                    bsl_regs[bsl_idx], detector_abcd_order
+    bsl_to_reg = {}
+    bsl_to_tel = {}
+    detector_order = [label.value for label in instrument.abcd_order]
+    for telescope_1 in range(instrument.n_telescopes):
+        for telescope_2 in range(instrument.n_telescopes):
+            if telescope_1 >= telescope_2:
+                continue
+            baseline_name = (
+                instrument.telescopes[telescope_1]
+                + instrument.telescopes[telescope_2]
+            )
+            baseline = instrument.baselines.index(baseline_name)
+            from_telescopes = set(tel_regs[telescope_1]) & set(tel_regs[telescope_2])
+            from_modulation = set(bsl_regs[baseline])
+            if from_telescopes != from_modulation:
+                log.error(
+                    f"    Mismatch in region mapping for {baseline_name}: "
+                    f"{from_telescopes} vs {from_modulation}"
                 )
-                bsl_to_tel[bsl_idx] = (t1, t2)
+                raise ValueError("Baseline mapping consistency check failed.")
+            bsl_to_reg[baseline] = order_abcd_regions(
+                bsl_regs[baseline], detector_order
+            )
+            bsl_to_tel[baseline] = (telescope_1, telescope_2)
 
-        to_save = ["spec_tel", "spec_bsl", "spec_wavesc", "spec_flat",
-                   "tel_regs", "bsl_regs", "bsl_to_reg", "bsl_to_tel",
-                   "wl_grid"]
-        ctx.save_product(preproc_product(obj), **{k: locals()[k] for k in to_save})
-        log.info("Preprocessed P2VM and FLAT data saved.")
-    else:
-        obj_list = ctx.conf["object"] if obj == "all" else [obj]
-        to_save = ["spec", "spec_flat", "wl_grid"]
-        for obj in obj_list:
-            data_file, dark_file = resolve_object_entry(ctx.conf["object"][obj])
-            object_dark = dark_map if dark_file is None else _load_dark_map(dark_file)
-            spec = _extract(data_file, object_dark)
-            ctx.save_product(preproc_product(obj), **{k: locals()[k] for k in to_save})
-        log.info(f"Preprocessed objects: {', '.join(obj_list)}")
-    log.info("--- Step: PREPROC [DONE] ---")
+    product = P2VMPreprocProduct(
+        spec_tel=spec_tel,
+        spec_bsl=spec_bsl,
+        spec_wavesc=spec_wavesc,
+        spec_flat=model.aligned_flat,
+        tel_regs=tel_regs,
+        bsl_regs=bsl_regs,
+        bsl_to_reg=bsl_to_reg,
+        bsl_to_tel=bsl_to_tel,
+        wl_grid=model.wavelength_grid,
+    )
+    write_product(config.output_dir / "p2vm_preproc.npz", product)
+    log.info("Preprocessed P2VM and FLAT data saved.")
+    log.info("--- Step: PREPROC P2VM [DONE] ---")
     log.info("")
-    return
+    return product
+
+
+def run_preproc_target(
+    config: PipelineConfig, target_name: str
+) -> ObjectPreprocProduct:
+    """Extract and resample one science target cube."""
+    if target_name not in config.targets:
+        available = ", ".join(config.targets)
+        raise ValueError(f"Unknown target {target_name!r}; available targets: {available}")
+    log.info(f"--- Step: PREPROC {target_name} ---")
+    model = _extraction_model(config)
+    target = config.targets[target_name]
+    dark = (
+        model.flat.dark_map
+        if target.dark is None
+        else _mean_cube(config, target.dark, target.frames)
+    )
+    spec = _extract_cube(
+        config,
+        target.data,
+        target.frames,
+        dark,
+        model,
+    )
+    product = ObjectPreprocProduct(
+        spec=spec,
+        spec_flat=model.aligned_flat,
+        wl_grid=model.wavelength_grid,
+    )
+    write_product(config.output_dir / f"{target_name}_preproc.npz", product)
+    log.info(f"Preprocessed target: {target_name}")
+    log.info(f"--- Step: PREPROC {target_name} [DONE] ---")
+    log.info("")
+    return product
+
+
+def _extraction_model(config: PipelineConfig) -> _ExtractionModel:
+    flat = read_product(config.output_dir / "flat.npz", FlatProduct)
+    wave = read_product(config.output_dir / "wave.npz", WaveProduct)
+    parameters = config.parameters.resampling
+    wl_grid = np.linspace(
+        parameters.wavelength_min_um,
+        parameters.wavelength_max_um,
+        parameters.wavelength_channels,
+    )
+    spec_flat_detector = extract_spec_sparse(
+        flat.flat_map[None, :, :], flat.profile_ys, flat.profile_xs
+    )
+    spec_flat_detector = np.clip(spec_flat_detector, a_min=1e-8, a_max=None)
+    spec_flat = 1 / twopx_interp(1 / spec_flat_detector, wave.wave_map, wl_grid)
+    return _ExtractionModel(
+        flat=flat,
+        wave_map=wave.wave_map,
+        detector_flat=spec_flat_detector,
+        aligned_flat=spec_flat,
+        wavelength_grid=wl_grid,
+    )
+
+
+def _mean_cube(config: PipelineConfig, path: Path, frames: FrameRange) -> NDArray:
+    log.info(f"    Building dark map from {path}...")
+    selection = CubeSelection(frames.slice, config.crop.y.slice, config.crop.x.slice)
+    return frame_mean(iter_cube(path, selection, config.chunk_frames))
+
+
+def _extract_cube(
+    config: PipelineConfig,
+    path: Path,
+    frames: FrameRange,
+    dark: NDArray,
+    model: _ExtractionModel,
+) -> NDArray:
+    log.info(f"    Extracting spectra from {path}...")
+    selection = CubeSelection(frames.slice, config.crop.y.slice, config.crop.x.slice)
+    aligned_chunks = []
+    for data in iter_cube(path, selection, config.chunk_frames):
+        spec = extract_spec_sparse(
+            data - dark,
+            model.flat.profile_ys,
+            model.flat.profile_xs,
+        )
+        spec_aligned = twopx_interp(
+            spec / model.detector_flat,
+            model.wave_map,
+            model.wavelength_grid,
+        )
+        spec_aligned *= model.aligned_flat
+        aligned_chunks.append(spec_aligned)
+    if not aligned_chunks:
+        raise ValueError(f"Selected FITS cube contains no frames: {path}")
+    return np.concatenate(aligned_chunks, axis=1)
 
 
 @njit(parallel=True, fastmath=True, cache=True)

@@ -2,10 +2,12 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import numpy as np
 from numba import njit, prange
+
+from planetes.product_io import read_product
+from planetes.products import FlatProduct, P2VMProduct, WaveProduct
 
 NDArray = np.ndarray
 
@@ -44,7 +46,7 @@ def twopx_interp_single(spec: NDArray, wn_map: NDArray, wn_grid: NDArray) -> NDA
     return out
 
 
-@dataclass
+@dataclass(slots=True)
 class P2VMReductionResult:
     """Reduced visibility products for one detector frame."""
 
@@ -53,7 +55,7 @@ class P2VMReductionResult:
     spec_aligned: NDArray
 
 
-@dataclass
+@dataclass(slots=True)
 class P2VMReducer:
     """Load calibration products once and reduce individual camera frames."""
 
@@ -61,12 +63,12 @@ class P2VMReducer:
     profile_ys: NDArray = field(init=False, repr=False)
     profile_xs: NDArray = field(init=False, repr=False)
     flat_map: NDArray = field(init=False, repr=False)
-    dark_map: Optional[NDArray] = field(init=False, repr=False)
-    profile_x_positions: Optional[NDArray] = field(init=False, repr=False)
-    profile_y_positions: Optional[NDArray] = field(init=False, repr=False)
+    dark_map: NDArray | None = field(init=False, repr=False)
+    profile_x_positions: NDArray | None = field(init=False, repr=False)
+    profile_y_positions: NDArray | None = field(init=False, repr=False)
     p2vm: NDArray = field(init=False, repr=False)
     wl_grid: NDArray = field(init=False, repr=False)
-    bsl_to_reg: Dict[int, List[int]] = field(init=False, repr=False)
+    bsl_to_reg: dict[int, list[int]] = field(init=False, repr=False)
     bsl_to_tel: NDArray = field(init=False, repr=False)
     wave_map: NDArray = field(init=False, repr=False)
     wn_map: NDArray = field(init=False, repr=False)
@@ -77,26 +79,27 @@ class P2VMReducer:
     def __post_init__(self) -> None:
         self.reduced_dir = Path(self.reduced_dir).expanduser().resolve()
 
-        with np.load(self.reduced_dir / "flat.npz") as d:
-            self.profile_ys = np.array(d["profile_ys"])
-            self.profile_xs = np.array(d["profile_xs"])
-            self.flat_map = d["flat_map"].astype(np.float32)
-            self.dark_map = d["dark_map"].astype(np.float32) if "dark_map" in d else None
-            self.profile_x_positions = d["xs"] if "xs" in d else None
-            self.profile_y_positions = d["ys"] if "ys" in d else None
+        flat = read_product(self.reduced_dir / "flat.npz", FlatProduct)
+        self.profile_ys = np.array(flat.profile_ys)
+        self.profile_xs = np.array(flat.profile_xs)
+        self.flat_map = flat.flat_map.astype(np.float32)
+        self.dark_map = flat.dark_map.astype(np.float32)
+        self.profile_x_positions = flat.xs
+        self.profile_y_positions = flat.ys
 
-        with np.load(self.reduced_dir / "p2vm.npz", allow_pickle=True) as d:
-            self.p2vm = d["p2vm"]
-            self.wl_grid = d["wl_grid"]
-            bsl_to_reg = d["bsl_to_reg"][()]
-            bsl_to_tel = d["bsl_to_tel"][()]
+        p2vm = read_product(self.reduced_dir / "p2vm.npz", P2VMProduct)
+        self.p2vm = p2vm.p2vm
+        self.wl_grid = p2vm.wl_grid
+        bsl_to_reg = p2vm.bsl_to_reg
+        bsl_to_tel = p2vm.bsl_to_tel
 
         self.bsl_to_reg = {int(k): list(v) for k, v in bsl_to_reg.items()}
         baseline_ids = sorted(int(k) for k in bsl_to_tel)
         self.bsl_to_tel = np.array([list(bsl_to_tel[i]) for i in baseline_ids])
 
-        with np.load(self.reduced_dir / "wave.npz") as d:
-            self.wave_map = d["wave_map"]
+        self.wave_map = read_product(
+            self.reduced_dir / "wave.npz", WaveProduct
+        ).wave_map
 
         self.wn_map = 1.0 / self.wave_map
         self.wn_grid = 1.0 / self.wl_grid
@@ -123,7 +126,7 @@ class P2VMReducer:
         self,
         img: NDArray,
         subtract_dark: bool = False,
-        dark: Optional[NDArray] = None,
+        dark: NDArray | None = None,
     ) -> P2VMReductionResult:
         """Reduce one detector frame to normalized visibility amplitudes."""
         frame = np.asarray(img, dtype=np.float32)

@@ -1,40 +1,22 @@
-"""
-Calibration sequence for the PLANETES pipeline.
+"""Linear calibration recipe for the PLANETES pipeline."""
 
-This module orchestrates the full calibration sequence:
-flat field, wavelength calibration, preprocessing, and P2VM calculation.
-"""
-
-from typing import Any
-
-from . import PipelineContext, command, log
+from . import log
+from .config import PipelineConfig
 from .flat import run_flat
 from .p2vm import run_p2vm
-from .preproc import run_preproc
+from .preproc import run_preproc_p2vm
+from .products import P2VMProduct
 from .wave import run_wave
 
 
-@command(
-    "calib",
-    "Run the full calibration sequence: flat, wave, preproc, p2vm",
-    requires=[],
-    produces=["flat", "wave", "preproc", "p2vm"]
-)
-def run_calib(ctx: PipelineContext, **kwargs: Any) -> None:
-    """
-    Execute the full calibration sequence.
-
-    Args:
-        ctx: Pipeline context with configuration
-        **kwargs: Additional keyword arguments passed from CLI
-    """
+def run_calibration(config: PipelineConfig) -> P2VMProduct:
+    """Run flat, wavelength, extraction, and P2VM calibration in order."""
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    config.save(config.output_dir / "config_used.yaml")
     log.info("Starting full calibration sequence")
-
-    CALIB_STEPS = [run_flat, run_wave, run_preproc, run_p2vm]
-
-    for i, step in enumerate(CALIB_STEPS, 1):
-        step_name = step.__name__.replace("run_", "")
-        log.info(f"Calibration step {i}/{len(CALIB_STEPS)}: {step_name}")
-        step(ctx, **kwargs)
-
+    run_flat(config)
+    run_wave(config)
+    run_preproc_p2vm(config)
+    product = run_p2vm(config)
     log.info("Calibration sequence completed successfully")
+    return product

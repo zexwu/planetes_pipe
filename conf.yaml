@@ -67,5 +67,8 @@ parameters:
     wavelength_channels: 151
   p2vm:
     phase_correction: true
+  reduction:
+    group_delay_min_um: -100.0
+    group_delay_max_um: 100.0
   plot:
     full: false

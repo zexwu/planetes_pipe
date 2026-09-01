@@ -1,76 +1,127 @@
-from typing import Any, List, Optional
+from dataclasses import dataclass
+from typing import List, Optional
 
 import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 from numba import njit
 from numpy.typing import NDArray
 from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, medfilt
 
-from . import PipelineContext, arg, command, log
-from .products import FLAT_PRODUCT
+from . import log
+from .config import FlatParameters, PipelineConfig
+from .fits import CubeSelection, iter_cube
+from .numerics import frame_mean, frame_mean_std
+from .product_io import write_product
+from .products import FlatProduct
 from .visualize import genfig, plt
 
 
-@command("flat", "Build flat, dark, and profile images.", requires=[], produces=["flat"])
-@arg("--profile-width", type=int, default=10, help="Width of the spectral profile in pixels.")
-@arg("--bad-thresh", type=float, default=5.0, help="Sigma threshold for bad pixel detection.")
-def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
-    """
-    Creates Dark map, Bad Pixel map, Flat map, and traces spectral profiles.
-    """
+@dataclass(slots=True)
+class _FlatDiagnostics:
+    flat_maps: list[NDArray]
+    ys_raw: NDArray
+    ys_error: NDArray
+
+
+def run_flat(config: PipelineConfig) -> FlatProduct:
+    """Build detector maps and sparse spectral traces."""
     log.info("--- Step: FLAT ---")
     log.info("Building DARK, BAD and FLAT maps...")
-    # 1. Load and Compute Maps
-    dark_map, dark_std = ctx.mean_std_fits(ctx.conf["calib"]["dark"])
+    selection = CubeSelection(
+        frames=config.calibration.frames.slice,
+        y=config.crop.y.slice,
+        x=config.crop.x.slice,
+    )
+    dark_map, dark_std = frame_mean_std(
+        iter_cube(
+            config.calibration.dark,
+            selection,
+            chunk_frames=config.chunk_frames,
+        )
+    )
+    flat_maps = [
+        frame_mean(
+            iter_cube(
+                config.calibration.flats[name],
+                selection,
+                chunk_frames=config.chunk_frames,
+            )
+        )
+        - dark_map
+        for name in config.instrument.telescopes
+    ]
+    product, diagnostics = build_flat_product(
+        dark_map,
+        dark_std,
+        flat_maps,
+        n_outputs=config.instrument.n_outputs,
+        parameters=config.parameters.flat,
+    )
+    write_product(config.output_dir / "flat.npz", product)
+    log.info("Saved profile, flat, dark, and trace data.")
 
-    flat_files = ctx.conf["calib"]["flat"]
+    if config.automatic_plots:
+        with PdfPages(config.output_dir / "flat.pdf") as pdf:
+            _plot_flat(
+                pdf,
+                product,
+                diagnostics,
+                config.instrument.telescopes,
+            )
 
-    # bad_map = compute_bad_map_gravi(dark_map, dark_std, flat_cubes,
-    #                                 bad_dark_factor=20)
+    log.info("--- Step: FLAT [DONE] ---")
+    log.info("")
+    return product
+
+
+def build_flat_product(
+    dark_map: NDArray,
+    dark_std: NDArray,
+    flat_maps: list[NDArray],
+    *,
+    n_outputs: int,
+    parameters: FlatParameters,
+) -> tuple[FlatProduct, _FlatDiagnostics]:
+    """Compute flat maps and traces from pre-reduced detector images."""
     bad_map = compute_bad_map_from_stats(
-        dark_map, dark_std, threshold=kwargs["bad_thresh"]
+        dark_map, dark_std, threshold=parameters.bad_threshold
     )
 
-    flat_maps = [ctx.mean_fits(filename) - dark_map for filename in flat_files]
     flat_map = np.mean(flat_maps, axis=0)
 
-    # 2. Trace Spectra
     h, w = flat_map.shape
-    h_half = h // ctx.n_reg // 2
+    h_half = h // n_outputs // 2
 
-    # Find peaks in the collapsed spatial direction
     spatial_profile = flat_map.sum(axis=1)
     thresh = np.percentile(spatial_profile, 75)
     ref_ys, props = find_peaks(spatial_profile, distance=h_half, height=thresh)
     log.debug(f"Found {len(ref_ys)} Peaks with THRESH {thresh:.0f}...")
 
-    # Select the strongest peaks corresponding to the n_reg regions
-    top_indices = np.argsort(props["peak_heights"])[-ctx.n_reg :]
+    top_indices = np.argsort(props["peak_heights"])[-n_outputs:]
     ref_ys = np.sort(ref_ys[top_indices])
 
-    profile_map = np.zeros((ctx.n_reg, h, w), dtype=np.uint8)
+    profile_map = np.zeros((n_outputs, h, w), dtype=np.uint8)
     xs_list, ys_list, ys_raw_list, ys_err_list = [], [], [], []
     profile_xs = []
     profile_ys = []
 
     log.info("Building PROFILE map...")
     for i, ref_y in enumerate(ref_ys):
-        # Trace spectrum curvature
-        log.debug(f"    Tracing spectrum {i+1}/{ctx.n_reg} at Y={ref_y}...")
+        log.debug(f"    Tracing spectrum {i+1}/{n_outputs} at Y={ref_y}...")
         xs = np.arange(w)
         ys, ys_err = trace_spectrum(
             flat_map, bad_map,
             ref_x=w // 2, ref_y=ref_y, range_y=h_half
         )
 
-        # Smooth the trace
         ys_med = medfilt(ys, kernel_size=3)
         good = (ys_err < 0.5) & (np.arange(w) < w - 50) & (np.arange(w) > 50)
         poly_coeffs = np.polyfit(xs[good], ys_med[good], deg=3)
         ys_smoothed = np.polyval(poly_coeffs, xs)
         Y, X = np.indices((h, w))
 
-        spatial_mask = np.abs(Y - ys_smoothed[X]) < kwargs["profile_width"] / 2
+        spatial_mask = np.abs(Y - ys_smoothed[X]) < parameters.profile_width / 2
         profile_map[i, spatial_mask & (bad_map == 0)] = 1
 
         # Keep a rectangular sparse array for NPZ/Numba; extractors skip -1 sentinels.
@@ -87,75 +138,80 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
         ys_raw_list.append(ys)
         ys_err_list.append(ys_err)
 
-    xs_list = np.array(xs_list)
-    ys_list = np.array(ys_list)
-    ys_raw_list = np.array(ys_raw_list)
-    ys_err_list = np.array(ys_err_list)
-
-    # 3. Save Results
-    ctx.save_product(
-        FLAT_PRODUCT,
+    product = FlatProduct(
         profile_map=profile_map,
-        profile_xs=profile_xs,
-        profile_ys=profile_ys,
+        profile_xs=np.array(profile_xs),
+        profile_ys=np.array(profile_ys),
         flat_map=flat_map,
         dark_map=dark_map,
         bad_map=bad_map,
-        xs=xs_list,
-        ys=ys_list,
+        xs=np.array(xs_list),
+        ys=np.array(ys_list),
     )
-    log.info("Saved profile, flat, dark, and trace data.")
+    diagnostics = _FlatDiagnostics(
+        flat_maps=flat_maps,
+        ys_raw=np.array(ys_raw_list),
+        ys_error=np.array(ys_err_list),
+    )
+    return product, diagnostics
 
-    # 4. Plotting
-    if ctx.conf.get("plot_to_pdf", False):
-        pdf = ctx.plot_ctx("flat.pdf")
-        # Plot 1: Maps and Traces
-        fig, axs = plt.subplots(1, 3, sharey=True)
-        titles = ["DARK", "FLAT", "BAD"]
-        for ax, img, title in zip(axs, [dark_map, flat_map, bad_map], titles):
-            vmin, vmax = np.percentile(img, [0, 99])
-            if title == "BAD": vmin, vmax = 0, 1
-            ax.imshow(img, vmin=vmin, vmax=vmax)
-            ax.set_title(title)
-        pdf.savefig(fig); plt.close(fig) # fmt: skip
 
-        # Plot 2: Per-Telescope Flats
-        fig, axs = plt.subplots(1, 4)
-        vmin, vmax = np.percentile(flat_map, [1, 99])
-        for i, dat in enumerate(flat_maps):
-            axs[i].imshow(dat, vmin=vmin, vmax=vmax)
-            axs[i].set_title(f"Tel {ctx.telescopes[i]}")
-            axs[i].axis("off")
-            for reg in range(ctx.n_reg):
-                axs[i].plot(
-                    xs_list[reg], ys_list[reg],
-                    c="blue", lw=0.3, ls="-", alpha=1
-                )
-                axs[i].plot(
-                    xs_list[reg][ys_err_list[reg] < 5],
-                    ys_raw_list[reg][ys_err_list[reg] < 5],
-                    c="red", lw=0.3, ls="--", alpha=0.5,
-                )
-        pdf.savefig(fig); plt.close(fig) # fmt: skip
+def _plot_flat(
+    pdf: PdfPages,
+    product: FlatProduct,
+    diagnostics: _FlatDiagnostics,
+    telescopes: tuple[str, ...],
+) -> None:
+    fig, axs = plt.subplots(1, 3, sharey=True)
+    titles = ["DARK", "FLAT", "BAD"]
+    images = [product.dark_map, product.flat_map, product.bad_map]
+    for ax, image, title in zip(axs, images, titles, strict=True):
+        vmin, vmax = np.percentile(image, [0, 99])
+        if title == "BAD":
+            vmin, vmax = 0, 1
+        ax.imshow(image, vmin=vmin, vmax=vmax)
+        ax.set_title(title)
+    pdf.savefig(fig)
+    plt.close(fig)
 
-        fig, axs = genfig(4, ctx.n_reg // 4, xlabel="X (px)", ylabel="Y (px)")
-        for k in range(ctx.n_reg):
-            axs[k].axis("off")
-            axs[k].imshow(profile_map[k, :, :])
-            axs[k].text(
-                0.5, 0.9, f"OUTPUT {k}",
-                c="white", transform=axs[k].transAxes,
-                ha="center", fontsize=8,
+    fig, axs = plt.subplots(1, len(telescopes))
+    vmin, vmax = np.percentile(product.flat_map, [1, 99])
+    for i, image in enumerate(diagnostics.flat_maps):
+        axs[i].imshow(image, vmin=vmin, vmax=vmax)
+        axs[i].set_title(f"Tel {telescopes[i]}")
+        axs[i].axis("off")
+        for reg in range(len(product.profile_map)):
+            axs[i].plot(product.xs[reg], product.ys[reg], c="blue", lw=0.3)
+            good = diagnostics.ys_error[reg] < 5
+            axs[i].plot(
+                product.xs[reg][good],
+                diagnostics.ys_raw[reg][good],
+                c="red",
+                lw=0.3,
+                ls="--",
+                alpha=0.5,
             )
-            axs[k].set_xticks([])
-            axs[k].set_yticks([])
-        plt.subplots_adjust(wspace=0, hspace=0)
-        pdf.savefig(fig); plt.close(fig) # fmt: skip
-        pdf.close()
+    pdf.savefig(fig)
+    plt.close(fig)
 
-    log.info("--- Step: FLAT [DONE] ---")
-    log.info("")
-    return
+    fig, axs = genfig(4, len(product.profile_map) // 4, xlabel="X (px)", ylabel="Y (px)")
+    for index, profile in enumerate(product.profile_map):
+        axs[index].axis("off")
+        axs[index].imshow(profile)
+        axs[index].text(
+            0.5,
+            0.9,
+            f"OUTPUT {index}",
+            c="white",
+            transform=axs[index].transAxes,
+            ha="center",
+            fontsize=8,
+        )
+        axs[index].set_xticks([])
+        axs[index].set_yticks([])
+    plt.subplots_adjust(wspace=0, hspace=0)
+    pdf.savefig(fig)
+    plt.close(fig)
 
 
 def compute_bad_map_gravi(dark_map: NDArray,

@@ -11,6 +11,7 @@ from astropy.io import fits
 from planetes.config import PipelineConfig
 from planetes.fits import CubeSelection, iter_cube
 from planetes.numerics import frame_mean_std
+from main import build_parser
 
 
 def _valid_config() -> dict:
@@ -75,6 +76,14 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unknown keys"):
                 PipelineConfig.from_yaml(path)
 
+    def test_boolean_parameter_is_not_coerced_from_text(self) -> None:
+        config = _valid_config()
+        config["parameters"] = {"p2vm": {"phase_correction": "false"}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_config(config, tmp)
+            with self.assertRaisesRegex(ValueError, "true or false"):
+                PipelineConfig.from_yaml(path)
+
     def test_resolved_config_can_be_saved_and_reloaded(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_config(_valid_config(), tmp)
@@ -104,6 +113,13 @@ class ConfigTests(unittest.TestCase):
             np.testing.assert_array_equal(np.concatenate(chunks), selected)
             np.testing.assert_allclose(mean, selected.mean(axis=0), rtol=1e-6)
             np.testing.assert_allclose(std, selected.std(axis=0), rtol=1e-6)
+
+    def test_cli_only_selects_recipe_and_target(self) -> None:
+        args = build_parser().parse_args(["reduce", "target"])
+        self.assertEqual(
+            vars(args),
+            {"conf": "conf.yaml", "command": "reduce", "target": "target"},
+        )
 
 
 if __name__ == "__main__":

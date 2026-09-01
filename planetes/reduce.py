@@ -6,124 +6,87 @@ visibility extraction, group delay computation, and phase calculation.
 """
 
 from collections.abc import Mapping
-from typing import Any, Dict, List, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 
-from . import PipelineContext, arg, command, log
-from .products import P2VM_PRODUCT, preproc_product, reduced_product
-from .preproc import run_preproc
+from . import log
+from .config import PipelineConfig
+from .numerics import compute_gdelay
+from .preproc import run_preproc_target
+from .product_io import read_product, write_product
+from .products import P2VMProduct, ReducedProduct
 from .visualize import colored_text, summary_plot
 
 
-@command(
-    "reduce",
-    "Reduce science target data.",
-    requires=["flat", "wave", "p2vm"],
-    produces=["preproc", "reduced"]
-)
-@arg("--object", type=str, required=True, help="Target to reduce (object name)")
-def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
-    """
-    Reduce science target data.
+def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
+    """Preprocess and reduce one configured science target."""
+    if target_name not in config.targets:
+        available = ", ".join(config.targets)
+        raise ValueError(f"Unknown target {target_name!r}; available targets: {available}")
 
-    Args:
-        ctx: Pipeline context with configuration
-        **kwargs: Additional keyword arguments passed from CLI
-    """
-    obj = kwargs.get("object", None)
-    if not obj:
-        raise ValueError("An object name is required for reduction")
-    if obj != "all" and obj not in ctx.conf["object"]:
-        available = ", ".join(ctx.conf["object"])
-        raise ValueError(f"Unknown object {obj!r}; available objects: {available}")
+    config.output_dir.mkdir(parents=True, exist_ok=True)
+    config.save(config.output_dir / "config_used.yaml")
+    log.info(f"--- Step: REDUCE {target_name} ---")
+    preproc = run_preproc_target(config, target_name)
+    p2vm = read_product(config.output_dir / "p2vm.npz", P2VMProduct)
+    instrument = config.instrument
+    target_label = colored_text(target_name, color="green", bold=True)
 
-    log.info("--- Step: REDUCE ---")
+    log.info(f"Applying P2VM to extract visibility for {target_label}...")
+    p2vmred = np.einsum("box,ofx->fbx", p2vm.p2vm, preproc.spec)
+    fluxdata = p2vmred[:, : instrument.n_telescopes, :]
+    coherent_flux = (
+        p2vmred[:, instrument.real_slice, :]
+        + 1j * p2vmred[:, instrument.imag_slice, :]
+    )
+    visamp, flag = normalize_visibility(
+        coherent_flux, fluxdata, p2vm.bsl_to_tel
+    )
 
-    # --- 1. Load P2VM ---
-    with ctx.load_product(P2VM_PRODUCT) as d:
-        p2vm_map = d["p2vm"]
-        wl_grid = d["wl_grid"]
-        bsl_to_reg = d["bsl_to_reg"][()]
-        bsl_to_tel = d["bsl_to_tel"][()]
-
-    def reduce_single(object_name: str, gd_range: Tuple[float, float] = (-100, 100)) -> None:
-        """
-        Reduce data for a single object.
-
-        Args:
-            object_name: Name of the object to reduce
-            gd_range: Search range for group delay computation
-        """
-        # Load preprocessed spectra
-        spec = ctx.load_product(preproc_product(object_name))["spec"]
-        cobj = colored_text(object_name, color="green", bold=True)
-
-        log.info(f"Applying P2VM to extract visibility for {cobj}...")
-        p2vmred = np.einsum("box,ofx->fbx", p2vm_map, spec)
-
-        fluxdata = p2vmred[:, :ctx.n_tel, :]
-        # Extract visibility data
-        coherent_flux = (
-            p2vmred[:, ctx.sl_real, :] + 1j * p2vmred[:, ctx.sl_imag, :]
+    reduction = config.parameters.reduction
+    group_delay_range = (
+        reduction.group_delay_min_um,
+        reduction.group_delay_max_um,
+    )
+    gdelay = np.zeros((len(coherent_flux), instrument.n_baselines))
+    log.info(f"Computing group delay for {target_label}...")
+    for baseline in range(instrument.n_baselines):
+        gdelay[:, baseline] = compute_gdelay(
+            coherent_flux[:, baseline],
+            p2vm.wl_grid,
+            search_range=group_delay_range,
         )
-        visamp, flag = normalize_visibility(coherent_flux, fluxdata, bsl_to_tel)
 
-        # Compute group delay for each baseline
-        gdelay = np.zeros((len(coherent_flux), ctx.n_bsl))
-        log.info(f"Computing group delay for {cobj}...")
-        for bsl in range(ctx.n_bsl):
-            gdelay[:, bsl] = compute_gdelay(
-                coherent_flux[:, bsl], wl_grid, search_range=gd_range
-            )
+    visphi = coherent_flux * np.exp(
+        -2j * np.pi * gdelay[:, :, None] / p2vm.wl_grid[None, :]
+    )
+    visphi *= visphi.mean(axis=2)[:, :, None].conj()
+    visphi = np.angle(visphi, deg=True)
+    visphi -= visphi.mean(axis=2)[:, :, None]
+    visphi = (visphi + 180) % 360 - 180
 
-        # Compute visibility phase
-        visphi = coherent_flux * np.exp(
-            -2j * np.pi * gdelay[:, :, None] / wl_grid[None, :]
-        )
-        visphi *= visphi.mean(axis=2)[:, :, None].conj()
-        visphi = np.angle(visphi, deg=True)
+    product = ReducedProduct(
+        fluxdata=fluxdata,
+        coherent_flux=coherent_flux,
+        visamp=visamp,
+        flag=flag,
+        p2vmred=p2vmred,
+        wl_grid=p2vm.wl_grid,
+        gdelay=gdelay,
+        visphi=visphi,
+        bsl_to_reg=p2vm.bsl_to_reg,
+        bsl_to_tel=p2vm.bsl_to_tel,
+    )
+    write_product(config.output_dir / f"{target_name}_reduced.npz", product)
+    log.info(f"Reduction for {target_label} completed.")
 
-        # Normalize phase
-        visphi -= visphi.mean(axis=2)[:, :, None]
-        visphi = (visphi + 180) % 360 - 180
+    if config.automatic_plots:
+        summary_plot(config, target_name)
 
-        # Save results
-        product_data: Dict[str, Any] = {
-            "fluxdata": fluxdata,
-            "coherent_flux": coherent_flux,
-            "visamp": visamp,
-            "flag": flag,
-            "p2vmred": p2vmred,
-            "wl_grid": wl_grid,
-            "gdelay": gdelay,
-            "visphi": visphi,
-            "bsl_to_reg": bsl_to_reg,
-            "bsl_to_tel": bsl_to_tel,
-        }
-
-        ctx.save_product(reduced_product(object_name), **product_data)
-        log.info(f"Reduction for {cobj} completed.")
-
-    # Process objects
-    obj_list: List[str] = ctx.conf["object"] if obj == "all" else [obj]
-
-    for obj_name in obj_list:
-        log.info(f"Processing object: {obj_name}")
-
-        # Run preprocessing if needed
-        run_preproc(ctx, object=obj_name)
-
-        # Perform reduction
-        reduce_single(obj_name, gd_range=(-100, 100))
-
-        # Generate plots if requested
-        if ctx.conf.get("plot_to_pdf", False):
-            summary_plot(ctx, object=obj_name)
-
-    log.info("--- Step: REDUCE [DONE] ---")
+    log.info(f"--- Step: REDUCE {target_name} [DONE] ---")
     log.info("")
+    return product
 
 
 def normalize_visibility(
@@ -149,56 +112,3 @@ def normalize_visibility(
         flag[:, baseline, :] = ~valid
 
     return visamp, flag
-
-
-def compute_gdelay(
-    visdata: NDArray,
-    wl: NDArray,
-    search_range: Tuple[float, float] = (-30, 30),
-    n_newton: int = 5
-) -> NDArray:
-    """
-    Compute group delay for a batch of visibilities.
-
-    Args:
-        visdata: Visibility data array
-        wl: Wavelength array
-        search_range: Range for initial grid search
-        n_newton: Number of Newton iterations for refinement
-
-    Returns:
-        Group delay values
-    """
-    # Constants
-    k = -2j * np.pi / wl
-    w = -2 * np.pi / wl
-
-    # Initial grid search
-    gd_grid = np.arange(search_range[0], search_range[1], 0.01)
-    phasors_grid = np.exp(gd_grid[:, None] * k[None, :])
-    coherence = np.abs(np.tensordot(visdata, phasors_grid, axes=([-1], [-1])))
-
-    idx_best = np.argmax(coherence, axis=-1)
-    gd_current = gd_grid[idx_best]  # Shape: (N_frames,)
-
-    # Newton-Raphson refinement
-    for _ in range(n_newton):
-        gd_exp = gd_current[:, None]
-        rot_term = np.exp(1j * w * gd_exp)
-        V_rot = visdata * rot_term
-
-        S0 = np.sum(V_rot, axis=-1)
-        S1 = np.sum(V_rot * (1j * w), axis=-1)
-        S2 = np.sum(V_rot * (-(w**2)), axis=-1)
-
-        S0_conj = np.conj(S0)
-        grad = 2 * np.real(S1 * S0_conj)
-        hess = 2 * np.real(S2 * S0_conj + S1 * np.conj(S1))
-
-        diff = np.zeros_like(grad)
-        mask = hess != 0
-        diff[mask] = grad[mask] / hess[mask]
-
-        gd_current = gd_current - diff
-
-    return gd_current
