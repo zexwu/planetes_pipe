@@ -7,7 +7,6 @@ from . import PipelineContext, arg, command, log
 from .products import P2VM_PRODUCT, PREPROC_P2VM_PRODUCT
 from .reduce import compute_gdelay
 from .visualize import genfig, plt
-plt.style.use("~/zexwu_lib/zexwu.mplstyle")
 
 
 @command("p2vm", "Calculate P2VM matrix.",

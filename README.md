@@ -16,6 +16,8 @@ xrange: [0, 1024]        # Spectral crop [start, end]
 yrange: [0, 1024]        # Spatial crop [start, end]
 output_dir: ./reduced/   # Output path
 log_level: DEBUG
+io_chunk_frames: 16      # FITS frames processed per in-memory chunk
+plot_to_pdf: false       # automatic calibration/reduction plots
 
 parameters:
   flat:
@@ -34,6 +36,8 @@ parameters:
     object: p2vm
   p2vm:
     phase_correction: true
+  plot:
+    full: false
 
 telescopes: ["4", "3", "2", "1"] # names of telescopes
 baselines: ["43", "42", "41", "32", "31", "21"] # names of baselines
@@ -87,6 +91,15 @@ planetes p2vm
 
 ```bash
 planetes reduce --object my_target # ~ 3 seconds
+```
+
+Generate a compact five-page summary explicitly with:
+
+```bash
+planetes plot --object my_target
+
+# Include per-DIT, per-wavelength, and ABCD diagnostics.
+planetes plot --object my_target --full
 ```
 ## Output Files
 

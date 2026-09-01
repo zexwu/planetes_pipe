@@ -10,6 +10,7 @@ import functools
 import importlib
 import logging
 import pkgutil
+from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -191,6 +192,63 @@ class PipelineContext:
         data = fits.getdata(path, **kwargs)
         return data[self.sl_data].astype(np.float32)
 
+    def iter_fits(self, filename: str | Path) -> Iterator[NDArray]:
+        """Yield a sliced three-dimensional FITS cube in frame chunks."""
+        path = self._resolve_path(self.data_dir / filename)
+        if not path.exists():
+            raise FileNotFoundError(f"FITS file not found: {path}")
+
+        chunk_size = self.conf.get("io_chunk_frames", 16)
+        frame_slice, y_slice, x_slice = self.sl_data
+        with fits.open(path, memmap=True) as hdul:
+            data = next((hdu.data for hdu in hdul if hdu.data is not None), None)
+            if data is None:
+                raise ValueError(f"FITS file contains no data HDU: {path}")
+            if data.ndim != 3:
+                raise ValueError(f"Expected a 3D FITS cube in {path}, got shape {data.shape}")
+
+            start = frame_slice.start or 0
+            stop = len(data) if frame_slice.stop is None else min(frame_slice.stop, len(data))
+            for chunk_start in range(start, stop, chunk_size):
+                chunk_stop = min(chunk_start + chunk_size, stop)
+                yield np.asarray(
+                    data[chunk_start:chunk_stop, y_slice, x_slice], dtype=np.float32
+                )
+
+    def mean_fits(self, filename: str | Path) -> NDArray:
+        """Compute a frame mean without loading the full FITS cube."""
+        total = None
+        count = 0
+        for chunk in self.iter_fits(filename):
+            if total is None:
+                total = np.zeros(chunk.shape[1:], dtype=np.float64)
+            total += chunk.sum(axis=0, dtype=np.float64)
+            count += len(chunk)
+        if total is None or count == 0:
+            raise ValueError(f"Selected FITS cube contains no frames: {filename}")
+        return (total / count).astype(np.float32)
+
+    def mean_std_fits(self, filename: str | Path) -> tuple[NDArray, NDArray]:
+        """Compute frame mean and population standard deviation in chunks."""
+        total = None
+        total_squared = None
+        count = 0
+        for chunk in self.iter_fits(filename):
+            if total is None:
+                total = np.zeros(chunk.shape[1:], dtype=np.float64)
+                total_squared = np.zeros(chunk.shape[1:], dtype=np.float64)
+            total += chunk.sum(axis=0, dtype=np.float64)
+            total_squared += np.square(chunk, dtype=np.float64).sum(
+                axis=0, dtype=np.float64
+            )
+            count += len(chunk)
+        if total is None or total_squared is None or count == 0:
+            raise ValueError(f"Selected FITS cube contains no frames: {filename}")
+
+        mean = total / count
+        variance = np.maximum(total_squared / count - mean**2, 0.0)
+        return mean.astype(np.float32), np.sqrt(variance).astype(np.float32)
+
     def save_product(
         self,
         product: Union[str, Tuple[str, str], ProductSpec],
@@ -239,7 +297,7 @@ class PipelineContext:
             validate_product_keys(data.files, schema, filename)
         return data
 
-    def plot_ctx(self, filename: str) -> Any:
+    def plot_ctx(self, filename: str, *, enabled: bool | None = None) -> Any:
         """
         Create a plotting context for PDF output.
 
@@ -249,7 +307,9 @@ class PipelineContext:
         Returns:
             PDF context manager or null context
         """
-        if self.conf.get("plot_to_pdf", False):
+        if enabled is None:
+            enabled = self.conf.get("plot_to_pdf", False)
+        if enabled:
             from matplotlib.backends.backend_pdf import PdfPages
             return PdfPages(self.output_dir / filename)
         return nullcontext()
@@ -383,9 +443,4 @@ def command(name: str, help_msg: str,
 for loader, recipe_name, is_pkg in pkgutil.walk_packages(__path__):
     if recipe_name == "__init__":
         continue
-    try:
-        # Dynamically import the module using its name
-        importlib.import_module(f".{recipe_name}", package=__name__)
-        # log.info(f"Loaded recipe: {recipe_name}")
-    except Exception as e:
-        log.warning(f"Failed to load recipe '{recipe_name}': {e}")
+    importlib.import_module(f".{recipe_name}", package=__name__)

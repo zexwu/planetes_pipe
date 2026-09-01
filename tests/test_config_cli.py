@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import yaml
+from astropy.io import fits
 
 from recipes import COMMANDS, PipelineContext, arg, command
 from recipes.products import ProductSpec
@@ -101,6 +102,43 @@ class ConfigAndCommandTests(unittest.TestCase):
 
             ctx.conf.setdefault("parameters", {})["flat"] = {"profile_width": 99}
             self.assertFalse(ctx.product_exists(product))
+
+    def test_fits_cube_iteration_and_statistics_are_chunked(self) -> None:
+        config = _valid_config()
+        config["frames"] = [1, 5]
+        config["xrange"] = [1, 4]
+        config["yrange"] = [0, 2]
+        config["io_chunk_frames"] = 2
+        cube = np.arange(6 * 3 * 5, dtype=np.int16).reshape(6, 3, 5)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_config(config, tmp)
+            fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(cube)]).writeto(
+                Path(tmp) / "cube.fits"
+            )
+            ctx = PipelineContext(path)
+
+            chunks = list(ctx.iter_fits("cube.fits"))
+            selected = cube[1:5, 0:2, 1:4].astype(np.float32)
+            self.assertEqual([len(chunk) for chunk in chunks], [2, 2])
+            np.testing.assert_array_equal(np.concatenate(chunks), selected)
+
+            mean, std = ctx.mean_std_fits("cube.fits")
+            np.testing.assert_allclose(mean, selected.mean(axis=0), rtol=1e-6)
+            np.testing.assert_allclose(std, selected.std(axis=0), rtol=1e-6)
+
+    def test_dynamic_object_is_normalized_in_product_snapshot(self) -> None:
+        config = _valid_config()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_config(config, tmp)
+            ctx = PipelineContext(path)
+            ctx.active_parameters["preproc"] = {"object": "target"}
+            ctx.active_parameters["reduce"] = {"object": "target"}
+            active_snapshot = ctx.manifests.snapshot(("reduced", "target"))
+
+            ctx.active_parameters.clear()
+            fresh_snapshot = ctx.manifests.snapshot(("reduced", "target"))
+            self.assertEqual(active_snapshot, fresh_snapshot)
 
 
 if __name__ == "__main__":

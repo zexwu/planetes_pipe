@@ -29,9 +29,11 @@ def genfig(m, n, xlabel, ylabel, **kwargs):
     return fig, axs
 
 @command("plot", "Summary plots for reduced data.")
+@arg("--full", action="store_true", default=False, help="Include per-DIT diagnostics")
 @arg("--object", type=str, required=True, help="Target to plot (object name)")
 def summary_plot(ctx: PipelineContext, **kwargs):
     obj = kwargs.get("object", None)
+    full = kwargs.get("full", False)
     if not obj:
         raise ValueError("An object name is required for plotting")
     if obj != "all" and obj not in ctx.conf["object"]:
@@ -39,10 +41,11 @@ def summary_plot(ctx: PipelineContext, **kwargs):
         raise ValueError(f"Unknown object {obj!r}; available objects: {available}")
     obj_list = ctx.conf["object"] if obj == "all" else [obj]
     for obj in obj_list:
-        summary_plot_single(ctx, object=obj)
+        summary_plot_single(ctx, object=obj, full=full)
 
 def summary_plot_single(ctx: PipelineContext, **kwargs):
     obj = kwargs.get("object", None)
+    full = kwargs.get("full", False)
     data_file, _ = resolve_object_entry(ctx.conf["object"][obj])
     object_label = str(data_file)
     log.info(f"--- Step: PLOTTING {obj} ---")
@@ -56,7 +59,7 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
         bsl_to_reg = d["bsl_to_reg"][()]
         bsl_to_tel = d["bsl_to_tel"][()]
 
-    pdf = ctx.plot_ctx(f"{obj}.pdf")
+    pdf = ctx.plot_ctx(f"{obj}.pdf", enabled=True)
     mean_flux = p2vmred[:, :ctx.n_tel, :].mean(axis=-1)
     frame_samples = np.arange(0, visphi.shape[0], 10)
     wave_samples = np.arange(0, visphi.shape[-1], 10)
@@ -173,8 +176,11 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
                          f"Baseline {ctx.baselines[bsl]} Extracted Spectra")
             pdf.savefig(fig); plt.close(fig)
 
-    [fn() for fn in [plot_flux, plot_cohflux, plot_visamp, plot_phase, plot_gdelay,
-                     plot_visphi, plot_gdelay_visphi, plot_ABCD]]
+    plots = [plot_flux, plot_cohflux, plot_visamp, plot_phase, plot_gdelay]
+    if full:
+        plots.extend([plot_visphi, plot_gdelay_visphi, plot_ABCD])
+    for plot in plots:
+        plot()
     pdf.close()
 
     return

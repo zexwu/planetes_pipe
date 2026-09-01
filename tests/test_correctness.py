@@ -29,6 +29,13 @@ class _FlatContext:
     def load_fits(self, filename: str) -> np.ndarray:
         return self.dark_cube if filename == "dark.fits" else self.flat_cube
 
+    def mean_fits(self, filename: str) -> np.ndarray:
+        return self.load_fits(filename).mean(axis=0)
+
+    def mean_std_fits(self, filename: str) -> tuple[np.ndarray, np.ndarray]:
+        cube = self.load_fits(filename)
+        return cube.mean(axis=0), cube.std(axis=0)
+
     def save_product(self, product, **values: np.ndarray) -> None:
         self.saved = values
 
@@ -42,7 +49,7 @@ class CorrectnessTests(unittest.TestCase):
         trace_error = np.zeros(128)
 
         with (
-            patch("recipes.flat.compute_bad_map", return_value=bad_map),
+            patch("recipes.flat.compute_bad_map_from_stats", return_value=bad_map),
             patch("recipes.flat.trace_spectrum", return_value=(trace, trace_error)),
         ):
             run_flat(ctx, profile_width=3)

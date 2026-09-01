@@ -131,6 +131,8 @@ class ManifestStore:
         parameters = {stage: self._effective_parameters(stage) for stage in stages}
         if isinstance(product_id, tuple) and product_id[0] in {"preproc", "reduced"}:
             parameters.setdefault("preproc", {})["object"] = product_id[1]
+        if isinstance(product_id, tuple) and product_id[0] == "reduced":
+            parameters.setdefault("reduce", {})["object"] = product_id[1]
 
         config = {
             key: self.context.conf.get(key)
@@ -141,6 +143,7 @@ class ManifestStore:
                 "telescopes",
                 "baselines",
                 "abcd_order",
+                "io_chunk_frames",
             )
         }
         return {

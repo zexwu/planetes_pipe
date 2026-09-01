@@ -7,6 +7,10 @@ from typing import Any
 
 def validate_config(config: dict[str, Any]) -> None:
     """Validate structural assumptions shared by all recipes."""
+    chunk_size = config.get("io_chunk_frames", 16)
+    if not isinstance(chunk_size, int) or chunk_size <= 0:
+        raise ValueError("io_chunk_frames must be a positive integer")
+
     for key in ("frames", "xrange", "yrange"):
         bounds = config.get(key, [0, None])
         if not isinstance(bounds, list) or len(bounds) != 2:

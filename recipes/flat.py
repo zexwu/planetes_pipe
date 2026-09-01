@@ -21,18 +21,17 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
     log.info("--- Step: FLAT ---")
     log.info("Building DARK, BAD and FLAT maps...")
     # 1. Load and Compute Maps
-    dark_cube = ctx.load_fits(ctx.conf["calib"]["dark"])
-    dark_map = dark_cube.mean(axis=0)
-    # dark_std = dark_cube.std(axis=0)
+    dark_map, dark_std = ctx.mean_std_fits(ctx.conf["calib"]["dark"])
 
     flat_files = ctx.conf["calib"]["flat"]
-    flat_cubes = [ctx.load_fits(f) for f in flat_files]
 
     # bad_map = compute_bad_map_gravi(dark_map, dark_std, flat_cubes,
     #                                 bad_dark_factor=20)
-    bad_map = compute_bad_map(dark_cube, threshold=kwargs["bad_thresh"])
+    bad_map = compute_bad_map_from_stats(
+        dark_map, dark_std, threshold=kwargs["bad_thresh"]
+    )
 
-    flat_maps = [img.mean(axis=0) - dark_map for img in flat_cubes]
+    flat_maps = [ctx.mean_fits(filename) - dark_map for filename in flat_files]
     flat_map = np.mean(flat_maps, axis=0)
 
     # 2. Trace Spectra
@@ -364,10 +363,16 @@ def compute_bad_map(dark_cube: NDArray, threshold: float = 5.0) -> NDArray:
             2: Dead pixel (Mean < threshold)
             4: Noisy pixel (StdDev > threshold)
     """
-    BAD_HOT, BAD_DEAD, BAD_RON = 1, 2, 4
-
     mean_img = dark_cube.mean(axis=0)
     std_img = dark_cube.std(axis=0)
+    return compute_bad_map_from_stats(mean_img, std_img, threshold=threshold)
+
+
+def compute_bad_map_from_stats(
+    mean_img: NDArray, std_img: NDArray, threshold: float = 5.0
+) -> NDArray:
+    """Build a bad-pixel map from precomputed temporal mean and RMS images."""
+    BAD_HOT, BAD_DEAD, BAD_RON = 1, 2, 4
 
     med_mean = np.median(mean_img)
     med_rms = np.median(std_img)

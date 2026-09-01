@@ -31,9 +31,10 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
         ny, nx = flat_map.shape
         x_trace, y_trace = d["xs"], d["ys"]
 
-    wave_dark = ctx.load_fits(ctx.conf["calib"]["wave_dark"])
-    wave_cube = ctx.load_fits(ctx.conf["calib"]["wave"])
-    wave_img  = wave_cube.mean(axis=0) - wave_dark.mean(axis=0)
+    wave_img = (
+        ctx.mean_fits(ctx.conf["calib"]["wave"])
+        - ctx.mean_fits(ctx.conf["calib"]["wave_dark"])
+    )
     wave_spec = extract_spec_sparse(wave_img[None, :, :],
                                     profile_ys, profile_xs)[:, 0, :]
 

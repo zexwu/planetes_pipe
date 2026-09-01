@@ -84,22 +84,24 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
 
     def _load_dark_map(filename: str | Path) -> NDArray:
         log.info(f"    Building dark map from {filename}...")
-        return ctx.load_fits(filename).mean(axis=0)
+        return ctx.mean_fits(filename)
 
     def _extract(fname: str | Path, dark: NDArray = dark_map) -> NDArray:
         """Helper to process extraction."""
         log.info(f"    Extracting spectra from {fname}...")
-        data = ctx.load_fits(fname) - dark
-        spec = extract_spec_sparse(data, profile_ys, profile_xs)
+        aligned_chunks = []
+        for data in ctx.iter_fits(fname):
+            spec = extract_spec_sparse(data - dark, profile_ys, profile_xs)
 
-        # NOTE:
-        # divide by flat in pixel space before interpolation
-        # Then multiply by the flat again to preserve the
-        # original flux scale on the new wavelength grid.
-        spec_aligned = twopx_interp(spec / _spec_flat, wave_map, wl_grid)
-        spec_aligned *= spec_flat
+            # Divide by flat before interpolation, then restore the interpolated
+            # flat response to preserve the original flux scale.
+            spec_aligned = twopx_interp(spec / _spec_flat, wave_map, wl_grid)
+            spec_aligned *= spec_flat
+            aligned_chunks.append(spec_aligned)
 
-        return spec_aligned
+        if not aligned_chunks:
+            raise ValueError(f"Selected FITS cube contains no frames: {fname}")
+        return np.concatenate(aligned_chunks, axis=1)
 
     if obj == "p2vm":
         log.info("Preprocessing P2VM and FLAT files...")
