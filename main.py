@@ -9,7 +9,7 @@ parsing arguments and dispatching to the appropriate recipe commands.
 import sys
 import argparse
 
-import recipes
+import planetes
 
 
 def main() -> None:
@@ -32,7 +32,7 @@ def main() -> None:
     # Create subparsers for each registered command
     subs = parser.add_subparsers(dest="command", required=True)
 
-    for name, func in recipes.COMMANDS.items():
+    for name, func in planetes.COMMANDS.items():
         # Create the subparser for this command
         sub = subs.add_parser(name, help=func.meta["help"])
 
@@ -48,13 +48,13 @@ def main() -> None:
 
     # Initialize pipeline context
     try:
-        ctx = recipes.PipelineContext(args.conf)
+        ctx = planetes.PipelineContext(args.conf)
     except (FileNotFoundError, TypeError, ValueError) as exc:
         parser.error(str(exc))
 
     # Configure logging level from config
     log_level = ctx.conf.get("log_level", "INFO")
-    recipes.log.setLevel(log_level)
+    planetes.log.setLevel(log_level)
 
     # Check for required input products
     missing = []
@@ -63,7 +63,7 @@ def main() -> None:
             missing.append(req)
 
     if missing:
-        recipes.log.error(
+        planetes.log.error(
             f"Failed to run {args.func.meta['name']}\n"
             f"Missing required inputs: {missing}"
         )

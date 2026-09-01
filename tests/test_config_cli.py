@@ -8,8 +8,8 @@ import numpy as np
 import yaml
 from astropy.io import fits
 
-from recipes import COMMANDS, PipelineContext, arg, command
-from recipes.products import ProductSpec
+from planetes import COMMANDS, PipelineContext, arg, command
+from planetes.products import ProductSpec
 
 
 def _valid_config() -> dict:

@@ -14,7 +14,7 @@ from typing import Any
 from .products import ProductSpec, get_product_id
 
 Product = str | tuple[str, str] | ProductSpec
-log = logging.getLogger("recipes")
+log = logging.getLogger("planetes")
 
 
 @dataclass(slots=True)

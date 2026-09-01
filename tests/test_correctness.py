@@ -6,10 +6,10 @@ from unittest.mock import patch
 
 import numpy as np
 
-from recipes.flat import run_flat
-from recipes.preproc import extract_spec_sparse, order_abcd_regions, resolve_object_entry
-from recipes.reduce import normalize_visibility
-from recipes.wave import match_lines_grid
+from planetes.flat import run_flat
+from planetes.preproc import extract_spec_sparse, order_abcd_regions, resolve_object_entry
+from planetes.reduce import normalize_visibility
+from planetes.wave import match_lines_grid
 from rtp2vm import extract_spec_sparse_single
 
 
@@ -50,8 +50,8 @@ class CorrectnessTests(unittest.TestCase):
         trace_error = np.zeros(128)
 
         with (
-            patch("recipes.flat.compute_bad_map_from_stats", return_value=bad_map),
-            patch("recipes.flat.trace_spectrum", return_value=(trace, trace_error)),
+            patch("planetes.flat.compute_bad_map_from_stats", return_value=bad_map),
+            patch("planetes.flat.trace_spectrum", return_value=(trace, trace_error)),
         ):
             run_flat(ctx, profile_width=3)
 

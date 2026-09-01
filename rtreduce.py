@@ -9,7 +9,7 @@ try:
     from . import PipelineContext
     from .rtp2vm import P2VMReducer, extract_spec_sparse_single, twopx_interp_single
 except ImportError:
-    from recipes import PipelineContext
+    from planetes import PipelineContext
     from rtp2vm import P2VMReducer, extract_spec_sparse_single, twopx_interp_single
 
 

@@ -19,5 +19,5 @@ dependencies = [
 planetes = "main:main"
 
 [tool.setuptools]
-packages = ["recipes"]
+packages = ["planetes"]
 py-modules = ["main", "rtp2vm", "rtreduce"]
