@@ -4,12 +4,12 @@ import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from numpy.typing import NDArray
 
-from . import log
-from .config import InstrumentConfig, PipelineConfig
-from .numerics import compute_gdelay
-from .product_io import read_product, write_product
-from .products import P2VMPreprocProduct, P2VMProduct
-from .visualize import genfig, plt
+from .. import log
+from ..config import InstrumentConfig, PipelineConfig
+from ..numerics import compute_gdelay
+from ..product_io import read_product, write_product
+from ..products import P2VMPreprocProduct, P2VMProduct
+from .plotting import genfig, plt
 
 
 def run_p2vm(config: PipelineConfig) -> P2VMProduct:

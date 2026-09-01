@@ -6,12 +6,12 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from . import log
-from .config import FrameRange, PipelineConfig
-from .fits import CubeSelection, iter_cube
-from .numerics import frame_mean
-from .product_io import read_product, write_product
-from .products import FlatProduct, ObjectPreprocProduct, P2VMPreprocProduct, WaveProduct
+from .. import log
+from ..config import FrameRange, PipelineConfig
+from ..fits import CubeSelection, iter_cube
+from ..numerics import frame_mean
+from ..product_io import read_product, write_product
+from ..products import FlatProduct, ObjectPreprocProduct, P2VMPreprocProduct, WaveProduct
 
 ABCD_ORDER = ("A", "C", "B", "D")
 

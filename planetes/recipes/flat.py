@@ -8,13 +8,13 @@ from numpy.typing import NDArray
 from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, medfilt
 
-from . import log
-from .config import FlatParameters, PipelineConfig
-from .fits import CubeSelection, iter_cube
-from .numerics import frame_mean, frame_mean_std
-from .product_io import write_product
-from .products import FlatProduct
-from .visualize import genfig, plt
+from .. import log
+from ..config import FlatParameters, PipelineConfig
+from ..fits import CubeSelection, iter_cube
+from ..numerics import frame_mean, frame_mean_std
+from ..product_io import write_product
+from ..products import FlatProduct
+from .plotting import genfig, plt
 
 
 @dataclass(slots=True)

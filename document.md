@@ -11,7 +11,7 @@ The description follows the implementation in the codebase and is meant to expla
 
 ## 1. `flat`: detector calibration and spectral tracing
 
-Implemented in [planetes/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/flat.py).
+Implemented in [planetes/recipes/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/recipes/flat.py).
 
 ### Inputs
 
@@ -63,7 +63,7 @@ Each interferometric output is well approximated by a narrow, smooth trace in th
 
 ## 2. `wave`: wavelength calibration
 
-Implemented in [planetes/wave.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/wave.py).
+Implemented in [planetes/recipes/wavelength.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/recipes/wavelength.py).
 
 ### Inputs
 
@@ -120,7 +120,7 @@ Implemented in [planetes/wave.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/
 
 ## 3. `preproc p2vm`: extraction and common-grid interpolation
 
-Implemented in [planetes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/preproc.py).
+Implemented in [planetes/recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/recipes/preproc.py).
 
 ### Inputs
 
@@ -184,7 +184,7 @@ Implemented in [planetes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/planet
 
 ## 4. `p2vm`: pixel-to-visibility matrix calibration
 
-Implemented in [planetes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/p2vm.py).
+Implemented in [planetes/recipes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/recipes/p2vm.py).
 
 ### Inputs
 

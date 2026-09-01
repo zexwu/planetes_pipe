@@ -6,14 +6,14 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
-from . import log
-from .config import PipelineConfig
-from .fits import CubeSelection, iter_cube
-from .numerics import frame_mean
+from .. import log
+from ..config import PipelineConfig
+from ..fits import CubeSelection, iter_cube
+from ..numerics import frame_mean
+from ..product_io import read_product, write_product
+from ..products import FlatProduct, WaveProduct
 from .preproc import extract_spec_sparse
-from .product_io import read_product, write_product
-from .products import FlatProduct, WaveProduct
-from .visualize import genfig, plt
+from .plotting import genfig, plt
 
 
 def run_wave(config: PipelineConfig) -> tuple[WaveProduct, WaveProduct]:

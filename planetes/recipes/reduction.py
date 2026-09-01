@@ -10,13 +10,13 @@ from collections.abc import Mapping
 import numpy as np
 from numpy.typing import NDArray
 
-from . import log
-from .config import PipelineConfig
-from .numerics import compute_gdelay
+from .. import log
+from ..config import PipelineConfig
+from ..numerics import compute_gdelay
+from ..product_io import read_product, write_product
+from ..products import P2VMProduct, ReducedProduct
+from .plotting import colored_text, summary_plot
 from .preproc import run_preproc_target
-from .product_io import read_product, write_product
-from .products import P2VMProduct, ReducedProduct
-from .visualize import colored_text, summary_plot
 
 
 def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:

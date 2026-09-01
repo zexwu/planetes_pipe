@@ -103,8 +103,8 @@ Select another configuration with `planetes --conf path/to/config.yaml ...`.
 - `numerics.py`: reusable array-to-array reductions.
 - `products.py`: typed in-memory scientific products.
 - `product_io.py`: stateless product serialization.
-- `flat.py`, `wave.py`, `preproc.py`, `p2vm.py`, `reduce.py`: explicit recipes.
-- `calib.py`: the four-line linear calibration sequence.
+- `recipes/`: explicit scientific stages and plotting.
+- `recipes/calibration.py`: the four-line linear calibration sequence.
 - `main.py`: explicit argparse commands dispatched with `match`.
 
 There is no pipeline context/service object, command registry, dynamic recipe

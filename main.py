@@ -4,14 +4,14 @@
 import argparse
 
 from planetes import configure_logging
-from planetes.calib import run_calibration
 from planetes.config import PipelineConfig
-from planetes.flat import run_flat
-from planetes.p2vm import run_p2vm
-from planetes.preproc import run_preproc_p2vm, run_preproc_target
-from planetes.reduce import run_reduce
-from planetes.visualize import summary_plot
-from planetes.wave import run_wave
+from planetes.recipes.calibration import run_calibration
+from planetes.recipes.flat import run_flat
+from planetes.recipes.p2vm import run_p2vm
+from planetes.recipes.plotting import summary_plot
+from planetes.recipes.preproc import run_preproc_p2vm, run_preproc_target
+from planetes.recipes.reduction import run_reduce
+from planetes.recipes.wavelength import run_wave
 
 
 def build_parser() -> argparse.ArgumentParser:

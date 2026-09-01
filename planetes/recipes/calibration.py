@@ -1,12 +1,12 @@
 """Linear calibration recipe for the PLANETES pipeline."""
 
-from . import log
-from .config import PipelineConfig
+from .. import log
+from ..config import PipelineConfig
+from ..products import P2VMProduct
 from .flat import run_flat
 from .p2vm import run_p2vm
 from .preproc import run_preproc_p2vm
-from .products import P2VMProduct
-from .wave import run_wave
+from .wavelength import run_wave
 
 
 def run_calibration(config: PipelineConfig) -> P2VMProduct:
