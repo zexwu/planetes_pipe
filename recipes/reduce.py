@@ -5,6 +5,7 @@ This module handles the reduction of science target data, including
 visibility extraction, group delay computation, and phase calculation.
 """
 
+from collections.abc import Mapping
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -61,22 +62,26 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
 
         log.info(f"Applying P2VM to extract visibility for {cobj}...")
         p2vmred = np.einsum("box,ofx->fbx", p2vm_map, spec)
-        n_dit = len(p2vmred)
 
         fluxdata = p2vmred[:, :ctx.n_tel, :]
         # Extract visibility data
-        visdata = p2vmred[:, ctx.sl_real, :] + 1j * p2vmred[:, ctx.sl_imag, :]
+        coherent_flux = (
+            p2vmred[:, ctx.sl_real, :] + 1j * p2vmred[:, ctx.sl_imag, :]
+        )
+        visamp, flag = normalize_visibility(coherent_flux, fluxdata, bsl_to_tel)
 
         # Compute group delay for each baseline
-        gdelay = np.zeros((len(visdata), ctx.n_bsl))
+        gdelay = np.zeros((len(coherent_flux), ctx.n_bsl))
         log.info(f"Computing group delay for {cobj}...")
         for bsl in range(ctx.n_bsl):
             gdelay[:, bsl] = compute_gdelay(
-                visdata[:, bsl], wl_grid, search_range=gd_range
+                coherent_flux[:, bsl], wl_grid, search_range=gd_range
             )
 
         # Compute visibility phase
-        visphi = visdata * np.exp(-2j * np.pi * gdelay[:, :, None] / wl_grid[None, :])
+        visphi = coherent_flux * np.exp(
+            -2j * np.pi * gdelay[:, :, None] / wl_grid[None, :]
+        )
         visphi *= visphi.mean(axis=2)[:, :, None].conj()
         visphi = np.angle(visphi, deg=True)
 
@@ -87,7 +92,9 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
         # Save results
         product_data: Dict[str, Any] = {
             "fluxdata": fluxdata,
-            "visdata": visdata,
+            "coherent_flux": coherent_flux,
+            "visamp": visamp,
+            "flag": flag,
             "p2vmred": p2vmred,
             "wl_grid": wl_grid,
             "gdelay": gdelay,
@@ -95,34 +102,6 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
             "bsl_to_reg": bsl_to_reg,
             "bsl_to_tel": bsl_to_tel,
         }
-
-        _sta_idx = np.array([int(i) for i in ctx.telescopes])
-
-        sta_idx_tel = np.stack([_sta_idx] * n_dit, axis=0)
-        sta_idx_bsl = []
-        for bsl in range(ctx.n_bsl):
-            tel1, tel2 = bsl_to_tel[bsl]
-            sta_idx_bsl += [[_sta_idx[tel1], _sta_idx[tel2]]]
-        sta_idx_bsl = np.array(sta_idx_bsl)
-        sta_idx_bsl = np.stack([sta_idx_bsl] * n_dit, axis=0)
-
-        # strict = False
-        # meta = {"insname": None, "arrname": "BENCH", "strict": strict}
-        # oi_wav = OI_WAVELENGTH.from_attrs(eff_wave=wl_grid, **meta)
-        # oi_vis = OI_VIS.from_attrs(visdata=visdata.reshape(n_dit * ctx.n_bsl, -1),
-        #                            mjd=visdata.reshape(n_dit * ctx.n_bsl, -1),
-        #                            sta_index=sta_idx_bsl.reshape(n_dit * ctx.n_bsl, -1),
-        #                            **meta)
-        # oi_flux = OI_FLUX.from_attrs(fluxdata=fluxdata.reshape(n_dit * ctx.n_tel, -1),
-        #                              mjd=fluxdata.reshape(n_dit * ctx.n_tel, -1),
-        #                              sta_index=sta_idx_tel.reshape(n_dit * ctx.n_tel, -1),
-        #                              **meta)
-        #
-        # hdul = HDUList([PrimaryHDU(),
-        #                 oi_wav.to_hdu(strict=strict),
-        #                 oi_vis.to_hdu(strict=strict),
-        #                 oi_flux.to_hdu(strict=strict)])
-        # hdul.writeto(ctx.output_dir / f"{object_name}_reduced.oifits", overwrite=True)
 
         ctx.save_product(reduced_product(object_name), **product_data)
         log.info(f"Reduction for {cobj} completed.")
@@ -145,6 +124,31 @@ def run_reduce(ctx: PipelineContext, **kwargs: Any) -> None:
 
     log.info("--- Step: REDUCE [DONE] ---")
     log.info("")
+
+
+def normalize_visibility(
+    coherent_flux: NDArray,
+    flux: NDArray,
+    baseline_telescopes: Mapping[int, tuple[int, int]],
+) -> tuple[NDArray, NDArray]:
+    """Normalize coherent flux and flag non-positive or non-finite denominators."""
+    visamp = np.full(coherent_flux.shape, np.nan, dtype=float)
+    flag = np.ones(coherent_flux.shape, dtype=bool)
+
+    for baseline, (telescope_1, telescope_2) in baseline_telescopes.items():
+        flux_product = flux[:, telescope_1, :] * flux[:, telescope_2, :]
+        valid = (
+            (flux_product > 0)
+            & np.isfinite(flux_product)
+            & np.isfinite(coherent_flux[:, baseline, :])
+        )
+        visamp[:, baseline, :][valid] = (
+            np.abs(coherent_flux[:, baseline, :][valid])
+            / np.sqrt(flux_product[valid])
+        )
+        flag[:, baseline, :] = ~valid
+
+    return visamp, flag
 
 
 def compute_gdelay(

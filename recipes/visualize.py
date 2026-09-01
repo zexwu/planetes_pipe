@@ -53,11 +53,12 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
 
     with ctx.load_product(reduced_product(obj)) as d:
         p2vmred = d["p2vmred"]
-        visdata = d["visdata"]
+        coherent_flux = d["coherent_flux"]
+        visamp = d["visamp"]
+        flag = d["flag"]
         visphi = d["visphi"]
         gdelay = d["gdelay"]
         bsl_to_reg = d["bsl_to_reg"][()]
-        bsl_to_tel = d["bsl_to_tel"][()]
 
     pdf = ctx.plot_ctx(f"{obj}.pdf", enabled=True)
     mean_flux = p2vmred[:, :ctx.n_tel, :].mean(axis=-1)
@@ -80,8 +81,8 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
 
     def plot_cohflux():
         fig, axs = genfig(2, ctx.n_bsl//2,
-                          xlabel="#Frame", ylabel="abs(VISDATA) [adu]")
-        mean_cohflux = abs(visdata.mean(axis=-1))
+                          xlabel="#Frame", ylabel="abs(coherent flux) [adu]")
+        mean_cohflux = abs(coherent_flux.mean(axis=-1))
         for bsl in range(ctx.n_bsl):
             _mean = mean_cohflux[:, bsl].mean()
             axs[bsl].plot(mean_cohflux[:, bsl] - _mean)
@@ -95,8 +96,8 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
 
     def plot_phase():
         fig, axs = genfig(2, ctx.n_bsl//2,
-                          xlabel="#Frame", ylabel="arg(VISDATA) [deg]")
-        mean_phase = np.angle(visdata.mean(axis=-1), deg=True)
+                          xlabel="#Frame", ylabel="arg(coherent flux) [deg]")
+        mean_phase = np.angle(coherent_flux.mean(axis=-1), deg=True)
         mean_phase = np.unwrap(mean_phase, period=360, axis=0)
         for bsl in range(ctx.n_bsl):
             axs[bsl].plot(mean_phase[:, bsl])
@@ -143,14 +144,12 @@ def summary_plot_single(ctx: PipelineContext, **kwargs):
     def plot_visamp():
         fig, axs = genfig(2, ctx.n_bsl//2,
                           xlabel="Wavelength Index", ylabel="VISAMP")
-        visamp = np.abs(visdata)
-        n_dit = visamp.shape[0]
+        plotted_visamp = np.ma.array(visamp, mask=flag)
+        n_dit = plotted_visamp.shape[0]
         colors = plt.cm.viridis(np.linspace(0, 1, n_dit))
         for bsl in range(ctx.n_bsl):
-            tel1, tel2 = bsl_to_tel[bsl]
-            visamp[:, bsl, :] /= (p2vmred[:, tel1, :] * p2vmred[:, tel2, :]) ** 0.5
             axs[bsl].set_prop_cycle(color=colors)
-            axs[bsl].plot(visamp[:, bsl, :].T, alpha=0.3, lw=0.3)
+            axs[bsl].plot(plotted_visamp[:, bsl, :].T, alpha=0.3, lw=0.3)
             axs[bsl].set_title(f"Baseline {ctx.baselines[bsl]}")
             axs[bsl].set_ylim(0, 1.5)
         fig.suptitle(f"{object_label}\nVISAMP per baseline")

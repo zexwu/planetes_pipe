@@ -8,6 +8,7 @@ import numpy as np
 
 from recipes.flat import run_flat
 from recipes.preproc import extract_spec_sparse, order_abcd_regions, resolve_object_entry
+from recipes.reduce import normalize_visibility
 from recipes.wave import match_lines_grid
 from rtp2vm import extract_spec_sparse_single
 
@@ -108,6 +109,19 @@ class CorrectnessTests(unittest.TestCase):
             steps_per_unit=2,
         )
         self.assertEqual(len(matches), len(np.unique(matches[:, 1])))
+
+    def test_visibility_normalization_flags_invalid_flux_products(self) -> None:
+        coherent_flux = np.array([[[6 + 8j, 1 + 0j]]])
+        flux = np.array([[[4.0, -1.0], [25.0, 2.0]]])
+
+        visamp, flag = normalize_visibility(
+            coherent_flux, flux, {0: (0, 1)}
+        )
+
+        self.assertEqual(visamp[0, 0, 0], 1.0)
+        self.assertFalse(flag[0, 0, 0])
+        self.assertTrue(np.isnan(visamp[0, 0, 1]))
+        self.assertTrue(flag[0, 0, 1])
 
 
 if __name__ == "__main__":

@@ -111,6 +111,6 @@ planetes plot --object my_target --full
 | `wave_aberr.npz` | aberration-corrected wavelength map |
 | `p2vm.npz` | V2PM (phase, coherence & transmission) & P2VM matrix |
 | `*_preproc.npz` | pre-processed data|
-| `*_reduced.npz` | `visdata` , `visphi` , `gdelay` . |
+| `*_reduced.npz` | coherent flux, normalized `visamp`, `flag`, differential phase, and group delay |
 | `*.manifest.json` | effective parameters, source-file state, and code fingerprint |
 | `*.pdf` | Summary plots |

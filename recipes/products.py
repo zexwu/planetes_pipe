@@ -66,7 +66,9 @@ PREPROC_OBJECT_SCHEMA = (
 
 REDUCED_SCHEMA = (
     "fluxdata",
-    "visdata",
+    "coherent_flux",
+    "visamp",
+    "flag",
     "p2vmred",
     "wl_grid",
     "gdelay",
