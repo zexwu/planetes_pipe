@@ -9,6 +9,8 @@ import yaml
 from astropy.io import fits
 
 from planetes import COMMANDS, PipelineContext, arg, command
+from planetes.fits import CubeSelection, iter_cube
+from planetes.numerics import frame_mean_std
 from planetes.products import ProductSpec
 
 
@@ -113,9 +115,8 @@ class ConfigAndCommandTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_config(config, tmp)
-            fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(cube)]).writeto(
-                Path(tmp) / "cube.fits"
-            )
+            cube_path = Path(tmp) / "cube.fits"
+            fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(cube)]).writeto(cube_path)
             ctx = PipelineContext(path)
 
             chunks = list(ctx.iter_fits("cube.fits"))
@@ -126,6 +127,15 @@ class ConfigAndCommandTests(unittest.TestCase):
             mean, std = ctx.mean_std_fits("cube.fits")
             np.testing.assert_allclose(mean, selected.mean(axis=0), rtol=1e-6)
             np.testing.assert_allclose(std, selected.std(axis=0), rtol=1e-6)
+
+            selection = CubeSelection(
+                frames=slice(1, 5), y=slice(0, 2), x=slice(1, 4)
+            )
+            direct_chunks = list(iter_cube(cube_path, selection, chunk_frames=2))
+            direct_mean, direct_std = frame_mean_std(direct_chunks)
+            np.testing.assert_array_equal(np.concatenate(direct_chunks), selected)
+            np.testing.assert_allclose(direct_mean, mean, rtol=1e-6)
+            np.testing.assert_allclose(direct_std, std, rtol=1e-6)
 
     def test_dynamic_object_is_normalized_in_product_snapshot(self) -> None:
         config = _valid_config()

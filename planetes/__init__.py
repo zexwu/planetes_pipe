@@ -10,7 +10,6 @@ import functools
 import importlib
 import logging
 import pkgutil
-from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -24,8 +23,10 @@ from astropy.io import fits
 from numpy.typing import NDArray
 
 from .config import validate_config
+from .fits import CubeSelection, iter_cube
 from .io import write_npz_atomic
 from .manifest import ManifestStore
+from .numerics import frame_mean, frame_mean_std
 from .products import ProductSpec, get_product_id, get_product_schema, validate_product_keys
 
 # --- 0. Setup Logging ---
@@ -192,62 +193,23 @@ class PipelineContext:
         data = fits.getdata(path, **kwargs)
         return data[self.sl_data].astype(np.float32)
 
-    def iter_fits(self, filename: str | Path) -> Iterator[NDArray]:
+    def iter_fits(self, filename: str | Path):
         """Yield a sliced three-dimensional FITS cube in frame chunks."""
         path = self._resolve_path(self.data_dir / filename)
-        if not path.exists():
-            raise FileNotFoundError(f"FITS file not found: {path}")
-
-        chunk_size = self.conf.get("io_chunk_frames", 16)
         frame_slice, y_slice, x_slice = self.sl_data
-        with fits.open(path, memmap=True) as hdul:
-            data = next((hdu.data for hdu in hdul if hdu.data is not None), None)
-            if data is None:
-                raise ValueError(f"FITS file contains no data HDU: {path}")
-            if data.ndim != 3:
-                raise ValueError(f"Expected a 3D FITS cube in {path}, got shape {data.shape}")
-
-            start = frame_slice.start or 0
-            stop = len(data) if frame_slice.stop is None else min(frame_slice.stop, len(data))
-            for chunk_start in range(start, stop, chunk_size):
-                chunk_stop = min(chunk_start + chunk_size, stop)
-                yield np.asarray(
-                    data[chunk_start:chunk_stop, y_slice, x_slice], dtype=np.float32
-                )
+        yield from iter_cube(
+            path,
+            CubeSelection(frames=frame_slice, y=y_slice, x=x_slice),
+            chunk_frames=self.conf.get("io_chunk_frames", 16),
+        )
 
     def mean_fits(self, filename: str | Path) -> NDArray:
         """Compute a frame mean without loading the full FITS cube."""
-        total = None
-        count = 0
-        for chunk in self.iter_fits(filename):
-            if total is None:
-                total = np.zeros(chunk.shape[1:], dtype=np.float64)
-            total += chunk.sum(axis=0, dtype=np.float64)
-            count += len(chunk)
-        if total is None or count == 0:
-            raise ValueError(f"Selected FITS cube contains no frames: {filename}")
-        return (total / count).astype(np.float32)
+        return frame_mean(self.iter_fits(filename))
 
     def mean_std_fits(self, filename: str | Path) -> tuple[NDArray, NDArray]:
         """Compute frame mean and population standard deviation in chunks."""
-        total = None
-        total_squared = None
-        count = 0
-        for chunk in self.iter_fits(filename):
-            if total is None:
-                total = np.zeros(chunk.shape[1:], dtype=np.float64)
-                total_squared = np.zeros(chunk.shape[1:], dtype=np.float64)
-            total += chunk.sum(axis=0, dtype=np.float64)
-            total_squared += np.square(chunk, dtype=np.float64).sum(
-                axis=0, dtype=np.float64
-            )
-            count += len(chunk)
-        if total is None or total_squared is None or count == 0:
-            raise ValueError(f"Selected FITS cube contains no frames: {filename}")
-
-        mean = total / count
-        variance = np.maximum(total_squared / count - mean**2, 0.0)
-        return mean.astype(np.float32), np.sqrt(variance).astype(np.float32)
+        return frame_mean_std(self.iter_fits(filename))
 
     def save_product(
         self,
