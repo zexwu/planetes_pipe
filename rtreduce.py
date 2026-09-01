@@ -28,10 +28,30 @@ def main() -> None:
         config.crop.x.slice,
     )
     cube = np.concatenate(
-        list(iter_cube(target.data, selection, config.chunk_frames)), axis=0
+        list(
+            iter_cube(
+                target.data,
+                selection,
+                config.chunk_frames,
+                hdu=config.input_hdu,
+            )
+        ),
+        axis=0,
     )
     if target.dark is not None:
-        dark = frame_mean(iter_cube(target.dark, selection, config.chunk_frames))
+        dark_selection = CubeSelection(
+            target.dark_frames.slice,
+            config.crop.y.slice,
+            config.crop.x.slice,
+        )
+        dark = frame_mean(
+            iter_cube(
+                target.dark,
+                dark_selection,
+                config.chunk_frames,
+                hdu=config.input_hdu,
+            )
+        )
         cube -= dark[None, ...]
 
     import timeit

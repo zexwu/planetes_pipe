@@ -37,6 +37,7 @@ def run_flat(config: PipelineConfig) -> FlatProduct:
             config.calibration.dark,
             selection,
             chunk_frames=config.chunk_frames,
+            hdu=config.input_hdu,
         )
     )
     flat_maps = [
@@ -45,6 +46,7 @@ def run_flat(config: PipelineConfig) -> FlatProduct:
                 config.calibration.flats[name],
                 selection,
                 chunk_frames=config.chunk_frames,
+                hdu=config.input_hdu,
             )
         )
         - dark_map
@@ -96,6 +98,10 @@ def build_flat_product(
     thresh = np.percentile(spatial_profile, 75)
     ref_ys, props = find_peaks(spatial_profile, distance=h_half, height=thresh)
     log.debug(f"Found {len(ref_ys)} Peaks with THRESH {thresh:.0f}...")
+    if len(ref_ys) < n_outputs:
+        raise ValueError(
+            f"Expected {n_outputs} spectral traces, found only {len(ref_ys)}"
+        )
 
     top_indices = np.argsort(props["peak_heights"])[-n_outputs:]
     ref_ys = np.sort(ref_ys[top_indices])

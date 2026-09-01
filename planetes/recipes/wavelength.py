@@ -34,9 +34,28 @@ def run_wave(config: PipelineConfig) -> tuple[WaveProduct, WaveProduct]:
         y=config.crop.y.slice,
         x=config.crop.x.slice,
     )
+    dark_selection = CubeSelection(
+        frames=wave_input.dark_frames.slice,
+        y=config.crop.y.slice,
+        x=config.crop.x.slice,
+    )
     wave_img = (
-        frame_mean(iter_cube(wave_input.data, selection, config.chunk_frames))
-        - frame_mean(iter_cube(wave_input.dark, selection, config.chunk_frames))
+        frame_mean(
+            iter_cube(
+                wave_input.data,
+                selection,
+                config.chunk_frames,
+                hdu=config.input_hdu,
+            )
+        )
+        - frame_mean(
+            iter_cube(
+                wave_input.dark,
+                dark_selection,
+                config.chunk_frames,
+                hdu=config.input_hdu,
+            )
+        )
     )
     wave_spec = extract_spec_sparse(wave_img[None, :, :],
                                     profile_ys, profile_xs)[:, 0, :]
@@ -251,6 +270,10 @@ def run_wave(config: PipelineConfig) -> tuple[WaveProduct, WaveProduct]:
     for matched in matched_ind_all:
         matched_ind_common = matched_ind_common & set(matched[:, 0])
     common_indices = np.array(sorted(matched_ind_common), dtype=int)
+    if len(common_indices) <= parameters.dispersion_degree:
+        raise ValueError(
+            "Not enough lines common to all outputs for the dispersion fit"
+        )
     x_centroids_common = []
     y_centroids_common = []
 

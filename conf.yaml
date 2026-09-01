@@ -5,11 +5,13 @@ schema_version: 1
 data_dir: .
 output_dir: ./reduced
 chunk_frames: 16
+# All current camera FITS cubes store their 3D data in extension 1.
+input_hdu: 1
 log_level: DEBUG
 automatic_plots: false
 
 crop:
-  x: [0, 2048]
+  x: [0, 1280]
   y: [0, 1024]
 
 # Pixel data are ordered as [flux(telescopes), real(baselines), imag(baselines)].
@@ -30,6 +32,7 @@ calibration:
   wavelength:
     data: ./2026_02_05/p2vm2/wave.fits
     dark: ./2026_02_05/p2vm2/wave_dark.fits
+    dark_frames: [0, 256]
   p2vm:
     "43": ./2026_02_05/p2vm2/bsl43.fits
     "42": ./2026_02_05/p2vm2/bsl42.fits
@@ -41,12 +44,14 @@ calibration:
     data: ./2026_02_05/sci2/sci.fits
     dark: ./2026_02_05/sci2/sci_dark.fits
     frames: [0, 512]
+    dark_frames: [0, 128]
 
 targets:
   sci:
     data: ./2026_02_05/sci2/sci.fits
     dark: ./2026_02_05/sci2/sci_dark.fits
     frames: [0, 512]
+    dark_frames: [0, 128]
   test:
     data: ./2026_02_05/p2vm2/bsl43.fits
     frames: [0, 256]

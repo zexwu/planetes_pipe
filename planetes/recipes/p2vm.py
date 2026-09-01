@@ -154,7 +154,13 @@ def run_p2vm(config: PipelineConfig) -> P2VMProduct:
 
             # Solve for intensities contributing to the DC term
             imat = np.linalg.pinv(t_mat) @ c
-            f1f2 = np.sqrt(imat[t1] * imat[t2])
+            flux_product = imat[t1] * imat[t2]
+            if not np.isfinite(flux_product) or flux_product <= 0:
+                raise ValueError(
+                    f"Invalid photometric normalization for baseline {bsl}, "
+                    f"wavelength index {iw}"
+                )
+            f1f2 = np.sqrt(flux_product)
             v2pm[:, instrument.n_telescopes + bsl, iw] /= f1f2
 
     # Convert Polar (Amp, Phase) to Cartesian (Cos, Sin) for final matrix

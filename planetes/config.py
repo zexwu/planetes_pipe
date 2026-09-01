@@ -64,6 +64,8 @@ class InstrumentConfig:
             raise ValueError("instrument.telescopes must be non-empty and unique")
         if not self.baselines or len(set(self.baselines)) != len(self.baselines):
             raise ValueError("instrument.baselines must be non-empty and unique")
+        if len(self.telescopes) != 4 or len(self.baselines) != 6:
+            raise ValueError("PLANETES requires 4 telescopes and 6 baselines")
         expected = {
             self.telescopes[i] + self.telescopes[j]
             for i in range(len(self.telescopes))
@@ -109,6 +111,7 @@ class CubeInput:
     data: Path
     dark: Path | None
     frames: FrameRange
+    dark_frames: FrameRange
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +233,7 @@ class PipelineConfig:
     data_dir: Path
     output_dir: Path
     chunk_frames: int
+    input_hdu: int | str | None
     log_level: str
     automatic_plots: bool
     crop: Crop
@@ -247,6 +251,16 @@ class PipelineConfig:
             or self.chunk_frames <= 0
         ):
             raise ValueError("chunk_frames must be positive")
+        if not (
+            self.input_hdu is None
+            or isinstance(self.input_hdu, str)
+            or (
+                isinstance(self.input_hdu, int)
+                and not isinstance(self.input_hdu, bool)
+                and self.input_hdu >= 0
+            )
+        ):
+            raise ValueError("input_hdu must be a non-negative integer, name, or null")
         if not isinstance(self.automatic_plots, bool):
             raise ValueError("automatic_plots must be true or false")
 
@@ -378,6 +392,7 @@ class PipelineConfig:
             data_dir=data_dir,
             output_dir=output_dir,
             chunk_frames=raw.get("chunk_frames", 16),
+            input_hdu=raw.get("input_hdu"),
             log_level=str(raw.get("log_level", "INFO")).upper(),
             automatic_plots=raw.get("automatic_plots", False),
             crop=crop,
@@ -459,12 +474,13 @@ def _named_paths(
 
 def _cube(value: Any, base: Path, frames: FrameRange, name: str) -> CubeInput:
     values = _mapping(value, name)
-    _check_keys(values, {"data", "dark", "frames"}, name)
+    _check_keys(values, {"data", "dark", "frames", "dark_frames"}, name)
     dark = values.get("dark")
     return CubeInput(
         data=_path(base, values.get("data"), f"{name}.data"),
         dark=None if dark is None else _path(base, dark, f"{name}.dark"),
         frames=frames if "frames" not in values else _range(values["frames"], f"{name}.frames"),
+        dark_frames=_range(values.get("dark_frames", [0, None]), f"{name}.dark_frames"),
     )
 
 

@@ -88,7 +88,9 @@ def run_preproc_p2vm(config: PipelineConfig) -> P2VMPreprocProduct:
     if phase_reference := calibration.phase_reference:
         phase_dark = model.flat.dark_map
         if phase_reference.dark is not None:
-            phase_dark = _mean_cube(config, phase_reference.dark, phase_reference.frames)
+            phase_dark = _mean_cube(
+                config, phase_reference.dark, phase_reference.dark_frames
+            )
         spec_wavesc = _extract_cube(
             config,
             phase_reference.data,
@@ -165,7 +167,7 @@ def run_preproc_target(
     dark = (
         model.flat.dark_map
         if target.dark is None
-        else _mean_cube(config, target.dark, target.frames)
+        else _mean_cube(config, target.dark, target.dark_frames)
     )
     spec = _extract_cube(
         config,
@@ -212,7 +214,9 @@ def _extraction_model(config: PipelineConfig) -> _ExtractionModel:
 def _mean_cube(config: PipelineConfig, path: Path, frames: FrameRange) -> NDArray:
     log.info(f"    Building dark map from {path}...")
     selection = CubeSelection(frames.slice, config.crop.y.slice, config.crop.x.slice)
-    return frame_mean(iter_cube(path, selection, config.chunk_frames))
+    return frame_mean(
+        iter_cube(path, selection, config.chunk_frames, hdu=config.input_hdu)
+    )
 
 
 def _extract_cube(
@@ -225,7 +229,9 @@ def _extract_cube(
     log.info(f"    Extracting spectra from {path}...")
     selection = CubeSelection(frames.slice, config.crop.y.slice, config.crop.x.slice)
     aligned_chunks = []
-    for data in iter_cube(path, selection, config.chunk_frames):
+    for data in iter_cube(
+        path, selection, config.chunk_frames, hdu=config.input_hdu
+    ):
         spec = extract_spec_sparse(
             data - dark,
             model.flat.profile_ys,

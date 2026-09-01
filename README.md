@@ -20,10 +20,11 @@ schema_version: 1
 data_dir: .
 output_dir: ./reduced
 chunk_frames: 16
+input_hdu: 1
 automatic_plots: false
 
 crop:
-  x: [0, 2048]
+  x: [0, 1280]
   y: [0, 1024]
 
 instrument:
@@ -52,11 +53,15 @@ targets:
     data: ./science.fits
     dark: ./science_dark.fits
     frames: [0, 512]
+    dark_frames: [0, 128]
 ```
 
 Telescope and baseline inputs are mappings rather than positional lists, so a
 file cannot silently move to a different instrument channel. Relative raw-data
 paths resolve against `data_dir`; `output_dir` resolves against the YAML file.
+The current recipes explicitly support the PLANETES 4-telescope, 6-baseline,
+24-output layout. `input_hdu` and all frame/crop ranges are checked against each
+raw FITS cube instead of being silently clipped.
 
 All scientific settings live under `parameters`. The CLI deliberately has no
 threshold, polynomial-degree, wavelength-grid, phase-correction, or group-delay
