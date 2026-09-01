@@ -6,8 +6,7 @@ from pathlib import Path
 import numpy as np
 from numba import njit, prange
 
-from planetes.product_io import read_product
-from planetes.products import FlatProduct, P2VMProduct, WaveProduct
+from planetes.product import FlatProduct, P2VMProduct, WaveProduct, read_product
 
 NDArray = np.ndarray
 

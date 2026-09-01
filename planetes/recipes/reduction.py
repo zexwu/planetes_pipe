@@ -13,8 +13,7 @@ from numpy.typing import NDArray
 from .. import log
 from ..config import PipelineConfig
 from ..numerics import compute_gdelay
-from ..product_io import read_product, write_product
-from ..products import P2VMProduct, ReducedProduct
+from ..product import P2VMProduct, ReducedProduct, read_product, write_product
 from .plotting import colored_text, summary_plot
 from .preproc import run_preproc_target
 

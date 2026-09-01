@@ -9,7 +9,7 @@ import yaml
 from astropy.io import fits
 
 from planetes.config import PipelineConfig
-from planetes.fits import CubeSelection, iter_cube
+from planetes.cube import CubeSelection, iter_cube
 from planetes.numerics import frame_mean_std
 from main import build_parser
 

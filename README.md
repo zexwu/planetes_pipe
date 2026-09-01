@@ -99,10 +99,9 @@ Select another configuration with `planetes --conf path/to/config.yaml ...`.
 ## Code layout
 
 - `config.py`: YAML to immutable `PipelineConfig` dataclasses.
-- `fits.py`: chunked FITS cube reading only.
+- `cube.py`: chunked reading of raw detector FITS cubes.
 - `numerics.py`: reusable array-to-array reductions.
-- `products.py`: typed in-memory scientific products.
-- `product_io.py`: stateless product serialization.
+- `product.py`: typed products and stateless serialization.
 - `recipes/`: explicit scientific stages and plotting.
 - `recipes/calibration.py`: the four-line linear calibration sequence.
 - `main.py`: explicit argparse commands dispatched with `match`.

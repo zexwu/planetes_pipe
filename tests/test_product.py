@@ -6,11 +6,15 @@ from pathlib import Path
 
 import numpy as np
 
-from planetes.product_io import read_product, write_product
-from planetes.products import P2VMPreprocProduct, WaveProduct
+from planetes.product import (
+    P2VMPreprocProduct,
+    WaveProduct,
+    read_product,
+    write_product,
+)
 
 
-class ProductIOTests(unittest.TestCase):
+class ProductTests(unittest.TestCase):
     def test_array_product_round_trip(self) -> None:
         product = WaveProduct(wave_map=np.arange(12).reshape(3, 4))
         with tempfile.TemporaryDirectory() as tmp:

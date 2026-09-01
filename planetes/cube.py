@@ -1,4 +1,4 @@
-"""Stateless FITS cube reading."""
+"""Stateless reading of raw detector FITS cubes."""
 
 from collections.abc import Iterator
 from dataclasses import dataclass

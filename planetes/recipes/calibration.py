@@ -2,7 +2,7 @@
 
 from .. import log
 from ..config import PipelineConfig
-from ..products import P2VMProduct
+from ..product import P2VMProduct
 from .flat import run_flat
 from .p2vm import run_p2vm
 from .preproc import run_preproc_p2vm

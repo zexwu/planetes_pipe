@@ -10,10 +10,9 @@ from scipy.signal import find_peaks, medfilt
 
 from .. import log
 from ..config import FlatParameters, PipelineConfig
-from ..fits import CubeSelection, iter_cube
+from ..cube import CubeSelection, iter_cube
 from ..numerics import frame_mean, frame_mean_std
-from ..product_io import write_product
-from ..products import FlatProduct
+from ..product import FlatProduct, write_product
 from .plotting import genfig, plt
 
 

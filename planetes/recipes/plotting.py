@@ -4,8 +4,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from .. import log
 from ..config import PipelineConfig
-from ..product_io import read_product
-from ..products import ObjectPreprocProduct, ReducedProduct
+from ..product import ObjectPreprocProduct, ReducedProduct, read_product
 pltkwargs = {
     "font.size": 12,
     "figure.figsize": (12, 8),

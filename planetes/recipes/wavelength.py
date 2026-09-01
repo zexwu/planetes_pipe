@@ -8,10 +8,9 @@ from scipy.signal import find_peaks
 
 from .. import log
 from ..config import PipelineConfig
-from ..fits import CubeSelection, iter_cube
+from ..cube import CubeSelection, iter_cube
 from ..numerics import frame_mean
-from ..product_io import read_product, write_product
-from ..products import FlatProduct, WaveProduct
+from ..product import FlatProduct, WaveProduct, read_product, write_product
 from .preproc import extract_spec_sparse
 from .plotting import genfig, plt
 

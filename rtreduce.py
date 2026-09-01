@@ -11,7 +11,7 @@ except ImportError:
     from rtp2vm import P2VMReducer, extract_spec_sparse_single, twopx_interp_single
 
 from planetes.config import PipelineConfig
-from planetes.fits import CubeSelection, iter_cube
+from planetes.cube import CubeSelection, iter_cube
 from planetes.numerics import frame_mean
 
 
