@@ -196,7 +196,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     # --- 5. Build and save the full wavemap ---
     det_x_coords = np.repeat(np.arange(nx)[None, :], ctx.n_reg, axis=0)
     det_y_coords = y_trace
-    full_design_matrix = dmat_arr(det_x_coords, det_y_coords)
+    full_design_matrix = dmat_arr(det_x_coords, det_y_coords, max_deg=deg)
     wavemap = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix)
 
     ctx.save_product(WAVE_PRODUCT, wave_map=wavemap)
@@ -217,6 +217,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
             std=std,
             ny=ny,
             nx=nx,
+            deg=deg,
             dmat_arr=dmat_arr,
         )
         _plot_wave_region_diagnostics(
@@ -239,11 +240,12 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     matched_ind_common = set(range(len(line_pos)))
     for matched in matched_ind_all:
         matched_ind_common = matched_ind_common & set(matched[:, 0])
+    common_indices = np.array(sorted(matched_ind_common), dtype=int)
     x_centroids_common = []
     y_centroids_common = []
 
     for reg, matched in enumerate(matched_ind_all):
-        _common = np.isin(matched[:, 0], list(matched_ind_common))
+        _common = np.isin(matched[:, 0], common_indices)
         _common = np.where(_common)[0]
         x_centroids_common.append(x_centroids[reg][_common])
         y_centroids_common.append(y_centroids[reg][_common])
@@ -254,7 +256,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     # we have a set of (x, y, wl) points.
     x_flat = np.concatenate(x_centroids_common)
     y_flat = np.concatenate(y_centroids_common)
-    wl_grid = line_pos[list(matched_ind_common)]
+    wl_grid = line_pos[common_indices]
     wl_flat = np.tile(wl_grid, ctx.n_reg)
 
     # fit a 1D polynomial to the mean spec
@@ -265,7 +267,10 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
     disp_deg = kwargs["disp_deg"]
     pixel_to_wl_coeffs = np.polyfit(x_centroids_mean, wl_grid, deg=disp_deg)
     disp_std = np.std(wl_grid - np.polyval(pixel_to_wl_coeffs, x_centroids_mean))
-    px2wl_str = [f"{coef*1e3:.1e}*x{3 - i}" for i, coef in enumerate(pixel_to_wl_coeffs)]
+    px2wl_str = [
+        f"{coef * 1e3:.1e}*x{disp_deg - i}"
+        for i, coef in enumerate(pixel_to_wl_coeffs)
+    ]
     log.debug("Pixel-to-wave mapping: " + " + ".join(px2wl_str) + " nm")
     log.info(f"Std dev of pixel-to-wave fit: {disp_std * 1e3:.2f} nm")
 
@@ -319,6 +324,7 @@ def run_wave(ctx: PipelineContext, **kwargs: Any) -> None:
             pixel_to_wl_coeffs=pixel_to_wl_coeffs,
             dmat_arr=dmat_arr,
             wavemap_coeffs=wavemap_coeffs,
+            wavemap_deg=deg,
         )
 
     if ctx.conf.get("plot_to_pdf", False):
@@ -349,6 +355,7 @@ def _plot_wave_fit_diagnostics(
     std: float,
     ny: int,
     nx: int,
+    deg: int,
     dmat_arr,
 ) -> None:
     norm = plt.Normalize(vmin=wl_flat.min(), vmax=wl_flat.max())
@@ -375,7 +382,7 @@ def _plot_wave_fit_diagnostics(
 
     x_coords = np.repeat(np.arange(nx)[None, :], ny, axis=0)
     y_coords = np.repeat(np.arange(ny)[:, None], nx, axis=1)
-    full_design_matrix = dmat_arr(x_coords, y_coords)
+    full_design_matrix = dmat_arr(x_coords, y_coords, max_deg=deg)
     wavemap_full = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix) * 1e3
     dwavemap = wavemap_full - wavemap_full.mean(axis=0)[None, :]
     ddwavemap = dwavemap - dwavemap.mean(axis=1)[:, None]
@@ -512,6 +519,7 @@ def _plot_wave_aberration_diagnostics(
     pixel_to_wl_coeffs: NDArray,
     dmat_arr,
     wavemap_coeffs: NDArray,
+    wavemap_deg: int,
 ) -> None:
     fig, ax = plt.subplots()
     norm = plt.Normalize(vmin=wl_flat.min(), vmax=wl_flat.max())
@@ -551,7 +559,7 @@ def _plot_wave_aberration_diagnostics(
     dx_fit = np.einsum("i,iyx->yx", aber_coeffs, full_aber_design_matrix)
     wavemap_aber = np.polyval(pixel_to_wl_coeffs, x_coords - dx_fit) * 1e3
 
-    full_design_matrix = dmat_arr(x_coords, y_coords)
+    full_design_matrix = dmat_arr(x_coords, y_coords, max_deg=wavemap_deg)
     wavemap_ref = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix) * 1e3
     dwavemap_aber = wavemap_aber - wavemap_aber.mean(axis=0)[None, :]
     ddwavemap_aber = dwavemap_aber - dwavemap_aber.mean(axis=1)[:, None]
@@ -681,6 +689,7 @@ def match_lines_grid(
         # Check if match
         if ptr < len(obs) and abs(obs[ptr] - target) < tol:
             matches.append((i, ptr))
+            ptr += 1
 
     if len(matches) < min_inliers:
         raise RuntimeError(f"Grid search failed: found {len(matches)} matches.")
@@ -826,7 +835,9 @@ def _grid_search_kernel(
                 for m_idx in range(n_mod):
                     pred = a * mod[m_idx] ** 2 + b * mod[m_idx] + c
                     while ptr < n_obs and obs[ptr] < pred - tol: ptr += 1
-                    if ptr < n_obs and abs(obs[ptr] - pred) <= tol: score += 1
+                    if ptr < n_obs and abs(obs[ptr] - pred) <= tol:
+                        score += 1
+                        ptr += 1
 
                 if score > best_score:
                     best_score = score

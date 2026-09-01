@@ -1,3 +1,5 @@
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -6,6 +8,41 @@ from numpy.typing import NDArray
 
 from . import PipelineContext, arg, command, log
 from .products import FLAT_PRODUCT, WAVE_PRODUCT, preproc_product
+
+ABCD_ORDER = ("A", "C", "B", "D")
+
+
+def order_abcd_regions(
+    regions: Sequence[int], detector_order: Sequence[str]
+) -> list[int]:
+    """Return detector regions in the canonical internal A, C, B, D order."""
+    region_ids = sorted(int(region) for region in regions)
+    labels = [str(label).upper() for label in detector_order]
+
+    if len(region_ids) != 4 or len(set(region_ids)) != 4:
+        raise ValueError(f"Expected four unique ABCD regions, got {region_ids}")
+    if len(labels) != 4 or set(labels) != set(ABCD_ORDER):
+        raise ValueError(
+            f"abcd_order must contain each of {ABCD_ORDER} exactly once, got {labels}"
+        )
+
+    region_by_label = dict(zip(labels, region_ids, strict=True))
+    return [region_by_label[label] for label in ABCD_ORDER]
+
+
+def resolve_object_entry(
+    entry: str | Path | Mapping[str, Any],
+) -> tuple[str | Path, str | Path | None]:
+    """Resolve a legacy object path or an explicit data/dark mapping."""
+    if isinstance(entry, (str, Path)):
+        return entry, None
+    if not isinstance(entry, Mapping):
+        raise TypeError(f"Object entry must be a path or mapping, got {type(entry).__name__}")
+    if "data" not in entry:
+        raise ValueError("Object mapping must contain a 'data' path")
+    return entry["data"], entry.get("dark")
+
+
 @command("preproc", "Preprocessing data cubes.",
          requires=["flat", "wave"], produces=["preproc"])
 @arg("--object", type=str, default="p2vm", help="target to preprocess (p2vm or object name)")
@@ -41,7 +78,11 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
     _spec_flat = np.clip(_spec_flat, a_min=1e-8, a_max=None)
     spec_flat = 1 / twopx_interp(1 / _spec_flat, wave_map, wl_grid)
 
-    def _extract(fname: str, dark=dark_map) -> NDArray:
+    def _load_dark_map(filename: str | Path) -> NDArray:
+        log.info(f"    Building dark map from {filename}...")
+        return ctx.load_fits(filename).mean(axis=0)
+
+    def _extract(fname: str | Path, dark: NDArray = dark_map) -> NDArray:
         """Helper to process extraction."""
         log.info(f"    Extracting spectra from {fname}...")
         data = ctx.load_fits(fname) - dark
@@ -61,11 +102,12 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         calib_files = ctx.conf["calib"]
         spec_bsl = [_extract(_) for _ in calib_files["p2vm"]]
         spec_tel = [_extract(_) for _ in calib_files["flat"]]
-        spec_wavesc = None
+        spec_wavesc = np.empty((ctx.n_reg, 0, len(wl_grid)), dtype=np.float64)
         if "wavesc" in calib_files:
-            # dark_wavesc = ctx.load_fits(calib_files["wavesc_dark"])
-            # dark_wavesc = np.median(dark_wavesc, axis=0)  # collapse frames
-            spec_wavesc = _extract(calib_files["wavesc"])
+            wavesc_dark = dark_map
+            if "wavesc_dark" in calib_files:
+                wavesc_dark = _load_dark_map(calib_files["wavesc_dark"])
+            spec_wavesc = _extract(calib_files["wavesc"], wavesc_dark)
 
         # ---------------------------------------------------------
         # Match Baselines to Detector Regions
@@ -92,6 +134,7 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         bsl_to_reg = {}
         bsl_to_tel = {}
 
+        detector_abcd_order = ctx.conf.get("abcd_order", ABCD_ORDER)
         for t1 in range(ctx.n_tel):
             for t2 in range(ctx.n_tel):
                 if t1 >= t2: continue  # Unique pairs only
@@ -103,12 +146,14 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
                 # should match regions_from_data for consistency
                 regions_from_tels = set(tel_regs[t1]) & set(tel_regs[t2])
                 regions_from_data = set(bsl_regs[bsl_idx])
-                if str(regions_from_tels) != str(regions_from_data):
+                if regions_from_tels != regions_from_data:
                     log.error(f"    Mismatch in region mapping for {bsl_name}: "\
                               f"{regions_from_tels} vs {regions_from_data}")
                     raise ValueError("Baseline mapping consistency check failed.")
 
-                bsl_to_reg[bsl_idx] = list(regions_from_tels)
+                bsl_to_reg[bsl_idx] = order_abcd_regions(
+                    bsl_regs[bsl_idx], detector_abcd_order
+                )
                 bsl_to_tel[bsl_idx] = (t1, t2)
 
         to_save = ["spec_tel", "spec_bsl", "spec_wavesc", "spec_flat",
@@ -120,7 +165,9 @@ def run_preproc(ctx: PipelineContext, **kwargs: Any) -> None:
         obj_list = ctx.conf["object"] if obj == "all" else [obj]
         to_save = ["spec", "spec_flat", "wl_grid"]
         for obj in obj_list:
-            spec = _extract(ctx.conf["object"][obj])
+            data_file, dark_file = resolve_object_entry(ctx.conf["object"][obj])
+            object_dark = dark_map if dark_file is None else _load_dark_map(dark_file)
+            spec = _extract(data_file, object_dark)
             ctx.save_product(preproc_product(obj), **{k: locals()[k] for k in to_save})
         log.info(f"Preprocessed objects: {', '.join(obj_list)}")
     log.info("--- Step: PREPROC [DONE] ---")
@@ -153,8 +200,8 @@ def extract_spec_sparse(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
 
     Args:
         cube (NDArray): Input cube with shape `(n_frame, ny, nx)`.
-        ys (NDArray): Per-output Y indices.
-        xs (NDArray): Per-output X indices.
+        ys (NDArray): Per-output Y indices; negative values are invalid sentinels.
+        xs (NDArray): Per-output X indices; negative values are invalid sentinels.
 
     Returns:
         NDArray: Extracted spectra with shape `(n_reg, n_frame, nx)`.
@@ -169,7 +216,10 @@ def extract_spec_sparse(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
         for f in range(n_frame):
             for i in range(len(y_idx)):
                 x = x_idx[i]
-                output[o, f, x] += cube[f, y_idx[i], x]
+                y = y_idx[i]
+                if x < 0 or y < 0:
+                    continue
+                output[o, f, x] += cube[f, y, x]
     return output
 
 

@@ -212,7 +212,12 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
 
 
-    if spec_wavesc is not None and kwargs["phase_correction"]:
+    has_wavesc = (
+        isinstance(spec_wavesc, np.ndarray)
+        and spec_wavesc.ndim == 3
+        and spec_wavesc.shape[1] > 0
+    )
+    if has_wavesc and kwargs["phase_correction"]:
         log.info("Applying phase correction...")
         p2vmred_wave = np.einsum("dow,ofw->fdw", p2vm, spec_wavesc)
         vis_ft = p2vmred_wave[:, ctx.sl_real, :] + 1j * p2vmred_wave[:, ctx.sl_imag, :]
@@ -226,6 +231,8 @@ def run_p2vm(ctx: PipelineContext, **kwargs: Any) -> None:
         p2vm = np.zeros((ctx.n_data, ctx.n_reg, n_wave))
         for iw in range(n_wave):
             p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
+    elif kwargs["phase_correction"]:
+        log.info("Skipping phase correction: no WAVE,SC calibration was provided.")
 
     to_save = ["p2vm", "v2pm", "opd_per_baseline", "gd_per_baseline", "wl_grid",
                "bsl_to_reg", "bsl_to_tel", "ellipse_results"]

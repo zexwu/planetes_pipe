@@ -54,7 +54,7 @@ Implemented in [recipes/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes/fl
 - `bad_map`
 - `flat_map`
 - `profile_map`
-- sparse extraction coordinates: `profile_xs`, `profile_ys`
+- sparse extraction coordinates: `profile_xs`, `profile_ys` (`-1` marks excluded bad pixels)
 - traced centroids: `xs`, `ys`
 
 ### Main assumption

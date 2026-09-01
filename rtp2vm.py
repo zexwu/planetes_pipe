@@ -22,7 +22,10 @@ def extract_spec_sparse_single(img: NDArray, ys: NDArray, xs: NDArray) -> NDArra
         x_idx = xs[out]
         for i in range(len(y_idx)):
             x = x_idx[i]
-            output[out, x] += img[y_idx[i], x]
+            y = y_idx[i]
+            if x < 0 or y < 0:
+                continue
+            output[out, x] += img[y, x]
     return output
 
 

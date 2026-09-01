@@ -72,11 +72,16 @@ def run_flat(ctx: PipelineContext, **kwargs: Any) -> None:
         Y, X = np.indices((h, w))
 
         spatial_mask = np.abs(Y - ys_smoothed[X]) < kwargs["profile_width"] / 2
-        profile_map[i, spatial_mask] = 1
-        profile_map[i, bad_map > 0] = 0
+        profile_map[i, spatial_mask & (bad_map == 0)] = 1
 
-        profile_xs.append(X[spatial_mask])
-        profile_ys.append(Y[spatial_mask])
+        # Keep a rectangular sparse array for NPZ/Numba; extractors skip -1 sentinels.
+        sparse_x = X[spatial_mask].copy()
+        sparse_y = Y[spatial_mask].copy()
+        invalid = bad_map[sparse_y, sparse_x] > 0
+        sparse_x[invalid] = -1
+        sparse_y[invalid] = -1
+        profile_xs.append(sparse_x)
+        profile_ys.append(sparse_y)
 
         xs_list.append(xs)
         ys_list.append(ys_smoothed)

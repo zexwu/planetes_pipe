@@ -16,10 +16,10 @@ xrange: [0, 1024]        # Spectral crop [start, end]
 yrange: [0, 1024]        # Spatial crop [start, end]
 output_dir: ./reduced/   # Output path
 log_level: DEBUG
-wave_product: wave       # or wave_aberr
 
 telescopes: ["4", "3", "2", "1"] # names of telescopes
 baselines: ["43", "42", "41", "32", "31", "21"] # names of baselines
+abcd_order: ["A", "C", "B", "D"] # labels in ascending detector-region order
 
 calib:
   dark: /path/to/dark.fits
@@ -29,7 +29,12 @@ calib:
   p2vm: [/path/to/bsl34.fits, /path/to/bsl24.fits, ...]
 
 object:
-  my_target: /path/to/science.fits
+  my_target:
+    data: /path/to/science.fits
+    dark: /path/to/science_dark.fits
+
+  # A path alone remains valid when the calibration master dark applies.
+  another_target: /path/to/another_science.fits
 
 products:
   flat: "flat.npz"

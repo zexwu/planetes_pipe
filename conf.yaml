@@ -14,6 +14,9 @@ plot_to_pdf: True
 # Pixel data are ordered as [flux(telescopes), real(baselines), imag(baselines)]
 telescopes: ["4", "3", "2", "1"]
 baselines: ["43", "42", "41", "32", "31", "21"]
+# Labels assigned to the four detector regions in ascending region order.
+# Internally all baselines are converted to the canonical [A, C, B, D] order.
+abcd_order: ["A", "C", "B", "D"]
 
 calib:
   dark: ./2026_02_05/p2vm2/dark.fits
@@ -35,7 +38,9 @@ calib:
     - ./2026_02_05/p2vm2/bsl21.fits
 
 object:
-  sci: ./2026_02_05/sci2/sci.fits
+  sci:
+    data: ./2026_02_05/sci2/sci.fits
+    dark: ./2026_02_05/sci2/sci_dark.fits
   test: ./2026_02_05/p2vm2/bsl43.fits
 
 products:
