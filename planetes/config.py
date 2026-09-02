@@ -1,505 +1,116 @@
-"""Typed configuration for the PLANETES reduction recipes."""
+"""Small path configuration for PLANETES reductions."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass
-from enum import StrEnum
+import shutil
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
-from typing import Any, Self, TypeVar
+from typing import Any, Self
 
 import yaml
 
-
-@dataclass(frozen=True, slots=True)
-class FrameRange:
-    """Half-open frame or detector-pixel range."""
-
-    start: int = 0
-    stop: int | None = None
-
-    def __post_init__(self) -> None:
-        if isinstance(self.start, bool) or not isinstance(self.start, int) or self.start < 0:
-            raise ValueError("range start must be a non-negative integer")
-        if self.stop is not None and (
-            isinstance(self.stop, bool)
-            or not isinstance(self.stop, int)
-            or self.stop <= self.start
-        ):
-            raise ValueError(f"range stop must be greater than {self.start}")
-
-    @property
-    def slice(self) -> slice:
-        return slice(self.start, self.stop)
+from .instrument import BASELINES, TELESCOPES
 
 
 @dataclass(frozen=True, slots=True)
-class Crop:
-    """Detector crop in FITS array coordinates."""
-
-    x: FrameRange
-    y: FrameRange
-
-
-class ABCD(StrEnum):
-    """Interferometric output labels."""
-
-    A = "A"
-    B = "B"
-    C = "C"
-    D = "D"
-
-
-@dataclass(frozen=True, slots=True)
-class InstrumentConfig:
-    """Instrument ordering and dimensions used by all recipes."""
-
-    telescopes: tuple[str, ...]
-    baselines: tuple[str, ...]
-    abcd_order: tuple[ABCD, ...]
-
-    def __post_init__(self) -> None:
-        if not self.telescopes or len(set(self.telescopes)) != len(self.telescopes):
-            raise ValueError("instrument.telescopes must be non-empty and unique")
-        if not self.baselines or len(set(self.baselines)) != len(self.baselines):
-            raise ValueError("instrument.baselines must be non-empty and unique")
-        if len(self.telescopes) != 4 or len(self.baselines) != 6:
-            raise ValueError("PLANETES requires 4 telescopes and 6 baselines")
-        expected = {
-            self.telescopes[i] + self.telescopes[j]
-            for i in range(len(self.telescopes))
-            for j in range(i + 1, len(self.telescopes))
-        }
-        if set(self.baselines) != expected:
-            raise ValueError(
-                "instrument.baselines must contain each telescope pair exactly once; "
-                f"expected {sorted(expected)}, got {sorted(self.baselines)}"
-            )
-        if len(self.abcd_order) != 4 or set(self.abcd_order) != set(ABCD):
-            raise ValueError("instrument.abcd_order must contain A, B, C, and D once")
-
-    @property
-    def n_telescopes(self) -> int:
-        return len(self.telescopes)
-
-    @property
-    def n_baselines(self) -> int:
-        return len(self.baselines)
-
-    @property
-    def n_outputs(self) -> int:
-        return 4 * self.n_baselines
-
-    @property
-    def n_data(self) -> int:
-        return self.n_telescopes + 2 * self.n_baselines
-
-    @property
-    def real_slice(self) -> slice:
-        return slice(self.n_telescopes, self.n_telescopes + self.n_baselines)
-
-    @property
-    def imag_slice(self) -> slice:
-        return slice(self.n_telescopes + self.n_baselines, self.n_data)
-
-
-@dataclass(frozen=True, slots=True)
-class CubeInput:
-    """One FITS cube, its optional dark, and selected frames."""
+class Dataset:
+    """One detector dataset and its optional dark cube."""
 
     data: Path
-    dark: Path | None
-    frames: FrameRange
-    dark_frames: FrameRange
+    dark: Path | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class CalibrationInputs:
-    """Raw calibration files and their frame range."""
+    """Raw files used to derive the calibration products."""
 
-    frames: FrameRange
     dark: Path
-    flats: Mapping[str, Path]
-    wavelength: CubeInput
-    p2vm: Mapping[str, Path]
-    phase_reference: CubeInput | None
-
-
-@dataclass(frozen=True, slots=True)
-class FlatParameters:
-    profile_width: int = 10
-    bad_threshold: float = 5.0
-
-    def __post_init__(self) -> None:
-        if (
-            isinstance(self.profile_width, bool)
-            or not isinstance(self.profile_width, int)
-            or self.profile_width <= 0
-            or not isinstance(self.bad_threshold, (int, float))
-            or self.bad_threshold <= 0
-        ):
-            raise ValueError("flat profile width and bad-pixel threshold must be positive")
-
-
-@dataclass(frozen=True, slots=True)
-class WavelengthParameters:
-    detection_sigma: float = 3.0
-    surface_degree: int = 3
-    aberration_degree: int = 3
-    dispersion_degree: int = 3
-    ransac_iterations: int = 1_000_000
-
-    def __post_init__(self) -> None:
-        degrees = self.surface_degree, self.aberration_degree, self.dispersion_degree
-        integers = (*degrees, self.ransac_iterations)
-        if (
-            not isinstance(self.detection_sigma, (int, float))
-            or self.detection_sigma <= 0
-            or any(isinstance(value, bool) or not isinstance(value, int) for value in integers)
-            or min(degrees) < 0
-            or self.ransac_iterations <= 0
-        ):
-            raise ValueError("invalid wavelength calibration parameter")
-
-
-@dataclass(frozen=True, slots=True)
-class ResamplingParameters:
-    wavelength_min_um: float = 1.15
-    wavelength_max_um: float = 1.30
-    wavelength_channels: int = 151
-
-    def __post_init__(self) -> None:
-        if not all(
-            isinstance(value, (int, float))
-            for value in (self.wavelength_min_um, self.wavelength_max_um)
-        ) or self.wavelength_max_um <= self.wavelength_min_um:
-            raise ValueError("resampling wavelength maximum must exceed the minimum")
-        if (
-            isinstance(self.wavelength_channels, bool)
-            or not isinstance(self.wavelength_channels, int)
-            or self.wavelength_channels < 2
-        ):
-            raise ValueError("resampling needs at least two wavelength channels")
-
-
-@dataclass(frozen=True, slots=True)
-class P2VMParameters:
-    phase_correction: bool = True
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.phase_correction, bool):
-            raise ValueError("p2vm.phase_correction must be true or false")
-
-
-@dataclass(frozen=True, slots=True)
-class ReductionParameters:
-    group_delay_min_um: float = -100.0
-    group_delay_max_um: float = 100.0
-
-    def __post_init__(self) -> None:
-        if not all(
-            isinstance(value, (int, float))
-            for value in (self.group_delay_min_um, self.group_delay_max_um)
-        ) or self.group_delay_max_um <= self.group_delay_min_um:
-            raise ValueError("group-delay maximum must exceed the minimum")
-
-
-@dataclass(frozen=True, slots=True)
-class PlotParameters:
-    full: bool = False
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.full, bool):
-            raise ValueError("plot.full must be true or false")
-
-
-@dataclass(frozen=True, slots=True)
-class RecipeParameters:
-    flat: FlatParameters
-    wavelength: WavelengthParameters
-    resampling: ResamplingParameters
-    p2vm: P2VMParameters
-    reduction: ReductionParameters
-    plot: PlotParameters
+    flats: dict[str, Path]
+    wavelength: Dataset
+    p2vm: dict[str, Path]
+    phase_reference: Dataset | None
 
 
 @dataclass(frozen=True, slots=True)
 class PipelineConfig:
-    """Complete immutable pipeline configuration."""
+    """Input/output paths and the one retained calibration mode switch."""
 
-    schema_version: int
     source: Path
     data_dir: Path
     output_dir: Path
-    chunk_frames: int
-    input_hdu: int | str | None
-    log_level: str
-    automatic_plots: bool
-    crop: Crop
-    instrument: InstrumentConfig
     calibration: CalibrationInputs
-    targets: Mapping[str, CubeInput]
-    parameters: RecipeParameters
-
-    def __post_init__(self) -> None:
-        if isinstance(self.schema_version, bool) or self.schema_version != 1:
-            raise ValueError(f"Unsupported schema_version {self.schema_version}; expected 1")
-        if (
-            isinstance(self.chunk_frames, bool)
-            or not isinstance(self.chunk_frames, int)
-            or self.chunk_frames <= 0
-        ):
-            raise ValueError("chunk_frames must be positive")
-        if not (
-            self.input_hdu is None
-            or isinstance(self.input_hdu, str)
-            or (
-                isinstance(self.input_hdu, int)
-                and not isinstance(self.input_hdu, bool)
-                and self.input_hdu >= 0
-            )
-        ):
-            raise ValueError("input_hdu must be a non-negative integer, name, or null")
-        if not isinstance(self.automatic_plots, bool):
-            raise ValueError("automatic_plots must be true or false")
+    targets: dict[str, Dataset]
+    phase_correction: bool = True
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> Self:
-        """Load, validate, and resolve a YAML configuration."""
         source = Path(path).expanduser().resolve()
-        if not source.exists():
-            raise FileNotFoundError(f"Configuration file not found: {source}")
-        raw = _mapping(yaml.safe_load(source.read_text(encoding="utf-8")), "root")
-        _check_keys(raw, {field.name for field in fields(cls)} - {"source"}, "root")
+        raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+        if not isinstance(raw, Mapping):
+            raise ValueError("Configuration root must be a YAML mapping")
+        if raw.get("schema_version") != 1:
+            raise ValueError("Unsupported configuration schema_version")
 
-        data_dir = _path(source.parent, raw.get("data_dir", "."), "data_dir")
-        output_dir = _path(source.parent, raw.get("output_dir", "reduced"), "output_dir")
-
-        crop_raw = _mapping(raw.get("crop"), "crop")
-        _check_keys(crop_raw, {"x", "y"}, "crop")
-        crop = Crop(
-            x=_range(crop_raw.get("x", [0, None]), "crop.x"),
-            y=_range(crop_raw.get("y", [0, None]), "crop.y"),
-        )
-
-        instrument_raw = _mapping(raw.get("instrument"), "instrument")
-        _check_keys(
-            instrument_raw, {"telescopes", "baselines", "abcd_order"}, "instrument"
-        )
-        telescopes = _names(instrument_raw.get("telescopes"), "instrument.telescopes")
-        baselines = _names(instrument_raw.get("baselines"), "instrument.baselines")
-        try:
-            abcd_order = tuple(
-                ABCD(str(label).upper())
-                for label in _sequence(
-                    instrument_raw.get("abcd_order", ["A", "C", "B", "D"]),
-                    "instrument.abcd_order",
-                )
-            )
-        except ValueError as exc:
-            raise ValueError("instrument.abcd_order contains an invalid label") from exc
-        instrument = InstrumentConfig(telescopes, baselines, abcd_order)
-
-        calibration_raw = _mapping(raw.get("calibration"), "calibration")
-        _check_keys(
-            calibration_raw,
-            {"frames", "dark", "flats", "wavelength", "p2vm", "phase_reference"},
-            "calibration",
-        )
-        calibration_frames = _range(
-            calibration_raw.get("frames", [0, None]), "calibration.frames"
-        )
-        wavelength = _cube(
-            calibration_raw.get("wavelength"),
-            data_dir,
-            calibration_frames,
-            "calibration.wavelength",
-        )
-        if wavelength.dark is None:
-            raise ValueError("calibration.wavelength.dark is required")
-        phase_raw = calibration_raw.get("phase_reference")
-        calibration = CalibrationInputs(
-            frames=calibration_frames,
-            dark=_path(data_dir, calibration_raw.get("dark"), "calibration.dark"),
-            flats=MappingProxyType(
-                _named_paths(
-                    calibration_raw.get("flats"),
-                    data_dir,
-                    telescopes,
-                    "calibration.flats",
-                )
-            ),
-            wavelength=wavelength,
-            p2vm=MappingProxyType(
-                _named_paths(
-                    calibration_raw.get("p2vm"),
-                    data_dir,
-                    baselines,
-                    "calibration.p2vm",
-                )
-            ),
-            phase_reference=(
-                None
-                if phase_raw is None
-                else _cube(
-                    phase_raw,
-                    data_dir,
-                    calibration_frames,
-                    "calibration.phase_reference",
-                )
-            ),
-        )
-
-        targets_raw = _mapping(raw.get("targets", {}), "targets")
-        targets = MappingProxyType(
-            {
-                str(name): _cube(value, data_dir, calibration_frames, f"targets.{name}")
-                for name, value in targets_raw.items()
-            }
-        )
-
-        parameters_raw = _mapping(raw.get("parameters", {}), "parameters")
-        _check_keys(
-            parameters_raw,
-            {"flat", "wavelength", "resampling", "p2vm", "reduction", "plot"},
-            "parameters",
-        )
-        parameters = RecipeParameters(
-            flat=_build(FlatParameters, parameters_raw.get("flat", {}), "parameters.flat"),
-            wavelength=_build(
-                WavelengthParameters,
-                parameters_raw.get("wavelength", {}),
-                "parameters.wavelength",
-            ),
-            resampling=_build(
-                ResamplingParameters,
-                parameters_raw.get("resampling", {}),
-                "parameters.resampling",
-            ),
-            p2vm=_build(P2VMParameters, parameters_raw.get("p2vm", {}), "parameters.p2vm"),
-            reduction=_build(
-                ReductionParameters,
-                parameters_raw.get("reduction", {}),
-                "parameters.reduction",
-            ),
-            plot=_build(PlotParameters, parameters_raw.get("plot", {}), "parameters.plot"),
-        )
+        data_dir = _resolve(source.parent, raw.get("data_dir", "."))
+        calibration = raw["calibration"]
+        phase_reference = calibration.get("phase_reference")
+        phase_correction = raw.get("phase_correction", True)
+        if not isinstance(phase_correction, bool):
+            raise ValueError("phase_correction must be true or false")
 
         return cls(
-            schema_version=raw.get("schema_version"),
             source=source,
             data_dir=data_dir,
-            output_dir=output_dir,
-            chunk_frames=raw.get("chunk_frames", 16),
-            input_hdu=raw.get("input_hdu"),
-            log_level=str(raw.get("log_level", "INFO")).upper(),
-            automatic_plots=raw.get("automatic_plots", False),
-            crop=crop,
-            instrument=instrument,
-            calibration=calibration,
-            targets=targets,
-            parameters=parameters,
+            output_dir=_resolve(source.parent, raw.get("output_dir", "reduced")),
+            calibration=CalibrationInputs(
+                dark=_resolve(data_dir, calibration["dark"]),
+                flats=_named_paths(data_dir, calibration["flats"], TELESCOPES),
+                wavelength=_dataset(data_dir, calibration["wavelength"]),
+                p2vm=_named_paths(data_dir, calibration["p2vm"], BASELINES),
+                phase_reference=(
+                    None
+                    if phase_reference is None
+                    else _dataset(data_dir, phase_reference)
+                ),
+            ),
+            targets={
+                str(name): _dataset(data_dir, value)
+                for name, value in raw.get("targets", {}).items()
+            },
+            phase_correction=phase_correction,
         )
-
-    def as_mapping(self) -> dict[str, Any]:
-        """Return a resolved, YAML-serializable configuration mapping."""
-        return _plain(self, skip={"source"})
 
     def save(self, path: Path) -> None:
-        """Write the resolved configuration used for a reduction."""
+        """Copy the exact user configuration used for this run."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            yaml.safe_dump(self.as_mapping(), sort_keys=False), encoding="utf-8"
-        )
+        shutil.copyfile(self.source, path)
 
-ConfigT = TypeVar("ConfigT")
-
-
-def _build(cls: type[ConfigT], value: Any, name: str) -> ConfigT:
-    values = dict(_mapping(value, name))
-    _check_keys(values, {field.name for field in fields(cls)}, name)
-    return cls(**values)
-
-
-def _mapping(value: Any, name: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{name} must be a YAML mapping")
-    return value
+    def target(self, name: str) -> Dataset:
+        """Return one configured target with a useful unknown-name error."""
+        try:
+            return self.targets[name]
+        except KeyError as exc:
+            available = ", ".join(self.targets)
+            raise ValueError(
+                f"Unknown target {name!r}; available targets: {available}"
+            ) from exc
 
 
-def _sequence(value: Any, name: str) -> Sequence[Any]:
-    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
-        raise ValueError(f"{name} must be a YAML list")
-    return value
-
-
-def _check_keys(value: Mapping[str, Any], allowed: set[str], name: str) -> None:
-    if unknown := sorted(set(value) - allowed):
-        raise ValueError(f"Unknown keys in {name}: {unknown}")
-
-
-def _range(value: Any, name: str) -> FrameRange:
-    values = _sequence(value, name)
-    if len(values) != 2:
-        raise ValueError(f"{name} must contain [start, stop]")
-    return FrameRange(values[0], values[1])
-
-
-def _names(value: Any, name: str) -> tuple[str, ...]:
-    values = _sequence(value, name)
-    if not values or not all(isinstance(item, str) and item for item in values):
-        raise ValueError(f"{name} must contain non-empty strings")
-    return tuple(values)
-
-
-def _path(base: Path, value: Any, name: str) -> Path:
-    if not isinstance(value, (str, Path)):
-        raise ValueError(f"{name} must be a path")
-    path = Path(value).expanduser()
-    return path.resolve() if path.is_absolute() else (base / path).resolve()
-
-
-def _named_paths(
-    value: Any,
-    base: Path,
-    names: Sequence[str],
-    section: str,
-) -> dict[str, Path]:
-    values = _mapping(value, section)
-    if set(values) != set(names):
-        raise ValueError(f"{section} keys must be {list(names)}")
-    return {name: _path(base, values[name], f"{section}.{name}") for name in names}
-
-
-def _cube(value: Any, base: Path, frames: FrameRange, name: str) -> CubeInput:
-    values = _mapping(value, name)
-    _check_keys(values, {"data", "dark", "frames", "dark_frames"}, name)
-    dark = values.get("dark")
-    return CubeInput(
-        data=_path(base, values.get("data"), f"{name}.data"),
-        dark=None if dark is None else _path(base, dark, f"{name}.dark"),
-        frames=frames if "frames" not in values else _range(values["frames"], f"{name}.frames"),
-        dark_frames=_range(values.get("dark_frames", [0, None]), f"{name}.dark_frames"),
+def _dataset(base: Path, value: Mapping[str, Any]) -> Dataset:
+    dark = value.get("dark")
+    return Dataset(
+        data=_resolve(base, value["data"]),
+        dark=None if dark is None else _resolve(base, dark),
     )
 
 
-def _plain(value: Any, *, skip: set[str] | None = None) -> Any:
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, StrEnum):
-        return value.value
-    if isinstance(value, FrameRange):
-        return [value.start, value.stop]
-    if is_dataclass(value) and not isinstance(value, type):
-        excluded = skip or set()
-        return {
-            field.name: _plain(getattr(value, field.name))
-            for field in fields(value)
-            if field.name not in excluded
-        }
-    if isinstance(value, Mapping):
-        return {key: _plain(item) for key, item in value.items()}
-    if isinstance(value, tuple):
-        return [_plain(item) for item in value]
-    return value
+def _named_paths(
+    base: Path, values: Mapping[str, Any], names: tuple[str, ...]
+) -> dict[str, Path]:
+    return {name: _resolve(base, values[name]) for name in names}
+
+
+def _resolve(base: Path, value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    return path.resolve() if path.is_absolute() else (base / path).resolve()

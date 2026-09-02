@@ -12,49 +12,44 @@ from numpy.typing import NDArray
 
 from .. import log
 from ..config import PipelineConfig
+from ..instrument import IMAG_SLICE, N_BASELINES, N_TELESCOPES, REAL_SLICE
 from ..numerics import compute_gdelay
-from ..product import P2VMProduct, ReducedProduct, read_product, write_product
-from .plotting import colored_text, summary_plot
-from .preproc import run_preproc_target
+from ..product import (
+    FlatProduct,
+    P2VMProduct,
+    ReducedProduct,
+    WaveProduct,
+    read_product,
+    write_product,
+)
+from .preproc import preprocess_target
+
+GROUP_DELAY_RANGE_UM = (-100.0, 100.0)
 
 
 def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
     """Preprocess and reduce one configured science target."""
-    if target_name not in config.targets:
-        available = ", ".join(config.targets)
-        raise ValueError(f"Unknown target {target_name!r}; available targets: {available}")
-
     config.output_dir.mkdir(parents=True, exist_ok=True)
     config.save(config.output_dir / "config_used.yaml")
     log.info(f"--- Step: REDUCE {target_name} ---")
-    preproc = run_preproc_target(config, target_name)
+    flat = read_product(config.output_dir / "flat.npz", FlatProduct)
+    wave = read_product(config.output_dir / "wave.npz", WaveProduct)
     p2vm = read_product(config.output_dir / "p2vm.npz", P2VMProduct)
-    instrument = config.instrument
-    target_label = colored_text(target_name, color="green", bold=True)
+    preproc = preprocess_target(config, target_name, flat, wave)
 
-    log.info(f"Applying P2VM to extract visibility for {target_label}...")
+    log.info(f"Applying P2VM to extract visibility for {target_name}...")
     p2vmred = np.einsum("box,ofx->fbx", p2vm.p2vm, preproc.spec)
-    fluxdata = p2vmred[:, : instrument.n_telescopes, :]
-    coherent_flux = (
-        p2vmred[:, instrument.real_slice, :]
-        + 1j * p2vmred[:, instrument.imag_slice, :]
-    )
-    visamp, flag = normalize_visibility(
-        coherent_flux, fluxdata, p2vm.bsl_to_tel
-    )
+    fluxdata = p2vmred[:, :N_TELESCOPES, :]
+    coherent_flux = p2vmred[:, REAL_SLICE, :] + 1j * p2vmred[:, IMAG_SLICE, :]
+    visamp, flag = normalize_visibility(coherent_flux, fluxdata, p2vm.bsl_to_tel)
 
-    reduction = config.parameters.reduction
-    group_delay_range = (
-        reduction.group_delay_min_um,
-        reduction.group_delay_max_um,
-    )
-    gdelay = np.zeros((len(coherent_flux), instrument.n_baselines))
-    log.info(f"Computing group delay for {target_label}...")
-    for baseline in range(instrument.n_baselines):
+    gdelay = np.zeros((len(coherent_flux), N_BASELINES))
+    log.info(f"Computing group delay for {target_name}...")
+    for baseline in range(N_BASELINES):
         gdelay[:, baseline] = compute_gdelay(
             coherent_flux[:, baseline],
             p2vm.wl_grid,
-            search_range=group_delay_range,
+            search_range=GROUP_DELAY_RANGE_UM,
         )
 
     visphi = coherent_flux * np.exp(
@@ -78,10 +73,7 @@ def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
         bsl_to_tel=p2vm.bsl_to_tel,
     )
     write_product(config.output_dir / f"{target_name}_reduced.npz", product)
-    log.info(f"Reduction for {target_label} completed.")
-
-    if config.automatic_plots:
-        summary_plot(config, target_name)
+    log.info(f"Reduction for {target_name} completed.")
 
     log.info(f"--- Step: REDUCE {target_name} [DONE] ---")
     log.info("")
@@ -104,10 +96,9 @@ def normalize_visibility(
             & np.isfinite(flux_product)
             & np.isfinite(coherent_flux[:, baseline, :])
         )
-        visamp[:, baseline, :][valid] = (
-            np.abs(coherent_flux[:, baseline, :][valid])
-            / np.sqrt(flux_product[valid])
-        )
+        visamp[:, baseline, :][valid] = np.abs(
+            coherent_flux[:, baseline, :][valid]
+        ) / np.sqrt(flux_product[valid])
         flag[:, baseline, :] = ~valid
 
     return visamp, flag

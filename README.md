@@ -1,9 +1,8 @@
-# PLANETES bench data reduction
+# PLANETES data reduction
 
-PLANETES is a small scientific reduction pipeline for detector calibration,
-wavelength calibration, P2VM construction, and visibility extraction. Raw FITS
-files are read-only; all cuts, dimensions, and scientific parameters are recorded
-in one YAML configuration.
+PLANETES is a small scientific pipeline for detector calibration, wavelength
+calibration, P2VM construction, and visibility extraction. Raw FITS files are
+read-only.
 
 ## Install
 
@@ -13,27 +12,18 @@ pip install -e .
 
 ## Configuration
 
-See [`conf.yaml`](./conf.yaml) for a complete working example. Its main structure is:
+The YAML contains paths and the one retained calibration choice. Detector
+layout, full-cube reading, wavelength grid, fitting degrees, and thresholds are
+fixed by the current instrument implementation and live beside the relevant
+recipe.
 
 ```yaml
 schema_version: 1
 data_dir: .
 output_dir: ./reduced
-chunk_frames: 16
-input_hdu: 1
-automatic_plots: false
-
-crop:
-  x: [0, 1280]
-  y: [0, 1024]
-
-instrument:
-  telescopes: ["4", "3", "2", "1"]
-  baselines: ["43", "42", "41", "32", "31", "21"]
-  abcd_order: ["A", "C", "B", "D"]
+phase_correction: true
 
 calibration:
-  frames: [0, 256]
   dark: ./dark.fits
   flats:
     "4": ./tel4.fits
@@ -46,94 +36,88 @@ calibration:
   p2vm:
     "43": ./bsl43.fits
     "42": ./bsl42.fits
-    # one named file per configured baseline
+    "41": ./bsl41.fits
+    "32": ./bsl32.fits
+    "31": ./bsl31.fits
+    "21": ./bsl21.fits
+  phase_reference:
+    data: ./phase_reference.fits
+    dark: ./phase_reference_dark.fits
 
 targets:
   my_target:
     data: ./science.fits
     dark: ./science_dark.fits
-    frames: [0, 512]
-    dark_frames: [0, 128]
 ```
 
-Telescope and baseline inputs are mappings rather than positional lists, so a
-file cannot silently move to a different instrument channel. Relative raw-data
-paths resolve against `data_dir`; `output_dir` resolves against the YAML file.
-The current recipes explicitly support the PLANETES 4-telescope, 6-baseline,
-24-output layout. `input_hdu` and all frame/crop ranges are checked against each
-raw FITS cube instead of being silently clipped.
+Relative input paths resolve against `data_dir`; `data_dir` and
+`output_dir` resolve against the YAML file. Telescope and baseline files are
+named mappings so that file order cannot silently change the instrument
+channel. The implemented layout is explicitly PLANETES 4T/6B/24-output, with
+3D detector cubes in FITS HDU 1. Every data and dark cube is read in full.
 
-All scientific settings live under `parameters`. The CLI deliberately has no
-threshold, polynomial-degree, wavelength-grid, phase-correction, or group-delay
-overrides. Every run writes the fully resolved configuration to
-`reduced/config_used.yaml`.
+Each calibration or reduction run copies the source YAML to
+`config_used.yaml`. Algorithm constants are provenance carried by the code
+version, not user-facing controls.
 
 ## Run
 
-Run the full calibration:
-
 ```bash
 planetes calib
-```
-
-Or run its explicit stages:
-
-```bash
-planetes flat
-planetes wave
-planetes preproc p2vm
-planetes p2vm
-```
-
-Reduce or plot one configured target:
-
-```bash
 planetes reduce my_target
 planetes plot my_target
 ```
 
-Use `all` to process every configured target:
+Use `all` for every configured target. Extra frame- and wavelength-sampled
+plot pages are a runtime choice:
 
 ```bash
 planetes reduce all
-planetes plot all
+planetes plot all --full
 ```
 
 Select another configuration with `planetes --conf path/to/config.yaml ...`.
 
+The public commands are complete scientific operations. Internal
+`flat → wave → extraction → p2vm` stages are ordinary Python calls, not
+separate CLI workflows.
+
 ## Code layout
 
-- `config.py`: YAML to immutable `PipelineConfig` dataclasses.
-- `cube.py`: chunked reading of raw detector FITS cubes.
-- `numerics.py`: reusable array-to-array reductions.
-- `product.py`: typed products and stateless serialization.
-- `data/wavelength_lines.ecsv`: versioned wavelength-calibration reference.
-- `recipes/`: explicit scientific stages and plotting.
-- `recipes/calibration.py`: the four-line linear calibration sequence.
-- `main.py`: explicit argparse commands dispatched with `match`.
+- `config.py`: small path dataclasses and YAML loading.
+- `instrument.py`: fixed PLANETES detector and output ordering.
+- `cube.py`: chunked, full-cube FITS reading.
+- `numerics.py`: reusable array-to-array calculations.
+- `product.py`: dataclasses for persisted products and current NPZ I/O.
+- `data/wavelength_lines.ecsv`: versioned wavelength reference.
+- `recipes/`: calibration, reduction, extraction, and plotting.
+- `bench/`: experimental real-time code; not installed as pipeline code.
+- `main.py`: the three-command CLI.
 
-There is no pipeline context/service object, command registry, dynamic recipe
-loading, DAG, or freshness manifest. A recipe receives `PipelineConfig`, reads
-the products it needs, performs the scientific calculation, and writes one typed
-product.
+The calibration recipe passes intermediate arrays directly:
+
+```text
+flat -> wave -> CalibrationSpectra -> p2vm
+```
+
+Target extraction is likewise in memory during `reduce`. There is no pipeline
+context, manifest, dynamic recipe registry, DAG, or persisted preprocessing
+cache.
 
 ## Current products
 
 | File | Content |
 | --- | --- |
-| `config_used.yaml` | resolved configuration and scientific parameters |
+| `config_used.yaml` | exact source configuration used for the run |
 | `flat.npz` | dark/bad/flat maps and sparse traces |
 | `wave.npz` | detector wavelength map |
-| `wave_aberr.npz` | alternate aberration-model wavelength map |
-| `p2vm_preproc.npz` | extracted calibration spectra and output mapping |
-| `p2vm.npz` | V2PM, P2VM, OPD/GD diagnostics, and mapping |
-| `<target>_preproc.npz` | resampled target spectra |
+| `p2vm.npz` | V2PM, P2VM, OPD/GD diagnostics, and mappings |
 | `<target>_reduced.npz` | flux, coherent flux, visibility, flags, phase, and GD |
-| `<target>.pdf` | optional diagnostic plots |
+| `<target>.pdf` | explicitly requested diagnostic plots |
 
-NPZ is currently the internal product carrier. Recipes only see the product
-dataclasses, so replacing this serializer with schema-driven ESO-compatible FITS
-does not require rewriting the numerical recipes.
+NPZ remains a temporary internal product carrier. The numerical recipes consume
+typed product objects, leaving a narrow boundary for the planned
+schema-generated ESO-compatible FITS implementation.
 
 ## Tests
 

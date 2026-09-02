@@ -5,7 +5,7 @@ from ..config import PipelineConfig
 from ..product import P2VMProduct
 from .flat import run_flat
 from .p2vm import run_p2vm
-from .preproc import run_preproc_p2vm
+from .preproc import preprocess_calibration
 from .wavelength import run_wave
 
 
@@ -14,9 +14,9 @@ def run_calibration(config: PipelineConfig) -> P2VMProduct:
     config.output_dir.mkdir(parents=True, exist_ok=True)
     config.save(config.output_dir / "config_used.yaml")
     log.info("Starting full calibration sequence")
-    run_flat(config)
-    run_wave(config)
-    run_preproc_p2vm(config)
-    product = run_p2vm(config)
+    flat = run_flat(config)
+    wave = run_wave(config, flat)
+    spectra = preprocess_calibration(config, flat, wave)
+    product = run_p2vm(config, spectra)
     log.info("Calibration sequence completed successfully")
     return product

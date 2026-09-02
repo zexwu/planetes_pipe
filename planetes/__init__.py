@@ -18,6 +18,6 @@ if not log.handlers:
 log.propagate = False
 
 
-def configure_logging(level: str) -> None:
-    """Set the package log level from the pipeline configuration."""
+def configure_logging(level: str = "INFO") -> None:
+    """Set the package log level for the current process."""
     log.setLevel(level.upper())

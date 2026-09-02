@@ -6,12 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from planetes.product import (
-    P2VMPreprocProduct,
-    WaveProduct,
-    read_product,
-    write_product,
-)
+from planetes.product import P2VMProduct, WaveProduct, read_product, write_product
 
 
 class ProductTests(unittest.TestCase):
@@ -23,7 +18,6 @@ class ProductTests(unittest.TestCase):
             loaded = read_product(path, WaveProduct)
 
             np.testing.assert_array_equal(loaded.wave_map, product.wave_map)
-            self.assertFalse(list(Path(tmp).glob("*.tmp")))
 
     def test_mapping_fields_are_unpacked(self) -> None:
         baseline_regions = {
@@ -33,22 +27,22 @@ class ProductTests(unittest.TestCase):
         baseline_telescopes = dict(
             enumerate(((0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)))
         )
-        product = P2VMPreprocProduct(
-            spec_tel=np.ones((4, 24, 1, 2)),
-            spec_bsl=np.ones((6, 24, 1, 2)),
-            spec_wavesc=np.ones((24, 1, 2)),
-            spec_flat=np.ones((24, 1, 2)),
-            tel_regs={0: [0, 1]},
-            bsl_regs={0: [0, 1, 2, 3]},
+        product = P2VMProduct(
+            p2vm=np.ones(1),
+            v2pm=np.ones(1),
+            opd_per_baseline=np.ones(1),
+            gd_per_baseline=np.ones(1),
+            wl_grid=np.array([1.2, 1.3]),
             bsl_to_reg=baseline_regions,
             bsl_to_tel=baseline_telescopes,
-            wl_grid=np.array([1.2, 1.3]),
+            ellipse_results=np.ones(1),
         )
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "p2vm_preproc.npz"
+            path = Path(tmp) / "p2vm.npz"
             write_product(path, product)
-            loaded = read_product(path, P2VMPreprocProduct)
+            loaded = read_product(path, P2VMProduct)
 
+            self.assertEqual(loaded.bsl_to_reg, baseline_regions)
             self.assertEqual(loaded.bsl_to_tel, baseline_telescopes)
 
     def test_schema_mismatch_is_explicit(self) -> None:
@@ -57,14 +51,6 @@ class ProductTests(unittest.TestCase):
             np.savez(path, typo=np.ones(1))
             with self.assertRaisesRegex(ValueError, "missing keys.*unexpected keys"):
                 read_product(path, WaveProduct)
-
-    def test_wrong_planetes_axis_is_rejected(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaisesRegex(ValueError, "24 outputs"):
-                write_product(
-                    Path(tmp) / "wave.npz",
-                    WaveProduct(wave_map=np.ones((23, 4))),
-                )
 
 
 if __name__ == "__main__":

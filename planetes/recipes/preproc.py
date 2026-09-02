@@ -1,4 +1,6 @@
-from collections.abc import Sequence
+"""Detector-spectrum extraction shared by calibration and target recipes."""
+
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -7,19 +9,34 @@ from numba import njit, prange
 from numpy.typing import NDArray
 
 from .. import log
-from ..config import FrameRange, PipelineConfig
-from ..cube import CubeSelection, iter_cube
+from ..config import PipelineConfig
+from ..cube import iter_cube
+from ..instrument import BASELINES, N_OUTPUTS, N_TELESCOPES, TELESCOPES
 from ..numerics import frame_mean
-from ..product import (
-    FlatProduct,
-    ObjectPreprocProduct,
-    P2VMPreprocProduct,
-    WaveProduct,
-    read_product,
-    write_product,
-)
+from ..product import FlatProduct, WaveProduct
 
-ABCD_ORDER = ("A", "C", "B", "D")
+WAVELENGTH_MIN_UM = 1.15
+WAVELENGTH_MAX_UM = 1.30
+WAVELENGTH_CHANNELS = 151
+
+
+@dataclass(frozen=True, slots=True)
+class CalibrationSpectra:
+    """Extracted calibration cubes passed directly to the P2VM recipe."""
+
+    spec_tel: NDArray
+    spec_bsl: NDArray
+    spec_wavesc: NDArray
+    bsl_to_reg: Mapping[int, list[int]]
+    bsl_to_tel: Mapping[int, tuple[int, int]]
+    wl_grid: NDArray
+
+
+@dataclass(frozen=True, slots=True)
+class TargetSpectra:
+    """One target cube extracted onto the calibrated wavelength grid."""
+
+    spec: NDArray
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,70 +48,45 @@ class _ExtractionModel:
     wavelength_grid: NDArray
 
 
-def order_abcd_regions(
-    regions: Sequence[int], detector_order: Sequence[str]
-) -> list[int]:
-    """Return detector regions in the canonical internal A, C, B, D order."""
-    region_ids = sorted(int(region) for region in regions)
-    labels = [str(label).upper() for label in detector_order]
-
-    if len(region_ids) != 4 or len(set(region_ids)) != 4:
-        raise ValueError(f"Expected four unique ABCD regions, got {region_ids}")
-    if len(labels) != 4 or set(labels) != set(ABCD_ORDER):
-        raise ValueError(
-            f"abcd_order must contain each of {ABCD_ORDER} exactly once, got {labels}"
-        )
-
-    region_by_label = dict(zip(labels, region_ids, strict=True))
-    return [region_by_label[label] for label in ABCD_ORDER]
-
-
-def run_preproc_p2vm(config: PipelineConfig) -> P2VMPreprocProduct:
+def preprocess_calibration(
+    config: PipelineConfig,
+    flat: FlatProduct,
+    wave: WaveProduct,
+) -> CalibrationSpectra:
     """Extract and resample the P2VM calibration cubes."""
     log.info("--- Step: PREPROC P2VM ---")
-    model = _extraction_model(config)
+    model = _extraction_model(flat, wave)
     calibration = config.calibration
-    instrument = config.instrument
 
     log.info("Preprocessing P2VM and FLAT files...")
     spec_bsl = np.asarray(
         [
             _extract_cube(
-                config,
                 calibration.p2vm[name],
-                calibration.frames,
                 model.flat.dark_map,
                 model,
             )
-            for name in instrument.baselines
+            for name in BASELINES
         ]
     )
     spec_tel = np.asarray(
         [
             _extract_cube(
-                config,
                 calibration.flats[name],
-                calibration.frames,
                 model.flat.dark_map,
                 model,
             )
-            for name in instrument.telescopes
+            for name in TELESCOPES
         ]
     )
 
-    spec_wavesc = np.empty(
-        (instrument.n_outputs, 0, len(model.wavelength_grid)), dtype=np.float64
-    )
+    spec_wavesc = np.empty((N_OUTPUTS, 0, len(model.wavelength_grid)), dtype=np.float64)
     if phase_reference := calibration.phase_reference:
         phase_dark = model.flat.dark_map
         if phase_reference.dark is not None:
-            phase_dark = _mean_cube(
-                config, phase_reference.dark, phase_reference.dark_frames
-            )
+            phase_dark = _mean_cube(phase_reference.dark)
         spec_wavesc = _extract_cube(
-            config,
             phase_reference.data,
-            phase_reference.frames,
             phase_dark,
             model,
         )
@@ -102,7 +94,7 @@ def run_preproc_p2vm(config: PipelineConfig) -> P2VMPreprocProduct:
     tel_regs = {}
     for telescope, flux in enumerate(spec_tel):
         mean_flux = flux.mean(axis=(1, 2))
-        active = np.argsort(mean_flux)[-instrument.n_outputs // 2 :]
+        active = np.argsort(mean_flux)[-N_OUTPUTS // 2 :]
         tel_regs[telescope] = np.sort(active).tolist()
 
     bsl_regs = {}
@@ -113,89 +105,63 @@ def run_preproc_p2vm(config: PipelineConfig) -> P2VMPreprocProduct:
 
     bsl_to_reg = {}
     bsl_to_tel = {}
-    detector_order = [label.value for label in instrument.abcd_order]
-    for telescope_1 in range(instrument.n_telescopes):
-        for telescope_2 in range(instrument.n_telescopes):
+    for telescope_1 in range(N_TELESCOPES):
+        for telescope_2 in range(N_TELESCOPES):
             if telescope_1 >= telescope_2:
                 continue
-            baseline_name = (
-                instrument.telescopes[telescope_1]
-                + instrument.telescopes[telescope_2]
-            )
-            baseline = instrument.baselines.index(baseline_name)
+            baseline_name = TELESCOPES[telescope_1] + TELESCOPES[telescope_2]
+            baseline = BASELINES.index(baseline_name)
             from_telescopes = set(tel_regs[telescope_1]) & set(tel_regs[telescope_2])
             from_modulation = set(bsl_regs[baseline])
             if from_telescopes != from_modulation:
-                log.error(
-                    f"    Mismatch in region mapping for {baseline_name}: "
-                    f"{from_telescopes} vs {from_modulation}"
+                raise ValueError(
+                    f"Region mapping mismatch for baseline {baseline_name}: "
+                    f"{sorted(from_telescopes)} from flats, "
+                    f"{sorted(from_modulation)} from modulation"
                 )
-                raise ValueError("Baseline mapping consistency check failed.")
-            bsl_to_reg[baseline] = order_abcd_regions(
-                bsl_regs[baseline], detector_order
-            )
+            bsl_to_reg[baseline] = sorted(bsl_regs[baseline])
             bsl_to_tel[baseline] = (telescope_1, telescope_2)
 
-    product = P2VMPreprocProduct(
+    spectra = CalibrationSpectra(
         spec_tel=spec_tel,
         spec_bsl=spec_bsl,
         spec_wavesc=spec_wavesc,
-        spec_flat=model.aligned_flat,
-        tel_regs=tel_regs,
-        bsl_regs=bsl_regs,
         bsl_to_reg=bsl_to_reg,
         bsl_to_tel=bsl_to_tel,
         wl_grid=model.wavelength_grid,
     )
-    write_product(config.output_dir / "p2vm_preproc.npz", product)
-    log.info("Preprocessed P2VM and FLAT data saved.")
     log.info("--- Step: PREPROC P2VM [DONE] ---")
     log.info("")
-    return product
+    return spectra
 
 
-def run_preproc_target(
-    config: PipelineConfig, target_name: str
-) -> ObjectPreprocProduct:
+def preprocess_target(
+    config: PipelineConfig,
+    target_name: str,
+    flat: FlatProduct,
+    wave: WaveProduct,
+) -> TargetSpectra:
     """Extract and resample one science target cube."""
-    if target_name not in config.targets:
-        available = ", ".join(config.targets)
-        raise ValueError(f"Unknown target {target_name!r}; available targets: {available}")
     log.info(f"--- Step: PREPROC {target_name} ---")
-    model = _extraction_model(config)
-    target = config.targets[target_name]
-    dark = (
-        model.flat.dark_map
-        if target.dark is None
-        else _mean_cube(config, target.dark, target.dark_frames)
-    )
+    model = _extraction_model(flat, wave)
+    target = config.target(target_name)
+    dark = model.flat.dark_map if target.dark is None else _mean_cube(target.dark)
     spec = _extract_cube(
-        config,
         target.data,
-        target.frames,
         dark,
         model,
     )
-    product = ObjectPreprocProduct(
-        spec=spec,
-        spec_flat=model.aligned_flat,
-        wl_grid=model.wavelength_grid,
-    )
-    write_product(config.output_dir / f"{target_name}_preproc.npz", product)
     log.info(f"Preprocessed target: {target_name}")
     log.info(f"--- Step: PREPROC {target_name} [DONE] ---")
     log.info("")
-    return product
+    return TargetSpectra(spec=spec)
 
 
-def _extraction_model(config: PipelineConfig) -> _ExtractionModel:
-    flat = read_product(config.output_dir / "flat.npz", FlatProduct)
-    wave = read_product(config.output_dir / "wave.npz", WaveProduct)
-    parameters = config.parameters.resampling
+def _extraction_model(flat: FlatProduct, wave: WaveProduct) -> _ExtractionModel:
     wl_grid = np.linspace(
-        parameters.wavelength_min_um,
-        parameters.wavelength_max_um,
-        parameters.wavelength_channels,
+        WAVELENGTH_MIN_UM,
+        WAVELENGTH_MAX_UM,
+        WAVELENGTH_CHANNELS,
     )
     spec_flat_detector = extract_spec_sparse(
         flat.flat_map[None, :, :], flat.profile_ys, flat.profile_xs
@@ -211,27 +177,19 @@ def _extraction_model(config: PipelineConfig) -> _ExtractionModel:
     )
 
 
-def _mean_cube(config: PipelineConfig, path: Path, frames: FrameRange) -> NDArray:
+def _mean_cube(path: Path) -> NDArray:
     log.info(f"    Building dark map from {path}...")
-    selection = CubeSelection(frames.slice, config.crop.y.slice, config.crop.x.slice)
-    return frame_mean(
-        iter_cube(path, selection, config.chunk_frames, hdu=config.input_hdu)
-    )
+    return frame_mean(iter_cube(path))
 
 
 def _extract_cube(
-    config: PipelineConfig,
     path: Path,
-    frames: FrameRange,
     dark: NDArray,
     model: _ExtractionModel,
 ) -> NDArray:
     log.info(f"    Extracting spectra from {path}...")
-    selection = CubeSelection(frames.slice, config.crop.y.slice, config.crop.x.slice)
     aligned_chunks = []
-    for data in iter_cube(
-        path, selection, config.chunk_frames, hdu=config.input_hdu
-    ):
+    for data in iter_cube(path):
         spec = extract_spec_sparse(
             data - dark,
             model.flat.profile_ys,
@@ -244,27 +202,7 @@ def _extract_cube(
         )
         spec_aligned *= model.aligned_flat
         aligned_chunks.append(spec_aligned)
-    if not aligned_chunks:
-        raise ValueError(f"Selected FITS cube contains no frames: {path}")
     return np.concatenate(aligned_chunks, axis=1)
-
-
-@njit(parallel=True, fastmath=True, cache=True)
-def extract_spec_cpu(cube: NDArray, profile_map: NDArray) -> NDArray:
-    F, Y, X = cube.shape
-    O = profile_map.shape[0]
-
-    out = np.zeros((O, F, X), dtype=np.float32)
-
-    # Reordered loops: O -> F -> Y -> X
-    for o in prange(O):
-        for f in range(F):
-            for y in range(Y):
-                for x in range(X):
-                    pixel_val = cube[f, y, x]
-                    mask_val = profile_map[o, y, x]
-                    out[o, f, x] += pixel_val * mask_val
-    return out
 
 
 @njit(parallel=True, fastmath=True, cache=True)
@@ -298,9 +236,7 @@ def extract_spec_sparse(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
 
 
 @njit(parallel=True, cache=True)
-def twopx_interp(
-    spec: NDArray, wave_map: NDArray, wl_grid: NDArray
-) -> NDArray:
+def twopx_interp(spec: NDArray, wave_map: NDArray, wl_grid: NDArray) -> NDArray:
     """
     Resample spectra from detector pixels onto a uniform wavelength grid.
 

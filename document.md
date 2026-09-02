@@ -1,10 +1,10 @@
 # Calibration Procedures
 
-This note summarizes the algorithms currently used by the calibration stages of the pipeline:
+This note summarizes the algorithms called by `planetes calib`:
 
 - `flat`
 - `wave`
-- `preproc p2vm`
+- calibration-spectrum extraction
 - `p2vm`
 
 The description follows the implementation in the codebase and is meant to explain what is actually computed, in what order, and with what assumptions.
@@ -97,28 +97,20 @@ Implemented in [planetes/recipes/wavelength.py](/Users/zexwu/zexwu_lib/planetes_
    - combine that result with the global line identification to obtain `(x, y, wavelength)` samples
 
 6. Fit a global 2D wavelength solution:
-   - fit `wavelength = f(x, y)` with a polynomial of configurable degree
+   - fit `wavelength = f(x, y)` with the recipe's cubic polynomial
    - reject outliers iteratively using residual clipping
    - evaluate the fitted polynomial on the traced output coordinates
-
-7. Fit an alternate aberration-based model:
-   - keep only lines matched in all outputs
-   - fit a 1D dispersion relation along the mean trace
-   - fit a 2D polynomial correction in detector coordinates for the line shifts
-   - combine the two to build an aberration-corrected wavelength map
 
 ### Products
 
 - `wave.npz`: `wave_map`
-- `wave_aberr.npz`: alternate `wave_map`
 
 ### Main assumptions
 
 - the detector-to-wavelength mapping is smooth and well represented by a low-order polynomial
 - line ordering is preserved across outputs
-- the aberration term is a smooth low-order correction to a dominant 1D dispersion law
 
-## 3. `preproc p2vm`: extraction and common-grid interpolation
+## 3. Calibration-spectrum extraction and common-grid interpolation
 
 Implemented in [planetes/recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/recipes/preproc.py).
 
@@ -167,15 +159,16 @@ Implemented in [planetes/recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pip
 7. Cross-check the mapping:
    - the outputs inferred from telescope intersections must match the outputs inferred from baseline modulation
 
-### Products
+### In-memory result
 
 - `spec_tel`: extracted telescope calibration spectra
 - `spec_bsl`: extracted baseline calibration spectra
 - `spec_wavesc`: extracted optional phase-reference spectra
-- `spec_flat`: flat response on the common grid
-- `tel_regs`, `bsl_regs`
 - `bsl_to_reg`, `bsl_to_tel`
 - `wl_grid`
+
+These arrays form `CalibrationSpectra` and are passed directly to `run_p2vm`;
+there is no preprocessing product on disk.
 
 ### Main assumptions
 
@@ -188,11 +181,10 @@ Implemented in [planetes/recipes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/p
 
 ### Inputs
 
-- `p2vm_preproc.npz` product:
+- in-memory `CalibrationSpectra`:
   - `spec_tel`
   - `spec_bsl`
   - optional `spec_wavesc`
-  - `spec_flat`
   - `bsl_to_reg`
   - `bsl_to_tel`
   - `wl_grid`
@@ -268,7 +260,7 @@ The calibration steps are chained as follows:
    - detector background, bad pixels, and output traces
 2. `wave`
    - detector-coordinate to wavelength mapping
-3. `preproc p2vm`
+3. calibration-spectrum extraction
    - extract and interpolate all calibration cubes onto a common spectral grid
 4. `p2vm`
    - derive the visibility-to-pixel model and its inverse
@@ -277,5 +269,7 @@ After these steps, science reduction can consume:
 
 - sparse extraction geometry from `flat`
 - wavelength calibration from `wave`
-- common-grid flat response and baseline/output mapping from `preproc`
 - inversion matrices from `p2vm`
+
+Only `flat.npz`, `wave.npz`, and `p2vm.npz` are persisted by calibration;
+extracted calibration spectra remain in memory.

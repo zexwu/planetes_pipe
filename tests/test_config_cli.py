@@ -2,34 +2,27 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
 import yaml
 from astropy.io import fits
 
-from planetes.config import PipelineConfig
-from planetes.cube import CubeSelection, iter_cube
-from planetes.numerics import frame_mean_std
 from main import build_parser
+from planetes.config import PipelineConfig
+from planetes.cube import iter_cube
+from planetes.numerics import frame_mean_std
 
 
 def _valid_config() -> dict:
     return {
         "schema_version": 1,
-        "data_dir": ".",
-        "output_dir": "output",
-        "chunk_frames": 2,
-        "input_hdu": 1,
-        "automatic_plots": False,
-        "crop": {"x": [0, 4], "y": [0, 4]},
-        "instrument": {
-            "telescopes": ["4", "3", "2", "1"],
-            "baselines": ["43", "42", "41", "32", "31", "21"],
-            "abcd_order": ["A", "C", "B", "D"],
-        },
+        "data_dir": "data",
+        "output_dir": "products",
+        "phase_correction": True,
         "calibration": {
-            "frames": [0, 2],
             "dark": "dark.fits",
             "flats": {
                 "4": "tel4.fits",
@@ -46,11 +39,12 @@ def _valid_config() -> dict:
                 "31": "bsl31.fits",
                 "21": "bsl21.fits",
             },
+            "phase_reference": {
+                "data": "phase.fits",
+                "dark": "phase_dark.fits",
+            },
         },
-        "targets": {
-            "target": {"data": "science.fits", "dark": "dark.fits"}
-        },
-        "parameters": {},
+        "targets": {"science": {"data": "science.fits", "dark": "science_dark.fits"}},
     }
 
 
@@ -60,110 +54,99 @@ class ConfigTests(unittest.TestCase):
         path.write_text(yaml.safe_dump(config), encoding="utf-8")
         return path
 
-    def test_config_validates_baseline_pairs(self) -> None:
-        config = _valid_config()
-        config["instrument"]["baselines"][0] = "34"
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_config(config, tmp)
-            with self.assertRaisesRegex(ValueError, "telescope pair"):
-                PipelineConfig.from_yaml(path)
-
-    def test_config_rejects_non_planetes_dimensions(self) -> None:
-        config = _valid_config()
-        config["instrument"]["telescopes"] = ["2", "1"]
-        config["instrument"]["baselines"] = ["21"]
-        config["calibration"]["flats"] = {"2": "tel2.fits", "1": "tel1.fits"}
-        config["calibration"]["p2vm"] = {"21": "bsl21.fits"}
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_config(config, tmp)
-            with self.assertRaisesRegex(ValueError, "4 telescopes and 6 baselines"):
-                PipelineConfig.from_yaml(path)
-
-    def test_named_inputs_and_paths_are_resolved(self) -> None:
+    def test_paths_and_named_inputs_are_resolved(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_config(_valid_config(), tmp)
             config = PipelineConfig.from_yaml(path)
+            data_dir = (Path(tmp) / "data").resolve()
 
-            self.assertEqual(config.instrument.telescopes, ("4", "3", "2", "1"))
+            self.assertEqual(config.data_dir, data_dir)
+            self.assertEqual(config.output_dir, (Path(tmp) / "products").resolve())
+            self.assertEqual(config.calibration.flats["4"], data_dir / "tel4.fits")
+            self.assertEqual(config.calibration.p2vm["43"], data_dir / "bsl43.fits")
             self.assertEqual(
-                config.calibration.flats["4"], (Path(tmp) / "tel4.fits").resolve()
+                config.target("science").dark, data_dir / "science_dark.fits"
             )
-            self.assertEqual(config.targets["target"].frames.slice, slice(0, 2))
-            self.assertEqual(
-                config.targets["target"].dark_frames.slice, slice(0, None)
-            )
-            with self.assertRaises(TypeError):
-                config.targets["new"] = config.targets["target"]  # type: ignore[index]
+            self.assertTrue(config.phase_correction)
 
-    def test_unknown_parameter_is_rejected(self) -> None:
-        config = _valid_config()
-        config["parameters"] = {"flat": {"bad_thresh_typo": 5}}
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_config(config, tmp)
-            with self.assertRaisesRegex(ValueError, "Unknown keys"):
-                PipelineConfig.from_yaml(path)
+            with self.assertRaisesRegex(ValueError, "Unknown target"):
+                config.target("missing")
 
-    def test_boolean_parameter_is_not_coerced_from_text(self) -> None:
-        config = _valid_config()
-        config["parameters"] = {"p2vm": {"phase_correction": "false"}}
+    def test_phase_correction_is_not_coerced_from_text(self) -> None:
+        raw = _valid_config()
+        raw["phase_correction"] = "false"
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write_config(config, tmp)
+            path = self._write_config(raw, tmp)
             with self.assertRaisesRegex(ValueError, "true or false"):
                 PipelineConfig.from_yaml(path)
 
-    def test_resolved_config_can_be_saved_and_reloaded(self) -> None:
+    def test_schema_version_is_explicit(self) -> None:
+        raw = _valid_config()
+        raw["schema_version"] = 2
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write_config(raw, tmp)
+            with self.assertRaisesRegex(ValueError, "schema_version"):
+                PipelineConfig.from_yaml(path)
+
+    def test_used_config_is_an_exact_copy(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write_config(_valid_config(), tmp)
             config = PipelineConfig.from_yaml(path)
-            used_path = Path(tmp) / "output" / "config_used.yaml"
+            used_path = Path(tmp) / "products" / "config_used.yaml"
 
             config.save(used_path)
-            reloaded = PipelineConfig.from_yaml(used_path)
 
-            self.assertEqual(reloaded.as_mapping(), config.as_mapping())
+            self.assertEqual(
+                used_path.read_text(encoding="utf-8"),
+                path.read_text(encoding="utf-8"),
+            )
 
-    def test_fits_cube_iteration_and_statistics_are_chunked(self) -> None:
-        cube = np.arange(6 * 3 * 5, dtype=np.int16).reshape(6, 3, 5)
+    def test_fits_cube_iteration_and_statistics_use_the_full_cube(self) -> None:
+        cube = np.arange(17 * 3 * 5, dtype=np.int16).reshape(17, 3, 5)
 
         with tempfile.TemporaryDirectory() as tmp:
             cube_path = Path(tmp) / "cube.fits"
             fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(cube)]).writeto(cube_path)
-            selection = CubeSelection(
-                frames=slice(1, 5), y=slice(0, 2), x=slice(1, 4)
+
+            chunks = list(iter_cube(cube_path))
+            mean, std = frame_mean_std(chunks)
+            expected = cube.astype(np.float32)
+
+            self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
+            np.testing.assert_array_equal(np.concatenate(chunks), expected)
+            np.testing.assert_allclose(mean, expected.mean(axis=0), rtol=1e-6)
+            np.testing.assert_allclose(std, expected.std(axis=0), rtol=1e-6)
+
+    def test_fits_input_must_be_a_3d_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "image.fits"
+            fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(np.ones((3, 5)))]).writeto(
+                path
             )
 
-            chunks = list(iter_cube(cube_path, selection, chunk_frames=2, hdu=1))
-            selected = cube[1:5, 0:2, 1:4].astype(np.float32)
-            mean, std = frame_mean_std(chunks)
+            with self.assertRaisesRegex(ValueError, "3D FITS cube"):
+                list(iter_cube(path))
 
-            self.assertEqual([len(chunk) for chunk in chunks], [2, 2])
-            np.testing.assert_array_equal(np.concatenate(chunks), selected)
-            np.testing.assert_allclose(mean, selected.mean(axis=0), rtol=1e-6)
-            np.testing.assert_allclose(std, selected.std(axis=0), rtol=1e-6)
+    def test_cli_exposes_only_complete_recipes(self) -> None:
+        parser = build_parser()
+        plot = parser.parse_args(["plot", "science", "--full"])
+        reduce = parser.parse_args(["reduce", "science"])
 
-            with self.assertRaisesRegex(ValueError, "frame selection"):
-                list(
-                    iter_cube(
-                        cube_path,
-                        CubeSelection(slice(0, 7), slice(0, 2), slice(0, 2)),
-                        hdu=1,
-                    )
-                )
-            with self.assertRaisesRegex(ValueError, "y selection"):
-                list(
-                    iter_cube(
-                        cube_path,
-                        CubeSelection(slice(0, 2), slice(0, 4), slice(0, 2)),
-                        hdu=1,
-                    )
-                )
-
-    def test_cli_only_selects_recipe_and_target(self) -> None:
-        args = build_parser().parse_args(["reduce", "target"])
         self.assertEqual(
-            vars(args),
-            {"conf": "conf.yaml", "command": "reduce", "target": "target"},
+            vars(plot),
+            {
+                "conf": "conf.yaml",
+                "command": "plot",
+                "target": "science",
+                "full": True,
+            },
         )
+        self.assertEqual(
+            vars(reduce),
+            {"conf": "conf.yaml", "command": "reduce", "target": "science"},
+        )
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(["flat"])
 
 
 if __name__ == "__main__":

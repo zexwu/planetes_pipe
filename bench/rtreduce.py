@@ -5,53 +5,23 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-try:
-    from .rtp2vm import P2VMReducer, extract_spec_sparse_single, twopx_interp_single
-except ImportError:
-    from rtp2vm import P2VMReducer, extract_spec_sparse_single, twopx_interp_single
+from rtp2vm import P2VMReducer
 
 from planetes.config import PipelineConfig
-from planetes.cube import CubeSelection, iter_cube
+from planetes.cube import iter_cube
 from planetes.numerics import frame_mean
 
 
 def main() -> None:
     """Benchmark and display visibility amplitudes for the fake science cube."""
-    base_dir = Path(__file__).resolve().parent
-    reducer = P2VMReducer(base_dir / "reduced")
+    project_dir = Path(__file__).resolve().parents[1]
+    reducer = P2VMReducer(project_dir / "reduced")
 
-    config = PipelineConfig.from_yaml(base_dir / "conf.yaml")
-    target = config.targets["sci"]
-    selection = CubeSelection(
-        target.frames.slice,
-        config.crop.y.slice,
-        config.crop.x.slice,
-    )
-    cube = np.concatenate(
-        list(
-            iter_cube(
-                target.data,
-                selection,
-                config.chunk_frames,
-                hdu=config.input_hdu,
-            )
-        ),
-        axis=0,
-    )
+    config = PipelineConfig.from_yaml(project_dir / "conf.yaml")
+    target = config.target("sci")
+    cube = np.concatenate(list(iter_cube(target.data)), axis=0)
     if target.dark is not None:
-        dark_selection = CubeSelection(
-            target.dark_frames.slice,
-            config.crop.y.slice,
-            config.crop.x.slice,
-        )
-        dark = frame_mean(
-            iter_cube(
-                target.dark,
-                dark_selection,
-                config.chunk_frames,
-                hdu=config.input_hdu,
-            )
-        )
+        dark = frame_mean(iter_cube(target.dark))
         cube -= dark[None, ...]
 
     import timeit
