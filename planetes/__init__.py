@@ -1,4 +1,4 @@
-"""PLANETES bench data reduction."""
+"""PLANETES data reduction."""
 
 import logging
 

@@ -34,7 +34,6 @@ def run_flat(config: PipelineConfig) -> FlatProduct:
     log.info("Saved profile, flat, dark, and trace data.")
 
     log.info("--- Step: FLAT [DONE] ---")
-    log.info("")
     return product
 
 

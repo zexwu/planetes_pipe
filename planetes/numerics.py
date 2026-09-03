@@ -18,7 +18,7 @@ def frame_mean(
         total += chunk.sum(axis=0, dtype=np.float64)
         count += len(chunk)
     if total is None or count == 0:
-        raise ValueError("Selected cube contains no frames")
+        raise ValueError("Cube contains no frames")
     return (total / count).astype(np.float32)
 
 
@@ -39,7 +39,7 @@ def frame_mean_std(
         )
         count += len(chunk)
     if total is None or total_squared is None or count == 0:
-        raise ValueError("Selected cube contains no frames")
+        raise ValueError("Cube contains no frames")
 
     mean = total / count
     variance = np.maximum(total_squared / count - mean**2, 0.0)

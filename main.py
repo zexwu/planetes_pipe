@@ -43,28 +43,31 @@ def main() -> None:
         parser.error(str(exc))
     configure_logging()
 
+    targets = ()
+    if args.command in {"reduce", "plot"}:
+        try:
+            targets = _selected_targets(config, args.target)
+        except ValueError as exc:
+            parser.error(str(exc))
+
     match args.command:
         case "calib":
             run_calibration(config)
         case "reduce":
-            for target in _selected_targets(parser, config, args.target):
+            for target in targets:
                 run_reduce(config, target)
         case "plot":
-            for target in _selected_targets(parser, config, args.target):
+            for target in targets:
                 summary_plot(config, target, full=args.full)
 
 
 def _selected_targets(
-    parser: argparse.ArgumentParser,
     config: PipelineConfig,
     selection: str,
 ) -> tuple[str, ...]:
     if selection == "all":
         return tuple(config.targets)
-    try:
-        config.target(selection)
-    except ValueError as exc:
-        parser.error(str(exc))
+    config.target(selection)
     return (selection,)
 
 

@@ -65,6 +65,9 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.calibration.flats["4"], data_dir / "tel4.fits")
             self.assertEqual(config.calibration.p2vm["43"], data_dir / "bsl43.fits")
             self.assertEqual(
+                config.calibration.wavelength.dark, data_dir / "wave_dark.fits"
+            )
+            self.assertEqual(
                 config.target("science").dark, data_dir / "science_dark.fits"
             )
             self.assertTrue(config.phase_correction)
@@ -94,7 +97,7 @@ class ConfigTests(unittest.TestCase):
             config = PipelineConfig.from_yaml(path)
             used_path = Path(tmp) / "products" / "config_used.yaml"
 
-            config.save(used_path)
+            config.copy_used_config(used_path)
 
             self.assertEqual(
                 used_path.read_text(encoding="utf-8"),

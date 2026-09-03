@@ -22,12 +22,20 @@ class Dataset:
 
 
 @dataclass(frozen=True, slots=True)
+class WavelengthInput:
+    """Wavelength-lamp cube and its required dark cube."""
+
+    data: Path
+    dark: Path
+
+
+@dataclass(frozen=True, slots=True)
 class CalibrationInputs:
     """Raw files used to derive the calibration products."""
 
     dark: Path
     flats: dict[str, Path]
-    wavelength: Dataset
+    wavelength: WavelengthInput
     p2vm: dict[str, Path]
     phase_reference: Dataset | None
 
@@ -66,7 +74,7 @@ class PipelineConfig:
             calibration=CalibrationInputs(
                 dark=_resolve(data_dir, calibration["dark"]),
                 flats=_named_paths(data_dir, calibration["flats"], TELESCOPES),
-                wavelength=_dataset(data_dir, calibration["wavelength"]),
+                wavelength=_wavelength_input(data_dir, calibration["wavelength"]),
                 p2vm=_named_paths(data_dir, calibration["p2vm"], BASELINES),
                 phase_reference=(
                     None
@@ -81,7 +89,7 @@ class PipelineConfig:
             phase_correction=phase_correction,
         )
 
-    def save(self, path: Path) -> None:
+    def copy_used_config(self, path: Path) -> None:
         """Copy the exact user configuration used for this run."""
         path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(self.source, path)
@@ -102,6 +110,13 @@ def _dataset(base: Path, value: Mapping[str, Any]) -> Dataset:
     return Dataset(
         data=_resolve(base, value["data"]),
         dark=None if dark is None else _resolve(base, dark),
+    )
+
+
+def _wavelength_input(base: Path, value: Mapping[str, Any]) -> WavelengthInput:
+    return WavelengthInput(
+        data=_resolve(base, value["data"]),
+        dark=_resolve(base, value["dark"]),
     )
 
 

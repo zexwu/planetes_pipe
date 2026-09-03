@@ -57,7 +57,7 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
     wl_truth = []  # To store wavelengths for all matched lines
     spec_mean = wave_spec[-4:].mean(axis=0)
 
-    # line detection threshold: median + 5*MAD
+    # Gaussian-equivalent MAD threshold above the median.
     def thresh(_spec: NDArray) -> np.floating[Any]:
         med = np.median(_spec)
         mad = np.median(abs(_spec - med))
@@ -142,7 +142,7 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
 
     # Fit the wl = f(x, y), using a 3rd order polynomial
     deg = SURFACE_DEGREE
-    log.info("Fitted 2D wavelength solution.")
+    log.info("Fitting 2D wavelength solution...")
     design_matrix = dmat(x_flat, y_flat, max_deg=deg)
     terms = [f"x{d-i}y{i}" for d in range(deg + 1) for i in range(d + 1)]
     log.debug("Kernel used for wavemap fit: ")
@@ -151,8 +151,8 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
     residuals = wl_flat - design_matrix @ wavemap_coeffs
     std = np.std(residuals)
     log.info(f"Initial std dev of residuals: {std * 1e3:.2f} nm")
-    for _ in range(3):
-        log.info(f"Performing outlier rejection [{_ + 1}/3]")
+    for iteration in range(3):
+        log.info(f"Performing outlier rejection [{iteration + 1}/3]")
         reject = abs(residuals) > 3 * std
         wavemap_coeffs = np.linalg.lstsq(
             design_matrix[~reject], wl_flat[~reject], rcond=None
@@ -174,7 +174,6 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
     write_product(config.output_dir / "wave.npz", wave_product)
     log.info("Saved full wavemap")
     log.info("--- Step: WAVE [DONE] ---")
-    log.info("")
     return wave_product
 
 
@@ -265,7 +264,7 @@ def match_lines_grid(
     # Sanity check on grid size
     total_iters = len(a_grid) * len(b_grid) * len(c_grid)
     if total_iters > 2e6:
-        print(f"Warning: Grid search is large ({total_iters} iterations).")
+        log.warning(f"Grid search is large ({total_iters} iterations).")
 
     # 3. Run Grid Search
     # This finds the "Best Approximate" parameters

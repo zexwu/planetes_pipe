@@ -12,7 +12,7 @@ from .wavelength import run_wave
 def run_calibration(config: PipelineConfig) -> P2VMProduct:
     """Run flat, wavelength, extraction, and P2VM calibration in order."""
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    config.save(config.output_dir / "config_used.yaml")
+    config.copy_used_config(config.output_dir / "config_used.yaml")
     log.info("Starting full calibration sequence")
     flat = run_flat(config)
     wave = run_wave(config, flat)

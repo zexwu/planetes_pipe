@@ -163,7 +163,7 @@ Implemented in [planetes/recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pip
 
 - `spec_tel`: extracted telescope calibration spectra
 - `spec_bsl`: extracted baseline calibration spectra
-- `spec_wavesc`: extracted optional phase-reference spectra
+- `phase_reference`: extracted optional phase-reference spectra
 - `bsl_to_reg`, `bsl_to_tel`
 - `wl_grid`
 
@@ -184,7 +184,7 @@ Implemented in [planetes/recipes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/p
 - in-memory `CalibrationSpectra`:
   - `spec_tel`
   - `spec_bsl`
-  - optional `spec_wavesc`
+  - optional `phase_reference`
   - `bsl_to_reg`
   - `bsl_to_tel`
   - `wl_grid`
@@ -233,7 +233,7 @@ Implemented in [planetes/recipes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/p
    - this yields the final P2VM
 
 9. Optional phase correction:
-   - if `spec_wavesc` is available, apply an additional phase-reference correction and rebuild the P2VM
+   - if `phase_reference` is available, apply an additional phase-reference correction and rebuild the P2VM
 
 ### Products
 

@@ -26,17 +26,10 @@ class CalibrationSpectra:
 
     spec_tel: NDArray
     spec_bsl: NDArray
-    spec_wavesc: NDArray
+    phase_reference: NDArray
     bsl_to_reg: Mapping[int, list[int]]
     bsl_to_tel: Mapping[int, tuple[int, int]]
     wl_grid: NDArray
-
-
-@dataclass(frozen=True, slots=True)
-class TargetSpectra:
-    """One target cube extracted onto the calibrated wavelength grid."""
-
-    spec: NDArray
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,14 +47,13 @@ def preprocess_calibration(
     wave: WaveProduct,
 ) -> CalibrationSpectra:
     """Extract and resample the P2VM calibration cubes."""
-    log.info("--- Step: PREPROC P2VM ---")
+    log.info("Extracting calibration spectra...")
     model = _extraction_model(flat, wave)
     calibration = config.calibration
 
-    log.info("Preprocessing P2VM and FLAT files...")
     spec_bsl = np.asarray(
         [
-            _extract_cube(
+            _extract_resampled_spectra(
                 calibration.p2vm[name],
                 model.flat.dark_map,
                 model,
@@ -71,7 +63,7 @@ def preprocess_calibration(
     )
     spec_tel = np.asarray(
         [
-            _extract_cube(
+            _extract_resampled_spectra(
                 calibration.flats[name],
                 model.flat.dark_map,
                 model,
@@ -80,12 +72,17 @@ def preprocess_calibration(
         ]
     )
 
-    spec_wavesc = np.empty((N_OUTPUTS, 0, len(model.wavelength_grid)), dtype=np.float64)
+    phase_reference_spectra = np.empty(
+        (N_OUTPUTS, 0, len(model.wavelength_grid)), dtype=np.float64
+    )
     if phase_reference := calibration.phase_reference:
         phase_dark = model.flat.dark_map
         if phase_reference.dark is not None:
-            phase_dark = _mean_cube(phase_reference.dark)
-        spec_wavesc = _extract_cube(
+            log.info(
+                f"    Building phase-reference dark map from {phase_reference.dark}..."
+            )
+            phase_dark = frame_mean(iter_cube(phase_reference.dark))
+        phase_reference_spectra = _extract_resampled_spectra(
             phase_reference.data,
             phase_dark,
             model,
@@ -125,13 +122,12 @@ def preprocess_calibration(
     spectra = CalibrationSpectra(
         spec_tel=spec_tel,
         spec_bsl=spec_bsl,
-        spec_wavesc=spec_wavesc,
+        phase_reference=phase_reference_spectra,
         bsl_to_reg=bsl_to_reg,
         bsl_to_tel=bsl_to_tel,
         wl_grid=model.wavelength_grid,
     )
-    log.info("--- Step: PREPROC P2VM [DONE] ---")
-    log.info("")
+    log.info("Calibration spectra extracted.")
     return spectra
 
 
@@ -140,21 +136,22 @@ def preprocess_target(
     target_name: str,
     flat: FlatProduct,
     wave: WaveProduct,
-) -> TargetSpectra:
+) -> NDArray:
     """Extract and resample one science target cube."""
-    log.info(f"--- Step: PREPROC {target_name} ---")
+    log.info(f"Extracting spectra for target {target_name}...")
     model = _extraction_model(flat, wave)
     target = config.target(target_name)
-    dark = model.flat.dark_map if target.dark is None else _mean_cube(target.dark)
-    spec = _extract_cube(
+    dark = model.flat.dark_map
+    if target.dark is not None:
+        log.info(f"    Building target dark map from {target.dark}...")
+        dark = frame_mean(iter_cube(target.dark))
+    spectra = _extract_resampled_spectra(
         target.data,
         dark,
         model,
     )
-    log.info(f"Preprocessed target: {target_name}")
-    log.info(f"--- Step: PREPROC {target_name} [DONE] ---")
-    log.info("")
-    return TargetSpectra(spec=spec)
+    log.info(f"Target spectra extracted: {target_name}")
+    return spectra
 
 
 def _extraction_model(flat: FlatProduct, wave: WaveProduct) -> _ExtractionModel:
@@ -177,17 +174,13 @@ def _extraction_model(flat: FlatProduct, wave: WaveProduct) -> _ExtractionModel:
     )
 
 
-def _mean_cube(path: Path) -> NDArray:
-    log.info(f"    Building dark map from {path}...")
-    return frame_mean(iter_cube(path))
-
-
-def _extract_cube(
+def _extract_resampled_spectra(
     path: Path,
     dark: NDArray,
     model: _ExtractionModel,
 ) -> NDArray:
-    log.info(f"    Extracting spectra from {path}...")
+    """Dark-subtract, flat-correct, extract, and resample one detector cube."""
+    log.info(f"    Reducing detector cube to calibrated spectra: {path}")
     aligned_chunks = []
     for data in iter_cube(path):
         spec = extract_spec_sparse(

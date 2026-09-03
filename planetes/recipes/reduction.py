@@ -30,15 +30,15 @@ GROUP_DELAY_RANGE_UM = (-100.0, 100.0)
 def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
     """Preprocess and reduce one configured science target."""
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    config.save(config.output_dir / "config_used.yaml")
+    config.copy_used_config(config.output_dir / "config_used.yaml")
     log.info(f"--- Step: REDUCE {target_name} ---")
     flat = read_product(config.output_dir / "flat.npz", FlatProduct)
     wave = read_product(config.output_dir / "wave.npz", WaveProduct)
     p2vm = read_product(config.output_dir / "p2vm.npz", P2VMProduct)
-    preproc = preprocess_target(config, target_name, flat, wave)
+    spectra = preprocess_target(config, target_name, flat, wave)
 
     log.info(f"Applying P2VM to extract visibility for {target_name}...")
-    p2vmred = np.einsum("box,ofx->fbx", p2vm.p2vm, preproc.spec)
+    p2vmred = np.einsum("box,ofx->fbx", p2vm.p2vm, spectra)
     fluxdata = p2vmred[:, :N_TELESCOPES, :]
     coherent_flux = p2vmred[:, REAL_SLICE, :] + 1j * p2vmred[:, IMAG_SLICE, :]
     visamp, flag = normalize_visibility(coherent_flux, fluxdata, p2vm.bsl_to_tel)
@@ -76,7 +76,6 @@ def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
     log.info(f"Reduction for {target_name} completed.")
 
     log.info(f"--- Step: REDUCE {target_name} [DONE] ---")
-    log.info("")
     return product
 
 

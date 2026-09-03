@@ -1,5 +1,7 @@
 """P2VM calibration recipe."""
 
+from collections.abc import Mapping
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -20,17 +22,17 @@ from .preproc import CalibrationSpectra
 
 def run_p2vm(
     config: PipelineConfig,
-    preproc: CalibrationSpectra,
+    spectra: CalibrationSpectra,
 ) -> P2VMProduct:
     """Compute the pixel-to-visibility matrix."""
     log.info("--- Step: P2VM ---")
 
-    spec_tel = preproc.spec_tel
-    spec_bsl = preproc.spec_bsl
-    spec_wavesc = preproc.spec_wavesc
-    bsl_to_reg = preproc.bsl_to_reg
-    bsl_to_tel = preproc.bsl_to_tel
-    wl_grid = preproc.wl_grid
+    spec_tel = spectra.spec_tel
+    spec_bsl = spectra.spec_bsl
+    phase_reference = spectra.phase_reference
+    bsl_to_reg = spectra.bsl_to_reg
+    bsl_to_tel = spectra.bsl_to_tel
+    wl_grid = spectra.wl_grid
 
     reg_to_bsl = {reg: bsl for bsl, regs in bsl_to_reg.items() for reg in regs}
 
@@ -51,12 +53,13 @@ def run_p2vm(
 
         spec = spec_bsl[bsl]
         regs = bsl_to_reg[bsl]
+        # Keep explicit envelope weights for the planned weighted ellipse fit.
         envs = np.ones((n_frame, n_wave), dtype=float)
 
         # 1. Fit Ellipses to extract raw Phase & Visibility
         log.debug("    Fitting ellipses for phase extraction...")
         phase, visamp = fit_ellipse_linear(spec[regs], envs)
-        _visdata = visamp * np.exp(1j * phase)
+        visdata = visamp * np.exp(1j * phase)
         ellipse_results.append((phase, visamp))
 
         # use the central 50% of the wavelength range for OPD and GD estimation
@@ -64,7 +67,7 @@ def run_p2vm(
         w_end = (n_wave * 3) // 4
 
         opd = np.mean((phase * wl_grid)[:, w_start:w_end] / 2 / np.pi, axis=1)
-        gd = compute_gdelay(_visdata[:, w_start:w_end], wl_grid[w_start:w_end])
+        gd = compute_gdelay(visdata[:, w_start:w_end], wl_grid[w_start:w_end])
 
         # Assume OPD=0 <-> GD=0; remove OPD zero-point
         _, opd0 = np.polyfit(gd, opd, 1)
@@ -77,7 +80,7 @@ def run_p2vm(
         # Reconstruct phase for fitting
         phi = 2 * np.pi * opd[:, None] / wl_grid[None, :]
 
-        # Solve Linear System: spec = a*cos(phi) + b*cos(phi) + c
+        # Solve Linear System: spec = a*cos(phi) + b*sin(phi) + c
         mat = np.ones((len(phi), 3))
         log.debug("    Fitting P2VM coefficients...")
         for iw in range(n_wave):
@@ -136,44 +139,6 @@ def run_p2vm(
     coh = v2pm[:, REAL_SLICE, :]
     phase = v2pm[:, IMAG_SLICE, :]
 
-    def phase_corr(phase: NDArray, visdata: NDArray) -> NDArray:
-        phase = phase.copy()
-        opl = np.zeros((len(visdata), 4))
-        wave0 = len(wl_grid) // 2
-
-        for base in [1, 2, 3]:
-            _gd = compute_gdelay(visdata[:, base - 1, :], wl_grid)
-            _phasor = np.exp(-1j * 2 * np.pi * _gd[:, None] / wl_grid)
-            opl[:, base] = (
-                np.angle(visdata[:, base - 1, wave0] * _phasor[:, wave0])
-                + 2 * np.pi * _gd / wl_grid[wave0]
-            )
-        opl -= opl.mean(axis=0)[None, :]
-
-        visphase = np.zeros((N_BASELINES, n_wave), dtype=complex)
-        for bsl in range(N_BASELINES):
-            tel1, tel2 = bsl_to_tel[bsl]
-            x = opl[:, tel2] - opl[:, tel1]
-            visphase[bsl, :] = (
-                visdata[:, bsl, :] * np.exp(-1j * x[:, None] * wl_grid[wave0] / wl_grid)
-            ).sum(axis=0)
-
-        ref = np.ones((4, n_wave), dtype=complex)
-        gdelay = compute_gdelay(visphase, wl_grid)
-
-        for base in [0, 1, 2]:
-            ref[base + 1] = np.exp(2j * np.pi * gdelay[base] / wl_grid)
-
-        for bsl in range(N_BASELINES):
-            tel1, tel2 = bsl_to_tel[bsl]
-            visphase[bsl, :] *= ref[tel1] * ref[tel2].conj()
-
-        for reg in range(N_OUTPUTS):
-            bsl = reg_to_bsl[reg]
-            phi = np.exp(1j * phase[reg, bsl, :]) * visphase[bsl, :].conj()
-            phase[reg, bsl, :] = np.angle(phi)
-        return phase
-
     _v2pm = v2pm.copy()
     _v2pm[:, REAL_SLICE, :] = coh * np.cos(phase)
     _v2pm[:, IMAG_SLICE, :] = coh * np.sin(phase)
@@ -184,12 +149,18 @@ def run_p2vm(
     for iw in range(n_wave):
         p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
 
-    has_wavesc = spec_wavesc.shape[1] > 0
-    if has_wavesc and config.phase_correction:
-        log.info("Applying phase correction...")
-        p2vmred_wave = np.einsum("dow,ofw->fdw", p2vm, spec_wavesc)
+    has_phase_reference = phase_reference.shape[1] > 0
+    if has_phase_reference and config.phase_correction:
+        log.info("Applying phase-reference correction...")
+        p2vmred_wave = np.einsum("dow,ofw->fdw", p2vm, phase_reference)
         vis_ft = p2vmred_wave[:, REAL_SLICE, :] + 1j * p2vmred_wave[:, IMAG_SLICE, :]
-        phase = phase_corr(phase, vis_ft)
+        phase = _correct_phase_reference(
+            phase,
+            vis_ft,
+            wl_grid,
+            bsl_to_tel,
+            reg_to_bsl,
+        )
 
         _v2pm = v2pm.copy()
         _v2pm[:, REAL_SLICE, :] = coh * np.cos(phase)
@@ -200,7 +171,7 @@ def run_p2vm(
         for iw in range(n_wave):
             p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
     elif config.phase_correction:
-        log.info("Skipping phase correction: no WAVE,SC calibration was provided.")
+        log.info("Skipping phase correction: no phase-reference cube was provided.")
 
     product = P2VMProduct(
         p2vm=p2vm,
@@ -214,9 +185,56 @@ def run_p2vm(
     )
     write_product(config.output_dir / "p2vm.npz", product)
     log.info("--- Step: P2VM [DONE] ---")
-    log.info("")
 
     return product
+
+
+def _correct_phase_reference(
+    phase: NDArray,
+    visdata: NDArray,
+    wavelength: NDArray,
+    baseline_telescopes: Mapping[int, tuple[int, int]],
+    region_to_baseline: Mapping[int, int],
+) -> NDArray:
+    """Apply the phase-reference solution to the calibrated V2PM phases."""
+    phase = phase.copy()
+    opl = np.zeros((len(visdata), N_TELESCOPES))
+    wave0 = len(wavelength) // 2
+
+    for telescope in range(1, N_TELESCOPES):
+        group_delay = compute_gdelay(visdata[:, telescope - 1, :], wavelength)
+        phasor = np.exp(-1j * 2 * np.pi * group_delay[:, None] / wavelength)
+        opl[:, telescope] = (
+            np.angle(visdata[:, telescope - 1, wave0] * phasor[:, wave0])
+            + 2 * np.pi * group_delay / wavelength[wave0]
+        )
+    opl -= opl.mean(axis=0)[None, :]
+
+    visphase = np.zeros((N_BASELINES, len(wavelength)), dtype=complex)
+    for baseline in range(N_BASELINES):
+        telescope_1, telescope_2 = baseline_telescopes[baseline]
+        opl_difference = opl[:, telescope_2] - opl[:, telescope_1]
+        visphase[baseline] = (
+            visdata[:, baseline]
+            * np.exp(-1j * opl_difference[:, None] * wavelength[wave0] / wavelength)
+        ).sum(axis=0)
+
+    reference = np.ones((N_TELESCOPES, len(wavelength)), dtype=complex)
+    group_delay = compute_gdelay(visphase, wavelength)
+    for telescope in range(N_TELESCOPES - 1):
+        reference[telescope + 1] = np.exp(
+            2j * np.pi * group_delay[telescope] / wavelength
+        )
+
+    for baseline in range(N_BASELINES):
+        telescope_1, telescope_2 = baseline_telescopes[baseline]
+        visphase[baseline] *= reference[telescope_1] * reference[telescope_2].conj()
+
+    for region in range(N_OUTPUTS):
+        baseline = region_to_baseline[region]
+        phasor = np.exp(1j * phase[region, baseline]) * visphase[baseline].conj()
+        phase[region, baseline] = np.angle(phasor)
+    return phase
 
 
 # @njit(parallel=True, fastmath=True, cache=True)
