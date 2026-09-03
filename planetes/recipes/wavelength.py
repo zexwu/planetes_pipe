@@ -36,11 +36,11 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
 
     log.info("--- Step: WAVE ---")
 
-    profile_xs = flat.profile_xs
-    profile_ys = flat.profile_ys
-    _, nx = flat.flat_map.shape
+    profile_xs = flat.profile_x_pixels
+    profile_ys = flat.profile_y_pixels
+    _, nx = flat.flat_map_adu.shape
     detector_x = np.arange(nx)
-    y_trace = flat.ys
+    y_trace = flat.trace_y_pixels
 
     wave_input = config.calibration.wavelength
     wave_img = frame_mean(iter_cube(wave_input.data)) - frame_mean(
@@ -171,7 +171,7 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
     full_design_matrix = dmat_arr(det_x_coords, det_y_coords, max_deg=deg)
     wavemap = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix)
 
-    wave_product = WaveProduct(wave_map=wavemap)
+    wave_product = WaveProduct(wavelength_map_um=wavemap)
     write_product(config.output_dir / "wave.npz", wave_product)
     log.info("Saved full wavemap")
     log.info("--- Step: WAVE [DONE] ---")

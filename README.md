@@ -109,10 +109,10 @@ cache.
 | File | Content |
 | --- | --- |
 | `config_used.yaml` | exact source configuration used for the run |
-| `flat.npz` | dark/bad/flat maps and sparse traces |
-| `wave.npz` | detector wavelength map |
-| `p2vm.npz` | V2PM, P2VM, OPD/GD diagnostics, and mappings |
-| `<target>_reduced.npz` | flux, coherent flux, visibility, flags, phase, and GD |
+| `flat.npz` | ADU detector maps, bad-pixel flags, and sparse pixel traces |
+| `wave.npz` | detector wavelength map in micrometres |
+| `p2vm.npz` | V2PM transmission/coherence terms, P2VM, mappings, and fit diagnostics |
+| `<target>_reduced.npz` | photometric/coherent flux, visibility, flags, differential phase, and GD |
 | `<target>.pdf` | explicitly requested diagnostic plots |
 
 NPZ remains a temporary internal product carrier. The numerical recipes consume

@@ -98,12 +98,12 @@ def build_flat_product(
         ys_list.append(ys_smoothed)
 
     product = FlatProduct(
-        profile_xs=np.array(profile_xs),
-        profile_ys=np.array(profile_ys),
-        flat_map=flat_map,
-        dark_map=dark_map,
-        bad_map=bad_map,
-        ys=np.array(ys_list),
+        profile_x_pixels=np.array(profile_xs),
+        profile_y_pixels=np.array(profile_ys),
+        flat_map_adu=flat_map,
+        dark_map_adu=dark_map,
+        bad_pixel_flags=bad_map,
+        trace_y_pixels=np.array(ys_list),
     )
     return product
 

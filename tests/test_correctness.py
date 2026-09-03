@@ -5,13 +5,40 @@ from unittest.mock import patch
 
 import numpy as np
 
+from planetes.instrument import (
+    IMAG_SLICE,
+    N_BASELINES,
+    N_OUTPUTS,
+    N_TELESCOPES,
+    REAL_SLICE,
+)
 from planetes.recipes.flat import build_flat_product
+from planetes.recipes.p2vm import _build_v2pm_matrix
 from planetes.recipes.preproc import extract_spec_sparse
 from planetes.recipes.reduction import normalize_visibility
 from planetes.recipes.wavelength import load_wavelength_lines, match_lines_grid
 
 
 class CorrectnessTests(unittest.TestCase):
+    def test_v2pm_terms_expand_to_cartesian_matrix(self) -> None:
+        transmission = np.arange(
+            N_OUTPUTS * N_TELESCOPES * 2, dtype=float
+        ).reshape(N_OUTPUTS, N_TELESCOPES, 2)
+        amplitude = np.full((N_OUTPUTS, N_BASELINES, 2), 2.0)
+        phase = np.full((N_OUTPUTS, N_BASELINES, 2), np.pi / 3)
+
+        matrix = _build_v2pm_matrix(transmission, amplitude, phase)
+
+        np.testing.assert_array_equal(
+            matrix[:, :N_TELESCOPES], transmission / N_OUTPUTS
+        )
+        np.testing.assert_array_equal(
+            matrix[:, REAL_SLICE], amplitude * np.cos(phase) / N_OUTPUTS
+        )
+        np.testing.assert_array_equal(
+            matrix[:, IMAG_SLICE], amplitude * np.sin(phase) / N_OUTPUTS
+        )
+
     def test_sparse_profile_excludes_bad_pixels(self) -> None:
         dark_map = np.zeros((8, 128), dtype=np.float32)
         dark_std = np.zeros_like(dark_map)
@@ -40,7 +67,13 @@ class CorrectnessTests(unittest.TestCase):
                 profile_width=3,
             )
 
-        selected = set(zip(product.profile_ys[0], product.profile_xs[0], strict=True))
+        selected = set(
+            zip(
+                product.profile_y_pixels[0],
+                product.profile_x_pixels[0],
+                strict=True,
+            )
+        )
         self.assertNotIn((4, 10), selected)
         self.assertIn((-1, -1), selected)
 

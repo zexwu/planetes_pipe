@@ -16,32 +16,34 @@ Array = NDArray[Any]
 class FlatProduct:
     """Detector maps and sparse spectral traces."""
 
-    profile_xs: Array
-    profile_ys: Array
-    flat_map: Array
-    dark_map: Array
-    bad_map: Array
-    ys: Array
+    profile_x_pixels: Array
+    profile_y_pixels: Array
+    flat_map_adu: Array
+    dark_map_adu: Array
+    bad_pixel_flags: Array
+    trace_y_pixels: Array
 
 
 @dataclass(frozen=True, slots=True)
 class WaveProduct:
     """Wavelength at every extracted detector pixel."""
 
-    wave_map: Array
+    wavelength_map_um: Array
 
 
 @dataclass(frozen=True, slots=True)
 class P2VMProduct:
-    """Visibility-to-pixel model and its inverse."""
+    """V2PM calibration terms, P2VM inverse, and fit diagnostics."""
 
     p2vm: Array
-    v2pm: Array
-    opd_per_baseline: Array
-    gd_per_baseline: Array
-    wl_grid: Array
-    bsl_to_reg: Mapping[int, list[int]]
-    bsl_to_tel: Mapping[int, tuple[int, int]]
+    wavelength_um: Array
+    baseline_regions: Mapping[int, list[int]]
+    baseline_telescopes: Mapping[int, tuple[int, int]]
+    transmission: Array
+    coherence_amplitude: Array
+    coherence_phase_rad: Array
+    opd_um: Array
+    group_delay_um: Array
     ellipse_phase_rad: Array
     ellipse_amplitude: Array
 
@@ -50,15 +52,15 @@ class P2VMProduct:
 class ReducedProduct:
     """Reduced photometry and complex visibility observables."""
 
-    fluxdata: Array
-    coherent_flux: Array
-    visamp: Array
-    flag: Array
-    wl_grid: Array
-    gdelay: Array
-    visphi: Array
-    bsl_to_reg: Mapping[int, list[int]]
-    bsl_to_tel: Mapping[int, tuple[int, int]]
+    photometric_flux_adu: Array
+    coherent_flux_adu: Array
+    visibility_amplitude: Array
+    flags: Array
+    wavelength_um: Array
+    group_delay_um: Array
+    differential_phase_deg: Array
+    baseline_regions: Mapping[int, list[int]]
+    baseline_telescopes: Mapping[int, tuple[int, int]]
 
 
 ProductT = TypeVar("ProductT")

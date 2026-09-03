@@ -27,21 +27,21 @@ def run_p2vm(
     """Compute the pixel-to-visibility matrix."""
     log.info("--- Step: P2VM ---")
 
-    spec_tel = spectra.spec_tel
-    spec_bsl = spectra.spec_bsl
+    spec_tel = spectra.telescope_spectra
+    spec_bsl = spectra.baseline_spectra
     phase_reference = spectra.phase_reference
-    bsl_to_reg = spectra.bsl_to_reg
-    bsl_to_tel = spectra.bsl_to_tel
-    wl_grid = spectra.wl_grid
+    bsl_to_reg = spectra.baseline_regions
+    bsl_to_tel = spectra.baseline_telescopes
+    wl_grid = spectra.wavelength_um
 
     reg_to_bsl = {reg: bsl for bsl, regs in bsl_to_reg.items() for reg in regs}
 
     n_frame = spec_bsl[0].shape[1]
     n_wave = spec_bsl[0].shape[2]
 
-    # Initialize matrices
-    # v2pm: Visibility to Pixel Matrix
-    v2pm = np.zeros((N_OUTPUTS, N_DATA, n_wave))
+    transmission = np.zeros((N_OUTPUTS, N_TELESCOPES, n_wave))
+    coherence_amplitude = np.zeros((N_OUTPUTS, N_BASELINES, n_wave))
+    coherence_phase_rad = np.zeros((N_OUTPUTS, N_BASELINES, n_wave))
     cmat = np.zeros((N_OUTPUTS, N_BASELINES, n_wave))
     ellipse_phase = []
     ellipse_amplitude = []
@@ -95,9 +95,8 @@ def run_p2vm(
             coeff = np.einsum("if,of->oi", mat_inv, spec[..., iw])
             a, b, c = coeff[:, 2], coeff[:, 1], coeff[:, 0]
 
-            # Store in V2PM
-            v2pm[:, REAL_SLICE, iw][:, bsl] = np.sqrt(a**2 + b**2)  # Coherence Amp
-            v2pm[:, IMAG_SLICE, iw][:, bsl] = np.arctan2(b, a)  # Phase
+            coherence_amplitude[:, bsl, iw] = np.sqrt(a**2 + b**2)
+            coherence_phase_rad[:, bsl, iw] = np.arctan2(b, a)
             cmat[:, bsl, iw] = c
 
     # --- B. Process Telescopes (Photometric Terms) ---
@@ -106,24 +105,24 @@ def run_p2vm(
         # Median transmission map
         trans_map = np.median(spec_tel[tel], axis=1)
         # Normalize sum to 1
-        v2pm[:, tel, :] = trans_map / trans_map.sum()
+        transmission[:, tel, :] = trans_map / trans_map.sum()
 
     # --- C. Normalization & Inversion ---
     log.info("P2VM Normalization...")
     log.info("    Phase normalization (A=0)...")
     for bsl in range(N_BASELINES):
         regs = bsl_to_reg[bsl]
-        phase_A = v2pm[regs[0], IMAG_SLICE, :]
-        v2pm[regs, IMAG_SLICE, :] -= phase_A[None, :, :]
+        phase_A = coherence_phase_rad[regs[0]]
+        coherence_phase_rad[regs] -= phase_A[None, :, :]
 
     log.info("    Transmission normalization (sum of 24 outputs -> 1)...")
-    v2pm[:, :N_TELESCOPES, :] /= v2pm[:, :N_TELESCOPES, :].mean(axis=0)[None, :, :]
+    transmission /= transmission.mean(axis=0)[None, :, :]
 
     log.info("    Coherence normalization...")
     for bsl in range(N_BASELINES):
         t1, t2 = bsl_to_tel[bsl]
         for iw in range(n_wave):
-            t_mat = v2pm[:, :N_TELESCOPES, iw]
+            t_mat = transmission[:, :, iw]
             c = cmat[:, bsl, iw]
 
             # Solve for intensities contributing to the DC term
@@ -135,54 +134,54 @@ def run_p2vm(
                     f"wavelength index {iw}"
                 )
             f1f2 = np.sqrt(flux_product)
-            v2pm[:, N_TELESCOPES + bsl, iw] /= f1f2
+            coherence_amplitude[:, bsl, iw] /= f1f2
 
-    # Convert Polar (Amp, Phase) to Cartesian (Cos, Sin) for final matrix
-    coh = v2pm[:, REAL_SLICE, :]
-    phase = v2pm[:, IMAG_SLICE, :]
-
-    _v2pm = v2pm.copy()
-    _v2pm[:, REAL_SLICE, :] = coh * np.cos(phase)
-    _v2pm[:, IMAG_SLICE, :] = coh * np.sin(phase)
-    _v2pm /= N_OUTPUTS
+    v2pm_matrix = _build_v2pm_matrix(
+        transmission,
+        coherence_amplitude,
+        coherence_phase_rad,
+    )
 
     log.info("V2PM -> P2VM")
     p2vm = np.zeros((N_DATA, N_OUTPUTS, n_wave))
     for iw in range(n_wave):
-        p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
+        p2vm[:, :, iw] = np.linalg.pinv(v2pm_matrix[:, :, iw])
 
     has_phase_reference = phase_reference.shape[1] > 0
     if has_phase_reference and config.phase_correction:
         log.info("Applying phase-reference correction...")
         p2vmred_wave = np.einsum("dow,ofw->fdw", p2vm, phase_reference)
         vis_ft = p2vmred_wave[:, REAL_SLICE, :] + 1j * p2vmred_wave[:, IMAG_SLICE, :]
-        phase = _correct_phase_reference(
-            phase,
+        coherence_phase_rad = _correct_phase_reference(
+            coherence_phase_rad,
             vis_ft,
             wl_grid,
             bsl_to_tel,
             reg_to_bsl,
         )
 
-        _v2pm = v2pm.copy()
-        _v2pm[:, REAL_SLICE, :] = coh * np.cos(phase)
-        _v2pm[:, IMAG_SLICE, :] = coh * np.sin(phase)
-        _v2pm /= N_OUTPUTS
+        v2pm_matrix = _build_v2pm_matrix(
+            transmission,
+            coherence_amplitude,
+            coherence_phase_rad,
+        )
 
         p2vm = np.zeros((N_DATA, N_OUTPUTS, n_wave))
         for iw in range(n_wave):
-            p2vm[:, :, iw] = np.linalg.pinv(_v2pm[:, :, iw])
+            p2vm[:, :, iw] = np.linalg.pinv(v2pm_matrix[:, :, iw])
     elif config.phase_correction:
         log.info("Skipping phase correction: no phase-reference cube was provided.")
 
     product = P2VMProduct(
         p2vm=p2vm,
-        v2pm=v2pm,
-        opd_per_baseline=opd_per_baseline,
-        gd_per_baseline=gd_per_baseline,
-        wl_grid=wl_grid,
-        bsl_to_reg=bsl_to_reg,
-        bsl_to_tel=bsl_to_tel,
+        wavelength_um=wl_grid,
+        baseline_regions=bsl_to_reg,
+        baseline_telescopes=bsl_to_tel,
+        transmission=transmission,
+        coherence_amplitude=coherence_amplitude,
+        coherence_phase_rad=coherence_phase_rad,
+        opd_um=opd_per_baseline,
+        group_delay_um=gd_per_baseline,
         ellipse_phase_rad=np.asarray(ellipse_phase),
         ellipse_amplitude=np.asarray(ellipse_amplitude),
     )
@@ -190,6 +189,20 @@ def run_p2vm(
     log.info("--- Step: P2VM [DONE] ---")
 
     return product
+
+
+def _build_v2pm_matrix(
+    transmission: NDArray,
+    coherence_amplitude: NDArray,
+    coherence_phase_rad: NDArray,
+) -> NDArray:
+    """Expand the V2PM calibration terms into the matrix used for inversion."""
+    matrix = np.zeros((N_OUTPUTS, N_DATA, transmission.shape[-1]))
+    matrix[:, :N_TELESCOPES] = transmission
+    matrix[:, REAL_SLICE] = coherence_amplitude * np.cos(coherence_phase_rad)
+    matrix[:, IMAG_SLICE] = coherence_amplitude * np.sin(coherence_phase_rad)
+    matrix /= N_OUTPUTS
+    return matrix
 
 
 def _correct_phase_reference(

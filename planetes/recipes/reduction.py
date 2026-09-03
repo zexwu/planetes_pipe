@@ -39,37 +39,41 @@ def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
 
     log.info(f"Applying P2VM to extract visibility for {target_name}...")
     p2vmred = np.einsum("box,ofx->fbx", p2vm.p2vm, spectra)
-    fluxdata = p2vmred[:, :N_TELESCOPES, :]
-    coherent_flux = p2vmred[:, REAL_SLICE, :] + 1j * p2vmred[:, IMAG_SLICE, :]
-    visamp, flag = normalize_visibility(coherent_flux, fluxdata, p2vm.bsl_to_tel)
+    photometric_flux_adu = p2vmred[:, :N_TELESCOPES, :]
+    coherent_flux_adu = p2vmred[:, REAL_SLICE, :] + 1j * p2vmred[:, IMAG_SLICE, :]
+    visibility_amplitude, flags = normalize_visibility(
+        coherent_flux_adu,
+        photometric_flux_adu,
+        p2vm.baseline_telescopes,
+    )
 
-    gdelay = np.zeros((len(coherent_flux), N_BASELINES))
+    group_delay_um = np.zeros((len(coherent_flux_adu), N_BASELINES))
     log.info(f"Computing group delay for {target_name}...")
     for baseline in range(N_BASELINES):
-        gdelay[:, baseline] = compute_gdelay(
-            coherent_flux[:, baseline],
-            p2vm.wl_grid,
+        group_delay_um[:, baseline] = compute_gdelay(
+            coherent_flux_adu[:, baseline],
+            p2vm.wavelength_um,
             search_range=GROUP_DELAY_RANGE_UM,
         )
 
-    visphi = coherent_flux * np.exp(
-        -2j * np.pi * gdelay[:, :, None] / p2vm.wl_grid[None, :]
+    differential_phase_deg = coherent_flux_adu * np.exp(
+        -2j * np.pi * group_delay_um[:, :, None] / p2vm.wavelength_um[None, :]
     )
-    visphi *= visphi.mean(axis=2)[:, :, None].conj()
-    visphi = np.angle(visphi, deg=True)
-    visphi -= visphi.mean(axis=2)[:, :, None]
-    visphi = (visphi + 180) % 360 - 180
+    differential_phase_deg *= differential_phase_deg.mean(axis=2)[:, :, None].conj()
+    differential_phase_deg = np.angle(differential_phase_deg, deg=True)
+    differential_phase_deg -= differential_phase_deg.mean(axis=2)[:, :, None]
+    differential_phase_deg = (differential_phase_deg + 180) % 360 - 180
 
     product = ReducedProduct(
-        fluxdata=fluxdata,
-        coherent_flux=coherent_flux,
-        visamp=visamp,
-        flag=flag,
-        wl_grid=p2vm.wl_grid,
-        gdelay=gdelay,
-        visphi=visphi,
-        bsl_to_reg=p2vm.bsl_to_reg,
-        bsl_to_tel=p2vm.bsl_to_tel,
+        photometric_flux_adu=photometric_flux_adu,
+        coherent_flux_adu=coherent_flux_adu,
+        visibility_amplitude=visibility_amplitude,
+        flags=flags,
+        wavelength_um=p2vm.wavelength_um,
+        group_delay_um=group_delay_um,
+        differential_phase_deg=differential_phase_deg,
+        baseline_regions=p2vm.baseline_regions,
+        baseline_telescopes=p2vm.baseline_telescopes,
     )
     write_product(config.output_dir / f"{target_name}_reduced.npz", product)
     log.info(f"Reduction for {target_name} completed.")

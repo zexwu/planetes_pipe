@@ -11,13 +11,15 @@ from planetes.product import P2VMProduct, WaveProduct, read_product, write_produ
 
 class ProductTests(unittest.TestCase):
     def test_array_product_round_trip(self) -> None:
-        product = WaveProduct(wave_map=np.arange(96).reshape(24, 4))
+        product = WaveProduct(wavelength_map_um=np.arange(96).reshape(24, 4))
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "wave.npz"
             write_product(path, product)
             loaded = read_product(path, WaveProduct)
 
-            np.testing.assert_array_equal(loaded.wave_map, product.wave_map)
+            np.testing.assert_array_equal(
+                loaded.wavelength_map_um, product.wavelength_map_um
+            )
 
     def test_mapping_fields_are_unpacked(self) -> None:
         baseline_regions = {
@@ -29,12 +31,14 @@ class ProductTests(unittest.TestCase):
         )
         product = P2VMProduct(
             p2vm=np.ones(1),
-            v2pm=np.ones(1),
-            opd_per_baseline=np.ones(1),
-            gd_per_baseline=np.ones(1),
-            wl_grid=np.array([1.2, 1.3]),
-            bsl_to_reg=baseline_regions,
-            bsl_to_tel=baseline_telescopes,
+            wavelength_um=np.array([1.2, 1.3]),
+            baseline_regions=baseline_regions,
+            baseline_telescopes=baseline_telescopes,
+            transmission=np.ones(1),
+            coherence_amplitude=np.ones(1),
+            coherence_phase_rad=np.ones(1),
+            opd_um=np.ones(1),
+            group_delay_um=np.ones(1),
             ellipse_phase_rad=np.ones(1),
             ellipse_amplitude=np.ones(1),
         )
@@ -43,8 +47,8 @@ class ProductTests(unittest.TestCase):
             write_product(path, product)
             loaded = read_product(path, P2VMProduct)
 
-            self.assertEqual(loaded.bsl_to_reg, baseline_regions)
-            self.assertEqual(loaded.bsl_to_tel, baseline_telescopes)
+            self.assertEqual(loaded.baseline_regions, baseline_regions)
+            self.assertEqual(loaded.baseline_telescopes, baseline_telescopes)
 
     def test_schema_mismatch_is_explicit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -24,21 +24,21 @@ WAVELENGTH_CHANNELS = 151
 class CalibrationSpectra:
     """Extracted calibration cubes passed directly to the P2VM recipe."""
 
-    spec_tel: NDArray
-    spec_bsl: NDArray
+    telescope_spectra: NDArray
+    baseline_spectra: NDArray
     phase_reference: NDArray
-    bsl_to_reg: Mapping[int, list[int]]
-    bsl_to_tel: Mapping[int, tuple[int, int]]
-    wl_grid: NDArray
+    baseline_regions: Mapping[int, list[int]]
+    baseline_telescopes: Mapping[int, tuple[int, int]]
+    wavelength_um: NDArray
 
 
 @dataclass(frozen=True, slots=True)
 class _ExtractionModel:
     flat: FlatProduct
-    wave_map: NDArray
-    detector_flat: NDArray
-    aligned_flat: NDArray
-    wavelength_grid: NDArray
+    wavelength_map_um: NDArray
+    detector_flat_spectra: NDArray
+    resampled_flat_spectra: NDArray
+    wavelength_um: NDArray
 
 
 def preprocess_calibration(
@@ -55,7 +55,7 @@ def preprocess_calibration(
         [
             _extract_resampled_spectra(
                 calibration.p2vm[name],
-                model.flat.dark_map,
+                model.flat.dark_map_adu,
                 model,
             )
             for name in BASELINES
@@ -65,7 +65,7 @@ def preprocess_calibration(
         [
             _extract_resampled_spectra(
                 calibration.flats[name],
-                model.flat.dark_map,
+                model.flat.dark_map_adu,
                 model,
             )
             for name in TELESCOPES
@@ -73,10 +73,10 @@ def preprocess_calibration(
     )
 
     phase_reference_spectra = np.empty(
-        (N_OUTPUTS, 0, len(model.wavelength_grid)), dtype=np.float64
+        (N_OUTPUTS, 0, len(model.wavelength_um)), dtype=np.float64
     )
     if phase_reference := calibration.phase_reference:
-        phase_dark = model.flat.dark_map
+        phase_dark = model.flat.dark_map_adu
         if phase_reference.dark is not None:
             log.info(
                 f"    Building phase-reference dark map from {phase_reference.dark}..."
@@ -120,12 +120,12 @@ def preprocess_calibration(
             bsl_to_tel[baseline] = (telescope_1, telescope_2)
 
     spectra = CalibrationSpectra(
-        spec_tel=spec_tel,
-        spec_bsl=spec_bsl,
+        telescope_spectra=spec_tel,
+        baseline_spectra=spec_bsl,
         phase_reference=phase_reference_spectra,
-        bsl_to_reg=bsl_to_reg,
-        bsl_to_tel=bsl_to_tel,
-        wl_grid=model.wavelength_grid,
+        baseline_regions=bsl_to_reg,
+        baseline_telescopes=bsl_to_tel,
+        wavelength_um=model.wavelength_um,
     )
     log.info("Calibration spectra extracted.")
     return spectra
@@ -141,7 +141,7 @@ def preprocess_target(
     log.info(f"Extracting spectra for target {target_name}...")
     model = _extraction_model(flat, wave)
     target = config.target(target_name)
-    dark = model.flat.dark_map
+    dark = model.flat.dark_map_adu
     if target.dark is not None:
         log.info(f"    Building target dark map from {target.dark}...")
         dark = frame_mean(iter_cube(target.dark))
@@ -161,16 +161,22 @@ def _extraction_model(flat: FlatProduct, wave: WaveProduct) -> _ExtractionModel:
         WAVELENGTH_CHANNELS,
     )
     spec_flat_detector = extract_spec_sparse(
-        flat.flat_map[None, :, :], flat.profile_ys, flat.profile_xs
+        flat.flat_map_adu[None, :, :],
+        flat.profile_y_pixels,
+        flat.profile_x_pixels,
     )
     spec_flat_detector = np.clip(spec_flat_detector, a_min=1e-8, a_max=None)
-    spec_flat = 1 / twopx_interp(1 / spec_flat_detector, wave.wave_map, wl_grid)
+    spec_flat = 1 / twopx_interp(
+        1 / spec_flat_detector,
+        wave.wavelength_map_um,
+        wl_grid,
+    )
     return _ExtractionModel(
         flat=flat,
-        wave_map=wave.wave_map,
-        detector_flat=spec_flat_detector,
-        aligned_flat=spec_flat,
-        wavelength_grid=wl_grid,
+        wavelength_map_um=wave.wavelength_map_um,
+        detector_flat_spectra=spec_flat_detector,
+        resampled_flat_spectra=spec_flat,
+        wavelength_um=wl_grid,
     )
 
 
@@ -185,15 +191,15 @@ def _extract_resampled_spectra(
     for data in iter_cube(path):
         spec = extract_spec_sparse(
             data - dark,
-            model.flat.profile_ys,
-            model.flat.profile_xs,
+            model.flat.profile_y_pixels,
+            model.flat.profile_x_pixels,
         )
         spec_aligned = twopx_interp(
-            spec / model.detector_flat,
-            model.wave_map,
-            model.wavelength_grid,
+            spec / model.detector_flat_spectra,
+            model.wavelength_map_um,
+            model.wavelength_um,
         )
-        spec_aligned *= model.aligned_flat
+        spec_aligned *= model.resampled_flat_spectra
         aligned_chunks.append(spec_aligned)
     return np.concatenate(aligned_chunks, axis=1)
 

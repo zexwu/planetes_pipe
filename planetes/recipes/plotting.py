@@ -48,20 +48,20 @@ def summary_plot(
         config.output_dir / f"{target_name}_reduced.npz", ReducedProduct
     )
     object_label = str(target.data)
-    fluxdata = reduced.fluxdata
-    coherent_flux = reduced.coherent_flux
-    visamp = reduced.visamp
-    flag = reduced.flag
-    visphi = reduced.visphi
-    gdelay = reduced.gdelay
+    photometric_flux_adu = reduced.photometric_flux_adu
+    coherent_flux_adu = reduced.coherent_flux_adu
+    visibility_amplitude = reduced.visibility_amplitude
+    flags = reduced.flags
+    differential_phase_deg = reduced.differential_phase_deg
+    group_delay_um = reduced.group_delay_um
 
     log.info(f"--- Step: PLOTTING {target_name} ---")
     plt.rcParams["font.size"] = 14
 
     with PdfPages(config.output_dir / f"{target_name}.pdf") as pdf:
-        mean_flux = fluxdata.mean(axis=-1)
-        frame_samples = np.arange(0, visphi.shape[0], 10)
-        wave_samples = np.arange(0, visphi.shape[-1], 10)
+        mean_flux = photometric_flux_adu.mean(axis=-1)
+        frame_samples = np.arange(0, differential_phase_deg.shape[0], 10)
+        wave_samples = np.arange(0, differential_phase_deg.shape[-1], 10)
 
         def save(fig) -> None:
             pdf.savefig(fig)
@@ -93,7 +93,7 @@ def summary_plot(
                 xlabel="#Frame",
                 ylabel="abs(coherent flux) [adu]",
             )
-            mean_coherent_flux = abs(coherent_flux.mean(axis=-1))
+            mean_coherent_flux = abs(coherent_flux_adu.mean(axis=-1))
             for baseline in range(N_BASELINES):
                 mean = mean_coherent_flux[:, baseline].mean()
                 axes[baseline].plot(mean_coherent_flux[:, baseline] - mean)
@@ -115,7 +115,7 @@ def summary_plot(
             fig, axes = genfig(
                 2, N_BASELINES // 2, xlabel="Wavelength Index", ylabel="VISAMP"
             )
-            plotted = np.ma.array(visamp, mask=flag)
+            plotted = np.ma.array(visibility_amplitude, mask=flags)
             colors = plt.cm.viridis(np.linspace(0, 1, len(plotted)))
             for baseline in range(N_BASELINES):
                 axes[baseline].set_prop_cycle(color=colors)
@@ -132,7 +132,7 @@ def summary_plot(
                 xlabel="#Frame",
                 ylabel="arg(coherent flux) [deg]",
             )
-            mean_phase = np.angle(coherent_flux.mean(axis=-1), deg=True)
+            mean_phase = np.angle(coherent_flux_adu.mean(axis=-1), deg=True)
             mean_phase = np.unwrap(mean_phase, period=360, axis=0)
             for baseline in range(N_BASELINES):
                 axes[baseline].plot(mean_phase[:, baseline])
@@ -149,7 +149,7 @@ def summary_plot(
                 sharey=False,
             )
             for baseline in range(N_BASELINES):
-                axes[baseline].plot(gdelay[:, baseline])
+                axes[baseline].plot(group_delay_um[:, baseline])
                 axes[baseline].set_title(f"Baseline {BASELINES[baseline]}")
             fig.suptitle(f"{object_label}\nGroup Delay per baseline")
             save(fig)
@@ -160,13 +160,15 @@ def summary_plot(
                     2,
                     N_BASELINES // 2,
                     xlabel="Wavelength Index",
-                    ylabel="Phase [deg]",
+                    ylabel="Differential Phase [deg]",
                 )
                 for baseline in range(N_BASELINES):
-                    axes[baseline].plot(visphi[frame, baseline])
+                    axes[baseline].plot(differential_phase_deg[frame, baseline])
                     axes[baseline].set_title(f"Baseline {BASELINES[baseline]}")
                     axes[baseline].set_ylim(-10, 10)
-                fig.suptitle(f"{object_label}\nvisphi per baseline @ DIT {frame}")
+                fig.suptitle(
+                    f"{object_label}\ndifferential phase per baseline @ DIT {frame}"
+                )
                 save(fig)
 
         def plot_phase_vs_group_delay() -> None:
@@ -175,19 +177,19 @@ def summary_plot(
                     2,
                     N_BASELINES // 2,
                     xlabel="Group Delay [um]",
-                    ylabel="Phase [deg]",
+                    ylabel="Differential Phase [deg]",
                     sharex=False,
                 )
                 for baseline in range(N_BASELINES):
                     axes[baseline].scatter(
-                        gdelay[:, baseline],
-                        visphi[:, baseline, wavelength],
+                        group_delay_um[:, baseline],
+                        differential_phase_deg[:, baseline, wavelength],
                         s=5,
                         alpha=0.7,
                     )
                     axes[baseline].set_title(f"Baseline {BASELINES[baseline]}")
                     axes[baseline].set_ylim(-10, 10)
-                fig.suptitle(f"{object_label}\nvisphi per baseline")
+                fig.suptitle(f"{object_label}\ndifferential phase per baseline")
                 save(fig)
 
         plots = [
