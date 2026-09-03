@@ -31,7 +31,7 @@ def run_flat(config: PipelineConfig) -> FlatProduct:
         flat_maps,
     )
     write_product(config.output_dir / "flat.npz", product)
-    log.info("Saved profile, flat, dark, and trace data.")
+    log.info("Saved flat, dark, bad-pixel, and trace data.")
 
     log.info("--- Step: FLAT [DONE] ---")
     return product
@@ -66,12 +66,11 @@ def build_flat_product(
     top_indices = np.argsort(props["peak_heights"])[-n_outputs:]
     ref_ys = np.sort(ref_ys[top_indices])
 
-    profile_map = np.zeros((n_outputs, h, w), dtype=np.uint8)
-    xs_list, ys_list = [], []
+    ys_list = []
     profile_xs = []
     profile_ys = []
 
-    log.info("Building PROFILE map...")
+    log.info("Building sparse extraction profiles...")
     for i, ref_y in enumerate(ref_ys):
         log.debug(f"    Tracing spectrum {i+1}/{n_outputs} at Y={ref_y}...")
         xs = np.arange(w)
@@ -86,9 +85,8 @@ def build_flat_product(
         Y, X = np.indices((h, w))
 
         spatial_mask = np.abs(Y - ys_smoothed[X]) < profile_width / 2
-        profile_map[i, spatial_mask & (bad_map == 0)] = 1
 
-        # Keep a rectangular sparse array for NPZ/Numba; extractors skip -1 sentinels.
+        # Keep rectangular arrays for Numba; extractors skip bad-pixel sentinels.
         sparse_x = X[spatial_mask].copy()
         sparse_y = Y[spatial_mask].copy()
         invalid = bad_map[sparse_y, sparse_x] > 0
@@ -97,17 +95,14 @@ def build_flat_product(
         profile_xs.append(sparse_x)
         profile_ys.append(sparse_y)
 
-        xs_list.append(xs)
         ys_list.append(ys_smoothed)
 
     product = FlatProduct(
-        profile_map=profile_map,
         profile_xs=np.array(profile_xs),
         profile_ys=np.array(profile_ys),
         flat_map=flat_map,
         dark_map=dark_map,
         bad_map=bad_map,
-        xs=np.array(xs_list),
         ys=np.array(ys_list),
     )
     return product

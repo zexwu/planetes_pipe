@@ -16,13 +16,11 @@ Array = NDArray[Any]
 class FlatProduct:
     """Detector maps and sparse spectral traces."""
 
-    profile_map: Array
     profile_xs: Array
     profile_ys: Array
     flat_map: Array
     dark_map: Array
     bad_map: Array
-    xs: Array
     ys: Array
 
 
@@ -44,7 +42,8 @@ class P2VMProduct:
     wl_grid: Array
     bsl_to_reg: Mapping[int, list[int]]
     bsl_to_tel: Mapping[int, tuple[int, int]]
-    ellipse_results: Array
+    ellipse_phase_rad: Array
+    ellipse_amplitude: Array
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +54,6 @@ class ReducedProduct:
     coherent_flux: Array
     visamp: Array
     flag: Array
-    p2vmred: Array
     wl_grid: Array
     gdelay: Array
     visphi: Array

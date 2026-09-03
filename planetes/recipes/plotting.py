@@ -48,7 +48,7 @@ def summary_plot(
         config.output_dir / f"{target_name}_reduced.npz", ReducedProduct
     )
     object_label = str(target.data)
-    p2vmred = reduced.p2vmred
+    fluxdata = reduced.fluxdata
     coherent_flux = reduced.coherent_flux
     visamp = reduced.visamp
     flag = reduced.flag
@@ -59,7 +59,7 @@ def summary_plot(
     plt.rcParams["font.size"] = 14
 
     with PdfPages(config.output_dir / f"{target_name}.pdf") as pdf:
-        mean_flux = p2vmred[:, :N_TELESCOPES, :].mean(axis=-1)
+        mean_flux = fluxdata.mean(axis=-1)
         frame_samples = np.arange(0, visphi.shape[0], 10)
         wave_samples = np.arange(0, visphi.shape[-1], 10)
 

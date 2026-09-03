@@ -35,7 +35,8 @@ class ProductTests(unittest.TestCase):
             wl_grid=np.array([1.2, 1.3]),
             bsl_to_reg=baseline_regions,
             bsl_to_tel=baseline_telescopes,
-            ellipse_results=np.ones(1),
+            ellipse_phase_rad=np.ones(1),
+            ellipse_amplitude=np.ones(1),
         )
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "p2vm.npz"

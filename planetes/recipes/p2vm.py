@@ -43,7 +43,8 @@ def run_p2vm(
     # v2pm: Visibility to Pixel Matrix
     v2pm = np.zeros((N_OUTPUTS, N_DATA, n_wave))
     cmat = np.zeros((N_OUTPUTS, N_BASELINES, n_wave))
-    ellipse_results = []
+    ellipse_phase = []
+    ellipse_amplitude = []
     opd_per_baseline = np.zeros((N_BASELINES, n_frame), dtype=float)
     gd_per_baseline = np.zeros((N_BASELINES, n_frame), dtype=float)
 
@@ -60,7 +61,8 @@ def run_p2vm(
         log.debug("    Fitting ellipses for phase extraction...")
         phase, visamp = fit_ellipse_linear(spec[regs], envs)
         visdata = visamp * np.exp(1j * phase)
-        ellipse_results.append((phase, visamp))
+        ellipse_phase.append(phase)
+        ellipse_amplitude.append(visamp)
 
         # use the central 50% of the wavelength range for OPD and GD estimation
         w_start = n_wave // 4
@@ -181,7 +183,8 @@ def run_p2vm(
         wl_grid=wl_grid,
         bsl_to_reg=bsl_to_reg,
         bsl_to_tel=bsl_to_tel,
-        ellipse_results=np.asarray(ellipse_results),
+        ellipse_phase_rad=np.asarray(ellipse_phase),
+        ellipse_amplitude=np.asarray(ellipse_amplitude),
     )
     write_product(config.output_dir / "p2vm.npz", product)
     log.info("--- Step: P2VM [DONE] ---")

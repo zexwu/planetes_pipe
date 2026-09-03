@@ -53,9 +53,8 @@ Implemented in [planetes/recipes/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/p
 - `dark_map`
 - `bad_map`
 - `flat_map`
-- `profile_map`
 - sparse extraction coordinates: `profile_xs`, `profile_ys` (`-1` marks excluded bad pixels)
-- traced centroids: `xs`, `ys`
+- traced spatial centroids: `ys` (the corresponding `x` coordinate is the detector pixel index)
 
 ### Main assumption
 
@@ -244,7 +243,8 @@ Implemented in [planetes/recipes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/p
 - `wl_grid`
 - `bsl_to_reg`
 - `bsl_to_tel`
-- `ellipse_results`
+- `ellipse_phase_rad`
+- `ellipse_amplitude`
 
 ### Main assumptions
 

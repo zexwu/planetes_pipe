@@ -65,7 +65,6 @@ def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
         coherent_flux=coherent_flux,
         visamp=visamp,
         flag=flag,
-        p2vmred=p2vmred,
         wl_grid=p2vm.wl_grid,
         gdelay=gdelay,
         visphi=visphi,

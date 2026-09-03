@@ -43,7 +43,6 @@ class CorrectnessTests(unittest.TestCase):
         selected = set(zip(product.profile_ys[0], product.profile_xs[0], strict=True))
         self.assertNotIn((4, 10), selected)
         self.assertIn((-1, -1), selected)
-        self.assertEqual(product.profile_map[0, 4, 10], 0)
 
     def test_sparse_extractor_skips_invalid_sentinels(self) -> None:
         cube = np.ones((1, 2, 3), dtype=np.float32)

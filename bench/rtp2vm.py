@@ -63,8 +63,6 @@ class P2VMReducer:
     profile_xs: NDArray = field(init=False, repr=False)
     flat_map: NDArray = field(init=False, repr=False)
     dark_map: NDArray | None = field(init=False, repr=False)
-    profile_x_positions: NDArray | None = field(init=False, repr=False)
-    profile_y_positions: NDArray | None = field(init=False, repr=False)
     p2vm: NDArray = field(init=False, repr=False)
     wl_grid: NDArray = field(init=False, repr=False)
     bsl_to_reg: dict[int, list[int]] = field(init=False, repr=False)
@@ -83,9 +81,6 @@ class P2VMReducer:
         self.profile_xs = np.array(flat.profile_xs)
         self.flat_map = flat.flat_map.astype(np.float32)
         self.dark_map = flat.dark_map.astype(np.float32)
-        self.profile_x_positions = flat.xs
-        self.profile_y_positions = flat.ys
-
         p2vm = read_product(self.reduced_dir / "p2vm.npz", P2VMProduct)
         self.p2vm = p2vm.p2vm
         self.wl_grid = p2vm.wl_grid

@@ -39,7 +39,8 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
     profile_xs = flat.profile_xs
     profile_ys = flat.profile_ys
     _, nx = flat.flat_map.shape
-    x_trace, y_trace = flat.xs, flat.ys
+    detector_x = np.arange(nx)
+    y_trace = flat.ys
 
     wave_input = config.calibration.wavelength
     wave_img = frame_mean(iter_cube(wave_input.data)) - frame_mean(
@@ -123,7 +124,7 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
 
         _x = peak_pos[idx_peak]
         x_centroids.append(_x)
-        y_centroids.append(np.interp(_x, x_trace[reg], y_trace[reg]))
+        y_centroids.append(np.interp(_x, detector_x, y_trace[reg]))
         wl_truth.append(line_pos[idx_wave])
 
     # Flatten arrays for fitting: we have a set of (x, y, wl) points.
