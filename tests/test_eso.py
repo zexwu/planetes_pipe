@@ -12,15 +12,13 @@ from unittest.mock import patch
 
 import numpy as np
 from astropy.io import fits
-from p2vm_fixture import write_recipe_inputs
+from p2vm_fixture import write_recipe_inputs, input_rows, metadata
 
 import planetes
 from planetes.extraction import extract_calibration_files
-from planetes.fits import read_product, write_product
-from planetes.instrument import BASELINES, TELESCOPES
+from planetes.fits import read_product, write_product, write_raw
 from planetes.models import (
     DarkCalibration,
-    DarkImage,
     FlatCalibration,
     P2VMCalibration,
     ReducedObservables,
@@ -62,7 +60,7 @@ class ESOChainTests(unittest.TestCase):
             calibration.mkdir()
             sof = root / "p2vm.sof"
             sof.write_text(
-                "".join(f"{path} {tag}\n" for tag, path in reversed(inputs.items()))
+                "".join(f"{path} {tag}\n" for tag, path in reversed(input_rows(inputs)))
             )
             result = subprocess.run(
                 [
@@ -86,23 +84,24 @@ class ESOChainTests(unittest.TestCase):
             header["HIERARCH ESO DPR CATG"] = "SCIENCE"
             header["HIERARCH ESO DPR TYPE"] = "OBJECT"
             dark = np.full_like(signal, 7)
-            science_file, dark_file = root / "science.fits", root / "science_dark.fits"
-            fits.HDUList(
-                [fits.PrimaryHDU(header=header), fits.ImageHDU(signal + dark)]
-            ).writeto(science_file)
-            fits.HDUList([fits.PrimaryHDU(header=header), fits.ImageHDU(dark)]).writeto(
-                dark_file
-            )
+            science_file, _dark_file = root / "science.fits", root / "science_dark.fits"
+            write_raw(science_file, signal + dark, metadata("SINGLE_SCI_RAW", "1234"))
             dark_calib = root / "dark_calibration.fits"
+            original = read_product(inputs["DARK"])
+            from dataclasses import replace
+
             write_product(
-                dark_calib, DarkImage(np.full(signal.shape[1:], 7, dtype=np.float32))
+                dark_calib,
+                replace(
+                    original, mean_adu=np.full(signal.shape[1:], 7, dtype=np.float32)
+                ),
             )
             science_inputs = {
-                "SCIENCE_RAW": science_file,
-                "DARK_CALIB": dark_calib,
-                "PLANETES_FLAT": inputs["PLANETES_FLAT"],
-                "PLANETES_WAVE": inputs["PLANETES_WAVE"],
-                "PLANETES_P2VM": calibration / "planetes_p2vm.fits",
+                "SINGLE_SCI_RAW": science_file,
+                "DARK": dark_calib,
+                "FLAT": inputs["FLAT"],
+                "WAVE": inputs["WAVE"],
+                "P2VM": calibration / "planetes_p2vm.fits",
             }
             sof = root / "science.sof"
             sof.write_text(
@@ -126,9 +125,9 @@ class ESOChainTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             actual = read_product(output / "planetes_reduced.fits", ReducedObservables)
-            flat = read_product(inputs["PLANETES_FLAT"], FlatCalibration)
-            wave = read_product(inputs["PLANETES_WAVE"], WavelengthCalibration)
-            p2vm = read_product(science_inputs["PLANETES_P2VM"], P2VMCalibration)
+            flat = read_product(inputs["FLAT"], FlatCalibration)
+            wave = read_product(inputs["WAVE"], WavelengthCalibration)
+            p2vm = read_product(science_inputs["P2VM"], P2VMCalibration)
             expected = reduce_file(
                 science_file, read_product(dark_calib), flat, wave, p2vm
             )
@@ -140,13 +139,18 @@ class ESOChainTests(unittest.TestCase):
                     getattr(actual, field.name),
                 )
                 if isinstance(before, np.ndarray):
-                    np.testing.assert_array_equal(before, after)
+                    expected_array = (
+                        before / 1e6 * 1e6
+                        if field.metadata and field.metadata["unit"] == "um"
+                        else before
+                    )
+                    np.testing.assert_array_equal(expected_array, after)
                 else:
                     self.assertEqual(before, after)
             self.assertTrue(actual.flags[0].all())
             with fits.open(output / "planetes_reduced.fits") as hdus:
-                self.assertEqual(hdus[0].header["PLTLEVEL"], "INSTRUMENTAL")
-                self.assertIn("ESO QC VIS FLAG FRACTION", hdus[0].header)
+                self.assertEqual(hdus[0].header["ESO PRO CATG"], "SINGLE_SCI_P2VMRED")
+                self.assertNotIn("ESO QC REJECTED RATIO", hdus[0].header)
 
 
 @unittest.skipUnless(find_spec("cpl") is not None, "PyCPL runtime not installed")
@@ -163,23 +167,21 @@ class P2VMRecipeTests(unittest.TestCase):
         self.frames = ui.FrameSet(
             [
                 ui.Frame(file=str(path), tag=tag)
-                for tag, path in reversed(self.paths.items())
+                for tag, path in reversed(input_rows(self.paths))
             ]
         )
         self.recipe = PlanetesP2VM()
 
     def test_shuffled_tagged_inputs_match_direct_scientific_calculation(self):
-        flat = read_product(self.paths["PLANETES_FLAT"], FlatCalibration)
-        wave = read_product(self.paths["PLANETES_WAVE"], WavelengthCalibration)
+        flat = read_product(self.paths["FLAT"], FlatCalibration)
+        wave = read_product(self.paths["WAVE"], WavelengthCalibration)
         spectra = extract_calibration_files(
             flat,
             wave,
-            read_product(self.paths["DARK_CALIB"]),
+            read_product(self.paths["DARK"]),
             wavelength_um=wavelength_grid(),
-            telescope_flats={
-                name: self.paths[f"TEL_FLAT_{name}"] for name in TELESCOPES
-            },
-            baseline_cubes={name: self.paths[f"P2VM_RAW_{name}"] for name in BASELINES},
+            telescope_flats=self.paths["FLAT_RAW"],
+            baseline_cubes=self.paths["P2VM_RAW"],
             phase_reference=self.paths["PHASE_REFERENCE"],
             phase_dark=read_product(self.paths["PHASE_DARK_CALIB"]),
         )
@@ -194,18 +196,23 @@ class P2VMRecipeTests(unittest.TestCase):
                 continue
             before, after = getattr(expected, field.name), getattr(actual, field.name)
             if isinstance(before, np.ndarray):
-                np.testing.assert_array_equal(before, after)
+                expected_array = (
+                    before / 1e6 * 1e6
+                    if field.metadata and field.metadata["unit"] == "um"
+                    else before
+                )
+                np.testing.assert_array_equal(expected_array, after)
             else:
                 self.assertEqual(before, after)
         with fits.open(output) as hdus:
             header = hdus[0].header
             self.assertEqual(header["ESO PRO REC1 ID"], "planetes_p2vm")
             self.assertEqual(header["ESO PRO REC1 PARAM1 VALUE"], "true")
-            self.assertTrue(header["ESO DRS PHASE REF APPLIED"])
+            self.assertTrue(actual.provenance.parameters["phase_reference_applied"])
             self.assertTrue(header["DATAMD5"])
             self.assertFalse(any(key.startswith("ESO DPR ") for key in header))
             recorded = [value for key, value in header.items() if key.endswith(" NAME")]
-            for path in self.paths.values():
+            for _, path in input_rows(self.paths):
                 self.assertIn(path.name, recorded)
 
     def test_duplicate_and_missing_tags_are_rejected(self):
@@ -213,8 +220,10 @@ class P2VMRecipeTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Missing required"):
             self.recipe.run(ui.FrameSet(), {})
-        duplicate = ui.FrameSet([self.frames[0], self.frames[0]])
-        with self.assertRaisesRegex(ValueError, "Duplicate input tag"):
+        duplicate = ui.FrameSet(
+            list(self.frames) + [next(f for f in self.frames if f.tag == "DARK")]
+        )
+        with self.assertRaisesRegex(ValueError, "Duplicate or incomplete input tag"):
             self.recipe.run(duplicate, {})
 
     @unittest.skipUnless(
@@ -223,7 +232,9 @@ class P2VMRecipeTests(unittest.TestCase):
     def test_executor_applies_phase_correction_parameter(self):
         recipe_directory = Path(planetes.__file__).parent / "eso"
         sof = self.root / "p2vm.sof"
-        sof.write_text("".join(f"{path} {tag}\n" for tag, path in self.paths.items()))
+        sof.write_text(
+            "".join(f"{path} {tag}\n" for tag, path in input_rows(self.paths))
+        )
         result = subprocess.run(
             [
                 sys.executable,
@@ -245,7 +256,7 @@ class P2VMRecipeTests(unittest.TestCase):
         self.assertEqual(product.p2vm.shape, (16, 24, 151))
         with fits.open(path) as hdus:
             self.assertEqual(hdus[0].header["ESO PRO REC1 PARAM1 VALUE"], "false")
-            self.assertFalse(hdus[0].header["ESO DRS PHASE REF APPLIED"])
+            self.assertFalse(product.provenance.parameters["phase_reference_applied"])
 
 
 @unittest.skipUnless(find_spec("cpl") is not None, "PyCPL runtime not installed")
@@ -259,7 +270,6 @@ class DFSFailureTests(unittest.TestCase):
         product = DarkCalibration(
             np.ones((2, 3), dtype=np.float32),
             np.ones((2, 3), dtype=np.float32),
-            np.zeros((2, 3), dtype=np.int16),
             2,
         )
         with tempfile.TemporaryDirectory() as temporary, chdir(temporary):
@@ -293,16 +303,20 @@ class DFSFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, chdir(temporary):
             ny, nx = 576, 128
             dark = np.full((3, ny, nx), 10, dtype=np.float32)
-            header = fits.Header({"INSTRUME": "PLANETES"})
-            fits.HDUList([fits.PrimaryHDU(header=header), fits.ImageHDU(dark)]).writeto(
-                "raw_dark.fits"
+            write_raw(
+                Path("raw_dark.fits"), dark, metadata("DARK_RAW", n_wave=nx, height=ny)
             )
             dark_frames = ui.FrameSet(
                 [ui.Frame(file=str(Path("raw_dark.fits").absolute()), tag="DARK_RAW")]
             )
-            PlanetesDark().run(dark_frames, {"planetes.dark.bad_threshold": 6.5})
-            measured = read_product(Path("planetes_dark.fits"))
-            self.assertEqual(measured.provenance.parameters["bad_threshold"], 6.5)
+            PlanetesDark().run(dark_frames, {"planetes.calib.bad-dark-threshold": 6.5})
+            read_product(Path("planetes_dark.fits"))
+            self.assertEqual(
+                read_product(Path("planetes_bad.fits")).provenance.parameters[
+                    "bad_threshold"
+                ],
+                6.5,
+            )
             rows = np.arange(ny)
             profile = sum(
                 np.exp(-0.5 * ((rows - center) / 2.0) ** 2)
@@ -313,17 +327,22 @@ class DFSFailureTests(unittest.TestCase):
                 [
                     ui.Frame(
                         file=str(Path("planetes_dark.fits").absolute()),
-                        tag="DARK_CALIB",
+                        tag="DARK",
                     )
                 ]
             )
+            frames.append(
+                ui.Frame(file=str(Path("planetes_bad.fits").absolute()), tag="BAD")
+            )
             for name in ("4", "3", "2", "1"):
                 path = Path(f"tel{name}.fits").absolute()
-                fits.HDUList(
-                    [fits.PrimaryHDU(header=header), fits.ImageHDU(image[None] + dark)]
-                ).writeto(path)
-                frames.append(ui.Frame(file=str(path), tag=f"TEL_FLAT_{name}"))
-            PlanetesFlat().run(frames, {"planetes.flat.profile_width": 3.5})
+                write_raw(
+                    path,
+                    image[None] + dark,
+                    metadata("FLAT_RAW", name, n_wave=nx, height=ny),
+                )
+                frames.append(ui.Frame(file=str(path), tag="FLAT_RAW"))
+            PlanetesFlat().run(frames, {"planetes.calib.profile-width": 3.5})
             flat = read_product(Path("planetes_flat.fits"))
             self.assertEqual(flat.provenance.parameters["profile_width"], 3.5)
             self.assertEqual(flat.profile_x_pixels.shape[0], 24)

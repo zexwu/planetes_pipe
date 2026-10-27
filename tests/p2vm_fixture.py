@@ -4,12 +4,13 @@ from itertools import combinations
 from pathlib import Path
 
 import numpy as np
-from astropy.io import fits
 
 from planetes.instrument import BASELINES, TELESCOPES
-from planetes.fits import write_product
+from planetes.fits import write_product, write_raw
 from planetes.models import (
     FlatCalibration,
+    DetectorSetup,
+    RawMetadata,
     WavelengthCalibration,
     DarkCalibration,
     Provenance,
@@ -52,15 +53,21 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
     dark = DarkCalibration(
         np.zeros((24, n_wave), dtype=np.float32),
         np.zeros((24, n_wave), dtype=np.float32),
-        np.zeros((24, n_wave), dtype=np.int16),
         n_frame,
+        setup=setup(n_wave),
     )
+    from planetes.dark import compute_badpix
+
+    bad = compute_badpix(dark)
     flat = FlatCalibration(
         profile_x_pixels=np.tile(np.arange(n_wave), (24, 1)),
         profile_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1),
         flat_map_adu=np.ones((24, n_wave)),
         trace_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1).astype(float),
-        provenance=Provenance(dependencies={"dark": fingerprint(dark)}),
+        setup=setup(n_wave),
+        provenance=Provenance(
+            dependencies={"dark": fingerprint(dark), "bad": fingerprint(bad)}
+        ),
     )
     wave = WavelengthCalibration(
         wavelength_map_um=np.tile(wavelength, (24, 1)),
@@ -78,45 +85,74 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
     )
 
 
-def write_recipe_inputs(directory: Path) -> dict[str, Path]:
-    """Write compact synthetic detector cubes and typed upstream calibration FITS."""
+def setup(n_wave=151, height=24):
+    return DetectorSetup(
+        exposure_s=0.01,
+        origin_x=0,
+        origin_y=0,
+        width=n_wave,
+        height=height,
+        binning_x=1,
+        binning_y=1,
+        detector="synthetic",
+        orientation="native",
+    )
+
+
+def metadata(category, active=(), n_wave=151, height=24):
+    return RawMetadata(
+        category,
+        tuple(str(n) in active for n in range(1, 5)),
+        setup(n_wave, height),
+        "command",
+    )
+
+
+def input_rows(paths):
+    return [
+        (tag, path)
+        for tag, value in paths.items()
+        for path in (value if isinstance(value, list) else [value])
+    ]
+
+
+def write_recipe_inputs(directory: Path):
+    """Use repeated raw tags and real physical-shutter metadata, shuffled by callers."""
     telescope, baseline, reference, _, _, _, flat, wave = calibration_arrays()
     directory.mkdir(parents=True, exist_ok=True)
     paths = {}
-    header = fits.Header({"INSTRUME": "PLANETES", "ORIGIN": "PLANETES-SIMULATION"})
-    for tag, product in [("PLANETES_FLAT", flat), ("PLANETES_WAVE", wave)]:
+    for tag, product in [("FLAT", flat), ("WAVE", wave)]:
         path = directory / f"{tag.lower()}.fits"
         write_product(path, product)
         paths[tag] = path
-    cubes = {
-        f"TEL_FLAT_{name}": telescope[index] for index, name in enumerate(TELESCOPES)
-    }
-    cubes.update(
-        {f"P2VM_RAW_{name}": baseline[index] for index, name in enumerate(BASELINES)}
-    )
-    cubes["PHASE_REFERENCE"] = reference
     dark = DarkCalibration(
         np.zeros((24, 151), dtype=np.float32),
         np.zeros((24, 151), dtype=np.float32),
-        np.zeros((24, 151), dtype=np.int16),
         32,
+        setup=setup(),
     )
-    for tag in ("DARK_CALIB", "PHASE_DARK_CALIB"):
+    for tag in ("DARK", "PHASE_DARK_CALIB"):
         path = directory / f"{tag.lower()}.fits"
         write_product(path, dark)
         paths[tag] = path
-    for tag, spectra in cubes.items():
-        path = directory / f"{tag.lower()}.fits"
-        raw_header = header.copy()
-        raw_header["HIERARCH ESO DPR CATG"] = "CALIB"
-        raw_header["HIERARCH ESO DPR TYPE"] = tag
-        raw_header["HIERARCH ESO DPR TECH"] = "INTERFEROMETRY"
-        raw_header["ARCFILE"] = path.name
-        cube = np.transpose(spectra, (1, 0, 2)).astype(np.float32)
-        fits.HDUList([fits.PrimaryHDU(header=raw_header), fits.ImageHDU(cube)]).writeto(
-            path, checksum=True
-        )
-        paths[tag] = path
+    for tag, names, cubes in [
+        ("FLAT_RAW", TELESCOPES, telescope),
+        ("P2VM_RAW", BASELINES, baseline),
+    ]:
+        paths[tag] = []
+        for name, spectra in zip(names, cubes):
+            path = directory / f"{tag.lower()}_{name}.fits"
+            write_raw(
+                path, spectra.transpose(1, 0, 2).astype(np.float32), metadata(tag, name)
+            )
+            paths[tag].append(path)
+    path = directory / "phase_reference.fits"
+    write_raw(
+        path,
+        reference.transpose(1, 0, 2).astype(np.float32),
+        metadata("SINGLE_SCI_RAW", "1234"),
+    )
+    paths["PHASE_REFERENCE"] = path
     return paths
 
 

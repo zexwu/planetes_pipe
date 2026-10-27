@@ -240,6 +240,9 @@ def reduce_file(
     gd_search_max_um=100.0,
 ) -> ReducedObservables:
     """Read the complete raw science cube, apply explicit calibrations and return results."""
+    from .fits import check_raw_calibrations
+
+    unknown = check_raw_calibrations(path, dark, flat, category="SINGLE_SCI_RAW")
     validate(dark)
     validate_gd_range((gd_search_min_um, gd_search_max_um))
     reducer = FrameReducer(flat, wave, p2vm)
@@ -252,6 +255,7 @@ def reduce_file(
     )
     info = Provenance(
         producer="planetes.reduction",
+        unverified=unknown,
         parameters={
             "gd_search_min_um": gd_search_min_um,
             "gd_search_max_um": gd_search_max_um,

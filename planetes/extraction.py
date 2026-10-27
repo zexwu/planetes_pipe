@@ -95,6 +95,7 @@ class SpectralExtractor:
     profile_x_pixels: NDArray
     profile_y_pixels: NDArray
     detector_shape: tuple[int, int]
+    setup: object
     wavelength_map_um: NDArray
     wavelength_um: NDArray
     detector_flat_spectra: NDArray
@@ -121,7 +122,9 @@ class SpectralExtractor:
 
     def extract_file(self, path: Path, dark) -> NDArray:
         """Read and extract a whole file, retaining all frames and the 16-frame chunking."""
-        validate(dark)
+        from .fits import check_raw_calibrations
+
+        check_raw_calibrations(path, dark, flat_setup=self.setup)
         return np.concatenate(
             [self.extract(chunk, dark) for chunk in iter_raw_cube(path)], axis=1
         )
@@ -149,6 +152,7 @@ def prepare_extraction(flat, wave, wavelength_um: NDArray) -> SpectralExtractor:
         xs,
         ys,
         flat.flat_map_adu.shape,
+        flat.setup,
         wave_map,
         grid,
         _snapshot(spec_flat_detector),
@@ -168,6 +172,15 @@ def extract_calibration_files(
     phase_dark=None,
 ) -> CalibrationSpectra:
     """Extract calibration files and infer the retained physical output mapping."""
+    from .fits import identify_raw, check_raw_calibrations
+    from .models import DarkCalibration
+
+    if not isinstance(main_dark, DarkCalibration) or (
+        phase_dark is not None and not isinstance(phase_dark, DarkCalibration)
+    ):
+        raise ValueError("Formal file tasks require complete DARK calibrations")
+    telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
+    baseline_cubes = identify_raw(baseline_cubes, "P2VM_RAW")
     validate(main_dark)
     if phase_dark is not None and phase_reference is None:
         raise ValueError("phase_dark requires phase_reference")
@@ -186,6 +199,9 @@ def extract_calibration_files(
         "wave": fingerprint(wave),
         "main_dark": fingerprint(main_dark),
     }
+    unknown = []
+    for path in [*telescope_flats.values(), *baseline_cubes.values()]:
+        unknown.extend(check_raw_calibrations(path, main_dark, flat))
     inputs = {
         **{f"tel_flat_{k}": str(v) for k, v in telescope_flats.items()},
         **{f"baseline_{k}": str(v) for k, v in baseline_cubes.items()},
@@ -193,6 +209,7 @@ def extract_calibration_files(
     if phase_reference is not None:
         selected_dark = main_dark if phase_dark is None else phase_dark
         phase_reference_spectra = model.extract_file(phase_reference, selected_dark)
+        unknown.extend(check_raw_calibrations(phase_reference, selected_dark, flat))
         dependencies["phase_dark"] = fingerprint(selected_dark)
         inputs["phase_reference"] = str(phase_reference)
     tel_regs = {}
@@ -234,6 +251,9 @@ def extract_calibration_files(
         bsl_to_tel,
         model.wavelength_um,
         provenance=Provenance(
-            producer="planetes.extraction", inputs=inputs, dependencies=dependencies
+            producer="planetes.extraction",
+            inputs=inputs,
+            dependencies=dependencies,
+            unverified=tuple(sorted(set(unknown))),
         ),
     )

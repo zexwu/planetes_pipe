@@ -8,14 +8,16 @@ from unittest.mock import patch
 
 import numpy as np
 from astropy.io import fits
-from p2vm_fixture import calibration_arrays, calibration_spectra
+from p2vm_fixture import calibration_arrays, calibration_spectra, metadata
 
 from planetes.dark import frame_statistics
 from planetes.fits import (
+    destinations,
     fill_dfs_product,
     product_destination,
     read_product,
     write_product,
+    write_raw,
 )
 from planetes.fits import iter_raw_cube as iter_cube
 from planetes.models import ReducedObservables
@@ -43,12 +45,19 @@ class ScienceProductTests(unittest.TestCase):
             write_product(path, product)
             loaded = read_product(path, ReducedObservables)
             for field in fields(product):
+                if field.name == "provenance":
+                    continue
                 before, after = (
                     getattr(product, field.name),
                     getattr(loaded, field.name),
                 )
                 if isinstance(before, np.ndarray):
-                    np.testing.assert_array_equal(before, after)
+                    expected = (
+                        before / 1e6 * 1e6
+                        if field.metadata and field.metadata["unit"] == "um"
+                        else before
+                    )
+                    np.testing.assert_array_equal(expected, after)
                 else:
                     self.assertEqual(before, after)
             np.testing.assert_array_equal(
@@ -62,9 +71,9 @@ class ScienceProductTests(unittest.TestCase):
             path = Path(temporary) / "science.fits"
             write_product(path, self.product)
             with fits.open(path, mode="update") as hdus:
-                hdus["FLAGS"].data[0, 0, 0] = 2
-                hdus["FLAGS"].add_checksum()
-            with self.assertRaisesRegex(ValueError, "boolean visibility flags"):
+                hdus["PLANETES_VIS"].data["FLAG"][0, 0] = False
+                hdus["PLANETES_VIS"].add_checksum()
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
                 read_product(path, ReducedObservables)
 
     def test_scientific_edit_with_valid_checksums_is_rejected(self):
@@ -72,29 +81,24 @@ class ScienceProductTests(unittest.TestCase):
             path = Path(temporary) / "science.fits"
             write_product(path, self.product)
             with fits.open(path, mode="update") as hdus:
-                hdus["VISIBILITY_AMPLITUDE"].data[0, 0, 0] = 42.0
-                hdus["VISIBILITY_AMPLITUDE"].add_checksum()
+                hdus["PLANETES_VIS"].data["VISAMP"][0, 0] = 42.0
+                hdus["PLANETES_VIS"].add_checksum()
             with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
                 read_product(path)
 
-    def test_baseline_table_exposes_zero_based_instrument_mapping(self):
+    def test_science_rows_use_physical_station_ids_and_frame_order(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "science.fits"
             write_product(path, self.product)
             with fits.open(path) as hdus:
-                table = hdus["BASELINE_MAP"]
-                self.assertTrue(table.header["INDEX0"])
-                self.assertEqual(table.header["PLTABCD"], "A,C,B,D")
-                for row in table.data:
-                    baseline = int(row["BASELINE_INDEX"])
-                    self.assertEqual(
-                        list(row["OUTPUT_INDICES"]),
-                        self.product.baseline_regions[baseline],
-                    )
-                    self.assertEqual(
-                        tuple(row["TELESCOPE_INDICES"]),
-                        self.product.baseline_telescopes[baseline],
-                    )
+                np.testing.assert_array_equal(
+                    hdus["PLANETES_VIS"].data["STA_INDEX"][:6],
+                    [[4, 3], [4, 2], [4, 1], [3, 2], [3, 1], [2, 1]],
+                )
+                np.testing.assert_array_equal(
+                    hdus["PLANETES_FLUX"].data["STA_INDEX"][:4], [4, 3, 2, 1]
+                )
+                self.assertTrue((hdus["PLANETES_VIS"].data["FRAME"][:6] == 1).all())
 
     def test_mapping_dictionary_order_cannot_change_baseline_identity(self):
         product = replace(
@@ -151,7 +155,12 @@ class CalibrationFitsTests(unittest.TestCase):
                         getattr(loaded, field.name),
                     )
                     if isinstance(before, np.ndarray):
-                        np.testing.assert_array_equal(before, after)
+                        expected = (
+                            before / 1e6 * 1e6
+                            if field.metadata and field.metadata["unit"] == "um"
+                            else before
+                        )
+                        np.testing.assert_array_equal(expected, after)
                         self.assertTrue(after.dtype.isnative)
                     else:
                         self.assertEqual(before, after)
@@ -161,9 +170,9 @@ class CalibrationFitsTests(unittest.TestCase):
             path = Path(tmp) / "wave.fits"
             write_product(path, self.wave)
             with fits.open(path, mode="update") as hdus:
-                hdus["WAVELENGTH_MAP_UM"].header["BUNIT"] = "nm"
-                hdus["WAVELENGTH_MAP_UM"].add_checksum()
-            with self.assertRaisesRegex(ValueError, "units or axes"):
+                hdus["WAVE_DATA_SC"].header["TUNIT1"] = "nm"
+                hdus["WAVE_DATA_SC"].add_checksum()
+            with self.assertRaisesRegex(ValueError, "units"):
                 read_product(path, type(self.wave))
 
     def test_fits_writer_rejects_changed_telescope_identity(self):
@@ -190,7 +199,7 @@ class RawFitsTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             cube_path = Path(tmp) / "cube.fits"
-            fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(cube)]).writeto(cube_path)
+            write_raw(cube_path, cube, metadata("DARK_RAW", n_wave=5, height=3))
 
             chunks = list(iter_cube(cube_path))
             mean, std, _ = frame_statistics(chunks)
@@ -204,13 +213,14 @@ class RawFitsTests(unittest.TestCase):
     def test_fits_input_must_be_a_3d_extension(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "image.fits"
-            fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(np.ones((3, 5)))]).writeto(
-                path
-            )
+            fits.HDUList(
+                [
+                    fits.PrimaryHDU(),
+                    fits.ImageHDU(np.ones((3, 5)), name="IMAGING_DATA_SC"),
+                ]
+            ).writeto(path)
 
-            with self.assertRaisesRegex(
-                ValueError, "three-dimensional raw detector cube"
-            ):
+            with self.assertRaisesRegex(ValueError, "new PLANETES raw FITS"):
                 list(iter_cube(path))
 
 
@@ -249,3 +259,106 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 write_product(path, self.wave)
             self.assertTrue(path.is_symlink())
+
+    def test_second_publication_failure_rolls_back_only_our_first_file(self):
+        import os
+
+        link = os.link
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = [Path(temporary) / "dark.fits", Path(temporary) / "bad.fits"]
+
+            def fail_second(source, target):
+                if Path(target) == paths[1]:
+                    raise OSError("injected second publication failure")
+                return link(source, target)
+
+            with patch("planetes.fits.os.link", side_effect=fail_second):
+                with self.assertRaisesRegex(OSError, "second publication"):
+                    with destinations(paths) as staged:
+                        # Stage directly to avoid counting nested single-product publication.
+                        from planetes.fits import encode_product
+
+                        for path in staged:
+                            encode_product(self.wave).writeto(path, checksum=True)
+            self.assertFalse(any(path.exists() for path in paths))
+
+
+class CanonicalAndRawTests(unittest.TestCase):
+    def test_rewrites_retain_valid_metres_and_inplace_changes_invalidate_hash(self):
+        from planetes.models import fingerprint, retain_representation
+
+        wave = calibration_arrays(n_wave=15)[-1]
+        metres = np.nextafter(wave.wavelength_map_um / 1e6, np.inf)
+        wave = replace(wave, wavelength_map_um=metres * 1e6)
+        wave = retain_representation(wave, {"wavelength_map_um": metres})
+        original = fingerprint(wave)
+        with tempfile.TemporaryDirectory() as temporary:
+            for i in range(3):
+                path = Path(temporary) / f"wave{i}.fits"
+                write_product(path, wave)
+                wave = read_product(path)
+                self.assertEqual(fingerprint(wave), original)
+                with fits.open(path) as hdus:
+                    np.testing.assert_array_equal(
+                        hdus["WAVE_DATA_SC"].data["DATA1"][0], metres[0]
+                    )
+            wave.wavelength_map_um[0, 0] += 1e-6
+            self.assertNotEqual(fingerprint(wave), original)
+            self.assertNotEqual(
+                fingerprint(
+                    replace(
+                        wave, provenance=replace(wave.provenance, parameters={"x": 1})
+                    )
+                ),
+                original,
+            )
+
+    def test_raw_pixels_metadata_and_duplicate_shutters(self):
+        from planetes.fits import read_raw_metadata, identify_raw
+
+        data = np.array([[[40000.0, -2.0, 3.5]], [[1.0, 2.0, 3.0]]], dtype=np.float32)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "anything.fits"
+            raw = metadata("FLAT_RAW", "4", 3, 1)
+            write_raw(path, data, raw)
+            self.assertEqual(read_raw_metadata(path), raw)
+            with fits.open(path) as hdus:
+                self.assertNotIn("DATE-OBS", hdus[0].header)
+                self.assertEqual(hdus[0].header["ESO DET WIN1 DIT1"], 0.01)
+                self.assertEqual(hdus[0].header["EXPTIME"], 0.02)
+                np.testing.assert_array_equal(hdus["IMAGING_DATA_SC"].data, data)
+                self.assertEqual(hdus["IMAGING_DATA_SC"].data.dtype.kind, "f")
+            with self.assertRaisesRegex(ValueError, "Duplicate shutter"):
+                identify_raw([path, path], "FLAT_RAW")
+            with fits.open(path, mode="update") as hdus:
+                hdus[0].header["ESO DET WIN1 STRX"] = 2
+                hdus[0].add_checksum()
+            with self.assertRaisesRegex(ValueError, "disagree"):
+                read_raw_metadata(path)
+
+    def test_operator_exposure_is_requested_and_legacy_missing_stays_unknown(self):
+        from planetes.fits import read_raw_metadata
+
+        with tempfile.TemporaryDirectory() as temporary:
+            data = np.zeros((2, 1, 3), dtype=np.uint16)
+            raw = metadata("DARK_RAW", n_wave=3, height=1)
+            raw = replace(raw, setup=replace(raw.setup, exposure_source="operator"))
+            path = Path(temporary) / "operator.fits"
+            write_raw(path, data, raw)
+            with fits.open(path) as hdus:
+                self.assertIn("ESO DET WIN1 UIT1", hdus[0].header)
+                self.assertNotIn("EXPTIME", hdus[0].header)
+            raw = replace(
+                raw,
+                configuration_source="legacy-role-map",
+                setup=replace(
+                    raw.setup,
+                    legacy=True,
+                    exposure_s=None,
+                    exposure_source="unknown",
+                    binning_x=None,
+                ),
+            )
+            path = Path(temporary) / "legacy.fits"
+            write_raw(path, data, raw)
+            self.assertIsNone(read_raw_metadata(path).setup.exposure_s)

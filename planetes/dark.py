@@ -7,8 +7,17 @@ import numpy as np
 from numpy.typing import NDArray
 from astropy.io import fits as afits
 
-from .fits import iter_raw_cube, read_product
-from .models import DarkCalibration, DarkImage, Provenance, positive, validate
+from .fits import iter_raw_cube, read_product, read_raw_metadata
+from .models import (
+    DarkCalibration,
+    DarkImage,
+    BadPixelMap,
+    Provenance,
+    DetectorSetup,
+    fingerprint,
+    positive,
+    validate,
+)
 
 BAD_THRESHOLD = 5.0
 
@@ -53,10 +62,11 @@ def frame_statistics(
     return mean.astype(np.float32), np.sqrt(variance).astype(np.float32), count
 
 
-def compute_bad_map_from_stats(
-    mean_img: NDArray, std_img: NDArray, threshold: float = 5.0
-) -> NDArray:
+def compute_badpix(dark: DarkCalibration, *, threshold: float = 5.0) -> BadPixelMap:
     """Build a bad-pixel map from precomputed temporal mean and RMS images."""
+    validate(dark)
+    threshold = positive(threshold, "bad pixel threshold")
+    mean_img, std_img = dark.mean_adu, dark.temporal_rms_adu
     BAD_HOT, BAD_DEAD, BAD_RON = 1, 2, 4
 
     med_mean = np.median(mean_img)
@@ -72,12 +82,18 @@ def compute_bad_map_from_stats(
     bpm[mean_img < range_min] |= BAD_DEAD
     bpm[std_img > std_max] |= BAD_RON
 
-    return bpm
+    return BadPixelMap(
+        bpm,
+        provenance=Provenance(
+            producer="planetes.dark.compute_badpix",
+            parameters={"bad_threshold": threshold},
+            dependencies={"dark": fingerprint(dark)},
+        ),
+    )
 
 
-def compute_dark(chunks, *, bad_threshold: float = BAD_THRESHOLD) -> DarkCalibration:
+def compute_dark(chunks) -> DarkCalibration:
     """Measure the retained population RMS and bad-pixel flags from a complete stack."""
-    bad_threshold = positive(bad_threshold, "bad pixel threshold")
     mean, rms, count = frame_statistics(chunks)
     if count < 2:
         raise ValueError(
@@ -86,62 +102,73 @@ def compute_dark(chunks, *, bad_threshold: float = BAD_THRESHOLD) -> DarkCalibra
     result = DarkCalibration(
         mean,
         rms,
-        compute_bad_map_from_stats(mean, rms, bad_threshold),
         count,
-        provenance=Provenance(
-            producer="planetes.dark", parameters={"bad_threshold": bad_threshold}
-        ),
+        provenance=Provenance(producer="planetes.dark"),
     )
     validate(result)
     return result
 
 
 def calibrate_dark_file(
-    path: Path, *, bad_threshold: float = BAD_THRESHOLD, hdu: int = 1
-) -> DarkCalibration:
-    """Read a raw stack and return a complete calibration, without writing files."""
+    path: Path, *, bad_threshold: float = BAD_THRESHOLD
+) -> tuple[DarkCalibration, BadPixelMap]:
+    """Return complete DARK and independent BAD from a declared raw dark stack."""
     from dataclasses import replace
 
-    result = compute_dark(iter_raw_cube(path, hdu=hdu), bad_threshold=bad_threshold)
-    return replace(
-        result,
+    metadata = read_raw_metadata(path, category="DARK_RAW")
+    dark = compute_dark(iter_raw_cube(path))
+    dark = replace(
+        dark,
+        setup=metadata.setup,
         provenance=replace(
-            result.provenance, inputs={"dark_raw": str(Path(path).absolute())}
+            dark.provenance, inputs={"dark_raw": str(Path(path).absolute())}
         ),
     )
+    return dark, compute_badpix(dark, threshold=bad_threshold)
 
 
-def load_dark(path: Path, *, bad_threshold: float = BAD_THRESHOLD):
-    """Load a typed dark, calibrate a raw stack, or explicitly read a subtraction-only image."""
+def load_dark(path: Path):
+    """GUI loader: complete new DARK, or explicitly selected raw/image subtraction data."""
+    from dataclasses import replace
+
     path = Path(path)
     with afits.open(path, memmap=True) as hdus:
         head = hdus[0].header
-        if "PLTSCHEM" in head or "ESO PRO CATG" in head:
-            result = read_product(path)
-            if not isinstance(result, (DarkCalibration, DarkImage)):
-                raise ValueError(f"Expected dark product, got {type(result).__name__}")
-            return result
+        if "ESO PRO CATG" in head:
+            return read_product(path, DarkCalibration)
         role = str(head.get("ESO DPR TYPE", "")).upper()
-        category = str(head.get("ESO DPR CATG", "")).upper()
-        if (
-            role and "DARK" not in role and "BIAS" not in role
-        ) or category == "SCIENCE":
-            raise ValueError(f"FITS declares a non-dark scientific role: {path}")
+        if role and role != "DARK":
+            raise ValueError("Expected dark input, FITS declares another raw category")
         index = next((i for i, h in enumerate(hdus) if h.data is not None), None)
         if index is None:
-            raise ValueError(f"Dark FITS has no data: {path}")
+            raise ValueError("Dark FITS has no data")
         data = hdus[index].data
-        unit = str(hdus[index].header.get("BUNIT", head.get("BUNIT", "adu"))).lower()
+        unit = str(hdus[index].header.get("BUNIT", "adu")).lower()
         if unit != "adu":
-            raise ValueError(f"Dark subtraction expects ADU, got {unit}")
+            raise ValueError("Dark subtraction expects ADU")
         if data.ndim == 3 and len(data) >= 2:
-            return calibrate_dark_file(path, bad_threshold=bad_threshold, hdu=index)
+            result = compute_dark(
+                np.asarray(data[i : i + 16], dtype=np.float32)
+                for i in range(0, len(data), 16)
+            )
+            setup = (
+                read_raw_metadata(path).setup
+                if "PLANETES FORMAT" in head
+                else DetectorSetup(
+                    width=data.shape[2], height=data.shape[1], legacy=True
+                )
+            )
+            return replace(
+                result,
+                setup=setup,
+                provenance=replace(
+                    result.provenance, inputs={"dark_raw": str(path.absolute())}
+                ),
+            )
         if data.ndim == 3 and len(data) == 1:
             data = data[0]
         if data.ndim != 2:
-            raise ValueError(
-                "A subtraction dark must be a 2-D image or nonempty 3-D cube"
-            )
+            raise ValueError("A GUI dark must be a 2-D image or nonempty cube")
         result = DarkImage(
             np.array(data, dtype=np.float32, copy=True),
             provenance=Provenance(

@@ -8,11 +8,11 @@ from unittest.mock import patch
 
 import numpy as np
 from astropy.io import fits
-from p2vm_fixture import calibration_arrays, calibration_spectra
+from p2vm_fixture import calibration_arrays, calibration_spectra, metadata, setup
 
-from planetes.dark import calibrate_dark_file, load_dark
+from planetes.dark import calibrate_dark_file, load_dark, compute_badpix
 from planetes.extraction import prepare_extraction
-from planetes.fits import read_product, write_product
+from planetes.fits import read_product, write_product, write_raw
 from planetes.flat import compute_flat
 from planetes.models import (
     DarkCalibration,
@@ -83,11 +83,16 @@ class CalibrationTests(unittest.TestCase):
     def test_live_and_file_match_with_an_independent_dark(self):
         signal = np.transpose(self.values[2], (1, 0, 2)).astype(np.float32)
         signal[0] = 0
-        dark = DarkImage(np.full(signal.shape[1:], 7, dtype=np.float32))
+        dark = DarkCalibration(
+            np.full(signal.shape[1:], 7, dtype=np.float32),
+            np.zeros(signal.shape[1:], dtype=np.float32),
+            32,
+            setup=setup(15),
+        )
         raw = signal + dark.mean_adu
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "science.fits"
-            fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(raw)]).writeto(path)
+            write_raw(path, raw, metadata("SINGLE_SCI_RAW", "1234", 15))
             complete = reduce_file(path, dark, self.flat, self.wave, self.p2vm)
             reducer = FrameReducer(self.flat, self.wave, self.p2vm)
             for index in (0, 1, len(raw) - 1):
@@ -114,24 +119,26 @@ class CalibrationTests(unittest.TestCase):
             self.assertIsInstance(dark, DarkImage)
             self.assertFalse(hasattr(dark, "temporal_rms_adu"))
             with self.assertRaisesRegex(ValueError, "complete dark"):
-                compute_flat(dark, [np.ones((24, 15))])
+                compute_flat(dark, None, [np.ones((24, 15))])
 
     def test_raw_stack_and_gui_loader_use_identical_statistics(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "dark.fits"
             data = np.arange(17 * 3 * 5, dtype=np.float32).reshape(17, 3, 5)
-            fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(data)]).writeto(path)
-            a, b = calibrate_dark_file(path), load_dark(path)
-            for name in ("mean_adu", "temporal_rms_adu", "bad_pixel_flags"):
+            write_raw(path, data, metadata("DARK_RAW", n_wave=5, height=3))
+            (a, _bad), b = calibrate_dark_file(path), load_dark(path)
+            for name in ("mean_adu", "temporal_rms_adu"):
                 self.assertEqual(getattr(a, name).tobytes(), getattr(b, name).tobytes())
             self.assertEqual(a.n_frames, 17)
 
     def test_single_frame_cube_is_subtraction_only(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "dark.fits"
-            fits.HDUList(
-                [fits.PrimaryHDU(), fits.ImageHDU(np.ones((1, 3, 5), dtype=np.float32))]
-            ).writeto(path)
+            write_raw(
+                path,
+                np.ones((1, 3, 5), dtype=np.float32),
+                metadata("DARK_RAW", n_wave=5, height=3),
+            )
             self.assertIsInstance(load_dark(path), DarkImage)
             with self.assertRaisesRegex(ValueError, "at least two"):
                 calibrate_dark_file(path)
@@ -140,7 +147,7 @@ class CalibrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "not_dark.fits"
             write_product(path, self.wave)
-            with self.assertRaisesRegex(ValueError, "Expected dark"):
+            with self.assertRaisesRegex(ValueError, "Unexpected product category"):
                 load_dark(path)
 
     def test_fingerprint_changes_with_data_but_not_filename_or_producer(self):
@@ -194,13 +201,14 @@ class CalibrationTests(unittest.TestCase):
             image[8] = 100
             bad = np.zeros((ny, nx), dtype=np.int16)
             bad[1 if center < 1 else 4, 10] = 1
-            dark = DarkCalibration(np.zeros_like(image), np.ones_like(image), bad, 2)
+            dark = DarkCalibration(np.zeros_like(image), np.ones_like(image), 2)
+            bpm = replace(compute_badpix(dark), bad_pixel_flags=bad)
             traces = [
-                (np.full(nx, center), np.zeros(nx)),
-                (np.full(nx, 8.0), np.zeros(nx)),
+                (np.full(nx, center), np.zeros(nx), np.ones(nx)),
+                (np.full(nx, 8.0), np.zeros(nx), np.ones(nx)),
             ]
             with patch("planetes.flat.trace_spectrum", side_effect=traces):
-                flat = compute_flat(dark, [image], n_outputs=2, profile_width=3.5)
+                flat = compute_flat(dark, bpm, [image], n_outputs=2, profile_width=3.5)
             Y, X = np.indices((ny, nx))
             actual = extract_spec_sparse(
                 np.ones((1, ny, nx), dtype=np.float32),
@@ -240,22 +248,19 @@ class CalibrationTests(unittest.TestCase):
                 hdus[1].data += 7
                 hdus[1].add_checksum()
             flat, wave = (
-                read_product(inputs["PLANETES_FLAT"]),
-                read_product(inputs["PLANETES_WAVE"]),
+                read_product(inputs["FLAT"]),
+                read_product(inputs["WAVE"]),
             )
-            main = read_product(inputs["DARK_CALIB"])
-            phase = DarkImage(np.full(main.mean_adu.shape, 7, dtype=np.float32))
+            main = read_product(inputs["DARK"])
+            phase = replace(
+                main, mean_adu=np.full(main.mean_adu.shape, 7, dtype=np.float32)
+            )
             spectra = extract_calibration_files(
                 flat,
                 wave,
                 main,
-                telescope_flats={
-                    n: inputs[f"TEL_FLAT_{n}"] for n in ("4", "3", "2", "1")
-                },
-                baseline_cubes={
-                    n: inputs[f"P2VM_RAW_{n}"]
-                    for n in ("43", "42", "41", "32", "31", "21")
-                },
+                telescope_flats=inputs["FLAT_RAW"],
+                baseline_cubes=inputs["P2VM_RAW"],
                 wavelength_um=wavelength_grid(),
                 phase_reference=reference,
                 phase_dark=phase,
@@ -271,3 +276,77 @@ class CalibrationTests(unittest.TestCase):
                 spectra.provenance.dependencies["phase_dark"], fingerprint(phase)
             )
             self.assertNotEqual(fingerprint(main), fingerprint(phase))
+
+
+class SetupAndQualityTests(unittest.TestCase):
+    def test_known_exposure_roi_conflicts_and_explicit_legacy_unknown(self):
+        from planetes.models import check_setup, DetectorSetup
+
+        known = setup(15)
+        for field, value in [
+            ("exposure_s", 0.02),
+            ("origin_x", 1),
+            ("detector", "other"),
+        ]:
+            with (
+                self.subTest(field=field),
+                self.assertRaisesRegex(ValueError, "Incompatible"),
+            ):
+                check_setup(
+                    known, replace(known, **{field: value}), exposure=True, role="DARK"
+                )
+        with self.assertRaisesRegex(ValueError, "Missing"):
+            check_setup(known, DetectorSetup(), exposure=True, role="DARK")
+        unknown = check_setup(
+            known, DetectorSetup(legacy=True), exposure=True, role="DARK"
+        )
+        self.assertIn("DARK.exposure_s", unknown)
+
+    def test_bad_requires_the_dark_that_actually_created_it(self):
+        dark = DarkCalibration(np.zeros((24, 15)), np.ones((24, 15)), 2)
+        bad = compute_badpix(dark)
+        with self.assertRaisesRegex(ValueError, "dependency"):
+            compute_flat(replace(dark, mean_adu=np.ones((24, 15))), bad, [])
+
+    def test_qc_uses_population_dark_rms_and_sample_wave_residual_stdev(self):
+        from planetes.qc import measure_quality
+        from planetes.models import WavelengthCalibration
+
+        dark = DarkCalibration(
+            np.array([[1.0, 2.0], [3.0, 40.0]]), np.array([[2.0, 4.0], [6.0, 80.0]]), 4
+        )
+        quality, _ = measure_quality(dark)
+        self.assertEqual(quality["ESO QC MEDIANDARK SC"][0], 2.5)
+        self.assertEqual(quality["ESO QC DARKRMS SC"][0], 5.0)
+        wave = replace(
+            calibration_arrays(n_wave=15)[-1],
+            wavelength_map_um=np.vstack(
+                [np.linspace(1 + 0.001 * i, 2 + 0.001 * i, 15) for i in range(24)]
+            ),
+            fit_residual_um=np.array([1.0, 2.0, 4.0]),
+            fit_x_pixels=np.arange(3.0),
+            fit_y_pixels=np.arange(3.0),
+        )
+        self.assertIsInstance(wave, WavelengthCalibration)
+        quality, _ = measure_quality(wave)
+        self.assertEqual(quality["ESO QC MINWAVE SC"][0], 1.023 / 1e6)
+        self.assertEqual(quality["ESO QC MAXWAVE SC"][0], 2.0 / 1e6)
+        self.assertAlmostEqual(quality["ESO QC RMSWAVE UM SC"][0], np.sqrt(7 / 3))
+        _, missing = measure_quality(replace(wave, fit_residual_um=np.empty(0)))
+        self.assertIn("RMSWAVE", missing)
+
+    def test_p2vm_coherence_qc_has_independent_normalization_and_quantiles(self):
+        from planetes.qc import measure_quality
+
+        product = compute_p2vm(calibration_spectra(n_wave=15), phase_correction=False)
+        transmission = np.full_like(product.transmission, 2.0)
+        amplitude = np.broadcast_to(
+            np.arange(1, 16.0), product.coherence_amplitude.shape
+        ).copy()
+        quality, _ = measure_quality(
+            replace(product, transmission=transmission, coherence_amplitude=amplitude)
+        )
+        self.assertEqual(quality["ESO QC P2VM_COHERENCE_SC43"][0], 2.0)
+        self.assertAlmostEqual(quality["ESO QC P2VM_MINCOHERENCE_SC43"][0], 0.25)
+        self.assertAlmostEqual(quality["ESO QC P2VM_MAXCOHERENCE_SC43"][0], 3.75)
+        self.assertEqual(quality["ESO QC P2VM_TRANS_AVG_SC"][0], 1.0)

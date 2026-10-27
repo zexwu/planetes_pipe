@@ -56,6 +56,7 @@ def compute_p2vm(
     coherence_amplitude = np.zeros((N_OUTPUTS, N_BASELINES, n_wave))
     coherence_phase_rad = np.zeros((N_OUTPUTS, N_BASELINES, n_wave))
     cmat = np.zeros((N_OUTPUTS, N_BASELINES, n_wave))
+    fit_rms = np.zeros_like(cmat)
     ellipse_phase = []
     ellipse_amplitude = []
     opd_per_baseline = np.zeros((N_BASELINES, n_frame), dtype=float)
@@ -113,6 +114,8 @@ def compute_p2vm(
             coherence_amplitude[:, bsl, iw] = np.sqrt(a**2 + b**2)
             coherence_phase_rad[:, bsl, iw] = np.arctan2(b, a)
             cmat[:, bsl, iw] = c
+            residual = spec[..., iw] - coeff @ mat.T
+            fit_rms[:, bsl, iw] = np.sqrt(np.mean(residual**2, axis=1))
 
     # --- B. Process Telescopes (Photometric Terms) ---
     for tel in range(N_TELESCOPES):
@@ -200,6 +203,8 @@ def compute_p2vm(
         group_delay_um=gd_per_baseline,
         ellipse_phase_rad=np.asarray(ellipse_phase),
         ellipse_amplitude=np.asarray(ellipse_amplitude),
+        dc_term_adu=cmat,
+        fit_rms_adu=fit_rms,
         provenance=Provenance(
             producer="planetes.p2vm",
             parameters={
@@ -210,6 +215,7 @@ def compute_p2vm(
                 "gd_search_min_um": gd_search_min_um,
                 "gd_search_max_um": gd_search_max_um,
             },
+            unverified=spectra.provenance.unverified,
             inputs=spectra.provenance.inputs,
             dependencies=spectra.provenance.dependencies,
         ),
