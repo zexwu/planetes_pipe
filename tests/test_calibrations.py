@@ -1,31 +1,31 @@
-"""Scientific boundary failures and equivalence of file, chunk and live processing."""
+"""Calibration relationships, grids, independent darks and live/file equivalence."""
 
-from dataclasses import replace
-from pathlib import Path
 import tempfile
 import unittest
+from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 from astropy.io import fits
+from p2vm_fixture import calibration_arrays, calibration_spectra
 
 from planetes.dark import calibrate_dark_file, load_dark
 from planetes.extraction import prepare_extraction
-from planetes.fits import read_product, write_product, product_destination
+from planetes.fits import read_product, write_product
 from planetes.flat import compute_flat
 from planetes.models import (
-    DarkImage,
     DarkCalibration,
+    DarkImage,
     fingerprint,
     validate_gd_range,
     wavelength_grid,
 )
 from planetes.p2vm import compute_p2vm
 from planetes.reduction import FrameReducer, reduce_file
-from p2vm_fixture import calibration_arrays, calibration_spectra
 
 
-class ContractTests(unittest.TestCase):
+class CalibrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.values = calibration_arrays(n_wave=15)
@@ -56,16 +56,29 @@ class ContractTests(unittest.TestCase):
             (24, 1, 17),
         )
 
-    def test_preparation_owns_geometry_and_grid_snapshots(self):
+    def test_live_preparation_owns_geometry_grid_and_inverse_snapshots(self):
         flat = replace(self.flat, profile_x_pixels=self.flat.profile_x_pixels.copy())
-        grid = self.p2vm.wavelength_um.copy()
-        prepared = prepare_extraction(flat, self.wave, grid)
-        original = prepared.profile_x_pixels.copy()
+        parent = replace(
+            self.p2vm,
+            p2vm=self.p2vm.p2vm.copy(),
+            wavelength_um=self.p2vm.wavelength_um.copy(),
+        )
+        reducer = FrameReducer(flat, self.wave, parent)
+        geometry = reducer.extractor.profile_x_pixels.copy()
+        inverse = reducer.p2vm.p2vm.copy()
+        grid = reducer.wavelength_um.copy()
         flat.profile_x_pixels[:] = -1
-        grid[:] = 2
-        np.testing.assert_array_equal(prepared.profile_x_pixels, original)
-        self.assertFalse(prepared.profile_x_pixels.flags.writeable)
-        self.assertLess(prepared.wavelength_um[-1], 2)
+        parent.wavelength_um[:] = 2
+        parent.p2vm[:] = 0
+        np.testing.assert_array_equal(reducer.extractor.profile_x_pixels, geometry)
+        np.testing.assert_array_equal(reducer.p2vm.p2vm, inverse)
+        np.testing.assert_array_equal(reducer.wavelength_um, grid)
+        for values in (
+            reducer.extractor.profile_x_pixels,
+            reducer.p2vm.p2vm,
+            reducer.wavelength_um,
+        ):
+            self.assertFalse(values.flags.writeable)
 
     def test_live_and_file_match_with_an_independent_dark(self):
         signal = np.transpose(self.values[2], (1, 0, 2)).astype(np.float32)
@@ -171,37 +184,6 @@ class ContractTests(unittest.TestCase):
         self.assertGreater(len(calls), 6)
         self.assertTrue(all(value == (-12.0, 12.0) for value in calls))
 
-    def test_failure_during_write_leaves_no_final_file_and_can_retry(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "wave.fits"
-            with patch(
-                "planetes.fits.read_product",
-                side_effect=ValueError("injected readback failure"),
-            ):
-                with self.assertRaisesRegex(ValueError, "injected"):
-                    write_product(path, self.wave)
-            self.assertFalse(path.exists())
-            self.assertEqual(list(path.parent.iterdir()), [])
-            write_product(path, self.wave)
-            self.assertIsNotNone(read_product(path))
-
-    def test_concurrent_publication_never_overwrites_the_winner(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "wave.fits"
-            with self.assertRaises(FileExistsError):
-                with product_destination(path) as candidate:
-                    write_product(candidate, self.wave)
-                    path.write_bytes(b"existing winner")
-            self.assertEqual(path.read_bytes(), b"existing winner")
-
-    def test_dangling_symlink_is_also_an_existing_target(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "wave.fits"
-            path.symlink_to("missing")
-            with self.assertRaises(FileExistsError):
-                write_product(path, self.wave)
-            self.assertTrue(path.is_symlink())
-
     def test_nondefault_width_pads_profiles_without_changing_pixels(self):
         from planetes.extraction import extract_spec_sparse
 
@@ -244,16 +226,9 @@ class ContractTests(unittest.TestCase):
         np.testing.assert_allclose(actual, [2.0], atol=1e-8)
         self.assertGreater(actual[0], 1.0)
 
-    def test_live_preparation_owns_the_inverse_matrix_snapshot(self):
-        parent = replace(self.p2vm, p2vm=self.p2vm.p2vm.copy())
-        reducer = FrameReducer(self.flat, self.wave, parent)
-        before = reducer.p2vm.p2vm.copy()
-        parent.p2vm[:] = 0
-        np.testing.assert_array_equal(reducer.p2vm.p2vm, before)
-        self.assertFalse(reducer.p2vm.p2vm.flags.writeable)
-
     def test_phase_dark_is_independent_from_main_dark(self):
         from p2vm_fixture import write_recipe_inputs
+
         from planetes.extraction import extract_calibration_files
         from planetes.models import wavelength_grid
 
@@ -296,7 +271,3 @@ class ContractTests(unittest.TestCase):
                 spectra.provenance.dependencies["phase_dark"], fingerprint(phase)
             )
             self.assertNotEqual(fingerprint(main), fingerprint(phase))
-
-
-if __name__ == "__main__":
-    unittest.main()

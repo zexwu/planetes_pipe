@@ -1,9 +1,7 @@
-include README.md document.md PLAN.md PLAN-REVIEW-LOG.md pyproject.toml uv.lock
+include README.md pyproject.toml uv.lock
 recursive-include planetes *.py *.ecsv *.fits
 recursive-include tests *.py
-recursive-include validation *.py
-recursive-include bench *.py *.md
-recursive-include docs *.md *.dot *.svg *.png *.json *.log
+recursive-include docs *.md *.dot *.svg *.png
 recursive-include examples *.in
 recursive-include integration *.patch *.json
 prune build

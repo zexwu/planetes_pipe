@@ -1,7 +1,7 @@
 # Scientific methods in PLANETES 0.3
 
 This note describes the retained numerical operations. Public arrays, units,
-FITS encoding and parameters are defined in [the product contract](docs/PRODUCT_CONTRACT.md).
+FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
 File tasks and array calculations live together in the corresponding scientific
 module. PyCPL and the GUI call these functions.
 

@@ -124,8 +124,10 @@ are documented in [GUI integration](docs/GUI_INTEGRATION.md).
 | `eso/` | SOF roles, parameters, task calls and CPL DFS registration |
 
 [Change report and diagrams](docs/CHANGE_REPORT.md) explain the migration and
-full-data evidence. [Scientific methods](document.md) describe retained numerical
-definitions. `validation/` contains reproducible regression and GUI checks.
+full-data evidence. [Scientific methods](docs/SCIENTIFIC_METHODS.md) describe retained numerical
+definitions. Maintained tests are grouped into scientific calculations, calibration
+relationships, FITS I/O and optional ESO integration. One-off migration scripts
+and logs are kept in Git history and the local archive referenced in the report.
 
 ```bash
 python -m unittest discover -s tests -v

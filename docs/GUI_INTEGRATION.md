@@ -31,11 +31,10 @@ that status. Complete raw dark stacks use the common dark calibration function.
 The 24 labels use the shared A,C,B,D order; invalid channels are excluded from
 means and left as gaps in curves.
 
-The headless check is `validation.gui_smoke.validate_gui`, run with the GUI
-interpreter and `QT_QPA_PLATFORM=offscreen`. It exercises the real window using
-recorded frames and saves screenshots, check results and warmed single-frame
-timings. It does not contact the bench. Tests validate the new core integration;
-live camera timing and bench deployment still require the actual bench environment.
+The actual window was checked headlessly using recorded raw frames. Results and
+one-off GUI validation scripts are archived with the migration records; see
+CHANGE_REPORT.md. The maintained calibration tests check live/file numerical
+equivalence. Live camera timing and bench deployment require the bench environment.
 
 ## Transfer and recovery
 

@@ -12,3 +12,4 @@ calib_zexuan*
 build/
 output/
 pyesorex.log
+.ruff_cache/
