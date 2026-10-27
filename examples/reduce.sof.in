@@ -1,5 +1,5 @@
 /absolute/raw/science.fits SCIENCE_RAW
-/absolute/raw/science_dark.fits SCIENCE_DARK
+/absolute/science-dark-output/planetes_dark.fits DARK_CALIB
 /absolute/flat-output/planetes_flat.fits PLANETES_FLAT
 /absolute/wave-output/planetes_wave.fits PLANETES_WAVE
 /absolute/p2vm-output/planetes_p2vm.fits PLANETES_P2VM

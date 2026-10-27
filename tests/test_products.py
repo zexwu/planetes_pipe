@@ -89,6 +89,20 @@ class ScienceProductTests(unittest.TestCase):
                         self.product.baseline_telescopes[baseline],
                     )
 
+    def test_mapping_dictionary_order_cannot_change_baseline_identity(self):
+        product = replace(
+            self.product,
+            baseline_regions=dict(
+                reversed(list(self.product.baseline_regions.items()))
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "science.fits"
+            write_product(path, product)
+            actual = read_product(path)
+            self.assertEqual(actual.baseline_regions, product.baseline_regions)
+            self.assertEqual(actual.baseline_telescopes, product.baseline_telescopes)
+
     def test_append_cannot_modify_a_raw_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "raw.fits"

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 
+import planetes
 import numpy as np
 from astropy.io import fits
 
@@ -28,7 +29,7 @@ from p2vm_fixture import write_recipe_inputs
 )
 class ESOChainTests(unittest.TestCase):
     def test_all_five_recipes_are_discoverable(self):
-        recipes = Path(__file__).resolve().parents[1] / "planetes/eso"
+        recipes = Path(planetes.__file__).parent / "eso"
         result = subprocess.run(
             [sys.executable, "-m", "pyesorex", f"--recipe-dir={recipes}", "--recipes"],
             capture_output=True,
@@ -46,7 +47,7 @@ class ESOChainTests(unittest.TestCase):
             self.assertIn(name, result.stdout)
 
     def test_science_recipe_preserves_dark_subtraction_and_masks(self):
-        recipes = Path(__file__).resolve().parents[1] / "planetes/eso"
+        recipes = Path(planetes.__file__).parent / "eso"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             inputs = write_recipe_inputs(root / "inputs")

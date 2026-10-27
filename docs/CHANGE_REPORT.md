@@ -1,89 +1,121 @@
-# PLANETES 0.2 修改汇报
+# PLANETES 0.3 修改汇报
 
-2026 年 10 月 27 日。这个版本将 flat、wave、P2VM 和科学 reduction 统一为四个可运行的 PyCPL recipe，正式运行不再读取项目 YAML。科学计算与输入输出分离，所有阶段使用可追溯的 FITS 产品。与备份旧版处理同一组完整台架原始数据、并匹配 Numba 缓存状态时，四类产品的 27 个字段一致：数值数组逐位相同，基线映射完全相同。
+2026-10-27。新版按科学任务整理了整个 package，Python、PyEsoRex 和实际
+Qt6 GUI 共用计算。完整真实数据回归中，在相同数值环境和对应的 Numba
+缓存状态下，旧版的 27 个科学字段全部逐位保持；Python 与 ESO 的 7 类产品、
+科学参数和父标定指纹也一致。
 
-## 原版本备份
+这次完成的是科学代码、数据契约和执行接口的整理。结果仍是仪器级观测量，
+不等于已经满足全部 ESO 最终交付或 Phase 3 要求。
 
-备份目录是 `/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_095248/`。
+## 修改位置和目的
 
-| 备份 | 内容 |
-| --- | --- |
-| `original_head/`、`original_head.tar.gz` | 原始提交 `dd923f62bf76c06246af4993569da0f98be7b89d` 的代码 |
-| `before_update/`、`before_update.tar.gz` | 本轮修改前的工作区代码，包含上一轮 P2VM 试点及未提交文件 |
-| `manifest.json` | 逐文件 SHA256 与两个归档的哈希 |
-| `working_tree.patch` | 本轮修改前相对原始提交的补丁 |
-
-工作区快照共 42 个文件，复制后逐文件核对了哈希。原始数据、已有科学产品、Python 环境和原生库没有重复打包，也没有覆盖。备份恢复说明在该目录的 `README.md` 中。
-
-## 修改了哪些地方
-
-| 原位置或原方式 | 新位置或新方式 | 目的和行为 |
+| 原来的组织 | 当前组织 | 实际作用 |
 | --- | --- | --- |
-| `main.py`、`config.py`、`conf.yaml` | 从活动版本退役；运行入口为 PyEsoRex | 文件由 SOF 标签指定，参数由 recipe 声明；不同时维护第二套配置入口 |
-| `recipes/flat.py` | `algorithms/flat.py` 和 `eso/flat.py` | 计算只接收暗场统计和 flat 数组；recipe 负责读取完整 cube 并登记结果 |
-| `recipes/wavelength.py` | `algorithms/wavelength.py`、`io/reference.py` 和 `eso/wavelength.py` | 波长拟合与文件读取分离；静态谱线以 FITS 输入并记录来源 |
-| `recipes/preproc.py` | `processing.py` 和 `algorithms/extraction.py` | 分离完整 cube 读取、暗场选择、数组提取与重采样；不传递全局配置 |
-| P2VM 试点 | `algorithms/p2vm.py`、`eso/p2vm.py` 和公共 ESO 工具 | 保留相位开关、椭圆拟合、归一化和求逆；输入标签与产品登记复用公共函数 |
-| `recipes/reduction.py` | `algorithms/reduction.py` 和 `eso/reduction.py` | 使用明确的光谱和标定对象计算仪器可见度、GD、差分相位及标志 |
-| 产品模型与 NPZ 读写 | `product.py` 与 `io/products.py` | 模型只表达科学内容；统一 FITS 编解码、单位、轴、通道映射和完整性检查 |
-| `recipes/plotting.py` | `plotting.py` 的 `plot_reduced` | 直接接收 ReducedProduct，保留诊断图计算；已有输出不覆盖 |
-| `bench/` 的旧 NPZ/YAML 路径 | FITS 标定产品和脚本内显式文件路径 | 保留实时试验的计算与计时循环，不作为正式 recipe 安装 |
-| 打包与测试 | 版本 0.2.0、全部新模块、静态参考 FITS 和 ESO 可选依赖 | wheel 可安装；科学模块本身可在未安装 PyCPL 时使用 |
+| processing.py 与 algorithms/ 同时组织任务 | dark / flat / wavelength / p2vm / reduction.py | 一项科学任务放在一个模块；文件入口与数组函数名称明确 |
+| product.py 与 io/products.py 容易混淆 | models.py 与 fits.py | 前者定义科学对象、单位、轴和关系；后者负责读取和编码 |
+| 暗场附着在 flat，暗场选择由各入口处理 | 独立 dark 任务、DarkCalibration 和 DarkImage | 完整统计与仅用于相减的图像有不同类型；flat 必须用完整统计 |
+| 实时独立实现及自身网格 | FrameReducer + 共享 extraction / normalization | 使用 P2VM 保存的网格、相同扣暗规则和 flags |
+| 对形状相同的标定缺少关联约束 | 科学指纹和父标定关系 | 拒绝不同 flat/wave/P2VM 混用；预备状态保存只读数组快照 |
+| 部分参数隐藏在计算/框架层 | 普通科学函数默认值，PyCPL 映射 | 宽度、阈值、网格、相位开关和 GD 范围含义一致 |
+| DFS 头与产品填充可能分步失败 | 临时目录中完成、签名、读回后原子发布 | 失败不留下最终名半成品；文件及符号链接均不覆盖 |
+| bench 中另有科学算法 | 仅保留公共核心的计时示例 | 实时示例不再维护第二份算法 |
+| import 时设置日志/绘图样式 | 显式 configure_logging / 绘图调用 | 导入数值库不改变应用的日志和绘图全局设置 |
 
-共用的 `eso/common.py` 只处理文件标签、输出文件保护、CPL DFS 来源记录和产品登记。它不再实现另一套流程调度系统。`product.py` 中的 dataclass 是模块之间的数据契约，算法层不接收 FrameSet、输出目录或全局 PipelineConfig。
+旧 Python API 和 schema-1 FITS 不做兼容包装。新增 schema 2 的 7 个产品类别，
+科学数组有明确单位/轴；基线映射有零基索引表，暗场记录真实帧数，复数与布尔
+flags 无损保存，全部 HDU 有校验和。30 条静态谱线的值和 origin 标签保留。
+详见 [产品与参数契约](PRODUCT_CONTRACT.md)。
 
-## 实际运行流程
-
-![数据处理流程](dataflow.png)
-
-每个 recipe 完成一项完整任务，并在独立目录写出产品。flat 产品供后续三个步骤使用，wave 产品供 P2VM 和 reduction 使用，P2VM 产品供 reduction 使用。提取后的校准光谱只在 P2VM recipe 内存中传递，没有额外的 preprocessing 缓存产品。
+## 模块和数据流程
 
 ![模块职责](architecture.png)
 
-PNG 适合直接查看或汇报，SVG 适合缩放，旁边的 `.dot` 文件可编辑后重新生成。
+普通 Python 文件任务返回内存对象。ESO 层只映射角色/参数、调用这些任务，
+再登记 DFS 产品。GUI 调用 FrameReducer；文件与单帧处理共享数值内核。
+无需重新引入全局 YAML 或另一套流程调度层。
 
-## 科学定义和文件格式
+![数据流程](dataflow.png)
 
-本轮保留以下定义：4 个望远镜、6 条基线、24 个输出、A,C,B,D 顺序、全部交叉项、原有坏像素阈值和提取 mask、151 通道的 1.15–1.30 um 公共网格、拟合次数和截断、相位校正默认值、science/phase-reference 各自的 dark、GD 搜索范围和可见度归一化。原始 cube 仍按 16 帧分块完整读取。
+main、lamp 和 science dark 按实际用途独立选择。flat 的 BPM 由建立它的完整
+暗场确定；science dark 的变化不重新定义这个 mask。相位参考可以使用独立
+暗场，未提供时记录主暗场复用。science/实时采用 P2VM 的目标波长坐标，
+任何输出覆盖不足均明确失败。
 
-谱线参考增加了 FITS 载体，30 个波长值与原 ECSV 除以 1000 后完全相同。ECSV 原文件及每条谱线的来源标签仍保留，FITS 头记录其文件名和 SHA256。
+PNG 可用于汇报，SVG 可缩放，DOT 为可编辑源文件。
 
-FITS 中明确保存单位、Python 数组轴、零基索引和实际望远镜顺序。复数相干通量分别保存实部与虚部，读回时逐分量赋值；科学 flags 以 0/1 字节存储并还原为布尔数组。校准和科学输出都拒绝覆盖已有文件，填充 CPL 产品前先以只读方式验证其身份。
+## 保留的科学定义与明确修复
 
-CPL DFS 工具写入 recipe 名称、版本、实际参数、输入文件及其类别、产品签名和校验和。新增描述性 QC 量用于记录坏像素比例、波长覆盖、矩阵条件数和无效可见度比例，未添加新的样本剔除或质量阈值。定义见 [QC 参数](QC_PARAMETERS.md)。
+保留 4T、6B、24 输出、A,C,B,D 次序、全部物理交叉项、原有默认坏像素判据、
+提取选点和累加顺序、拟合和剔除规则、相位符号、归一化、16 帧分块、GD
+粗网格步长和 Newton 更新、Numba cache/fastmath。开放参数不代表改变默认算法。
 
-## 验证结果
+针对不合法或不一致的输入，新行为包括：拒绝错配的父标定、拒绝覆盖不足、
+不从二维 dark 编造 RMS/BPM、ragged 提取几何用成对哨兵补齐、GUI 对无效波段
+显示间隙并排除均值、GUI 暗场关闭/错误时暂停并清除当前结果。GD 上下限
+约束粗搜索初始化，Newton 仍可越界；没有新增截断规则。
 
-真实数据使用现有 `2026_02_05/p2vm2` 和 `2026_02_05/sci2` 下的 15 个原始 FITS 文件，总计 10,401,966,720 字节，约 10.4 GB。旧版从备份源码运行，新版由真实 PyEsoRex 顺序执行四个 recipe。两版使用同一 Python 环境和相同科学设置，分别写入新建目录。对比区分首次冷启动和缓存复跑，不混合两种状态。
+## 验证证据
 
-| 产品 | 比较字段数 | 结果 | 新 FITS 完整性 |
-| --- | ---: | --- | --- |
-| flat | 6 | 全部逐位一致 | 7 个 HDU，校验和全部通过 |
-| wave | 1 | 全部逐位一致 | 2 个 HDU，校验和全部通过 |
-| P2VM | 11 | 全部逐位一致 | 11 个 HDU，校验和全部通过 |
-| reduced | 9 | 全部逐位一致 | 10 个 HDU，校验和全部通过 |
-| 合计 | 27 | 数组字节和映射均一致 | 全部通过 |
+输入为 `2026_02_05/p2vm2` 和 `sci2` 的 15 个完整原始 FITS，
+总计 10,401,966,720 字节。旧版从冻结的 38341e0 源码运行，新版执行五种
+真实 PyEsoRex recipe（包括三个独立 dark 调用），另跑完整 Python 调用链。
+每次写入新目录，原始数据及已有产品保留。
 
-自动测试 24 项全部通过，包含真实 PyCPL/PyEsoRex 调用、文件顺序打乱、参数开关、独立 science dark、无效标志、NaN 与复数 signed zero 的 FITS 往返，以及无 YAML 的诊断绘图接口。最终 wheel 安装到项目外的临时目录后，这 24 项测试也全部通过，确认四个 recipe 和静态谱线均随安装包提供。补齐显式 setuptools 构建配置后，锁文件检查和隔离环境的安装预演通过；Ruff、差异空白检查和 wheel 打包也通过。
+| 检查 | 实际结果 |
+| --- | --- |
+| 冷启动对应冷启动 | 27/27 个旧科学字段逐位相同，映射一致 |
+| 缓存复跑对应缓存复跑 | 27/27 个旧科学字段逐位相同，映射一致 |
+| Python 对应 ESO | 7 类产品、44 个字段/科学指纹比较全部一致 |
+| 主科学/ESO 环境测试 | 48 项全部通过，含真实 PyCPL/PyEsoRex |
+| 实际 GUI 环境测试 | 48 项中 41 项通过，7 项因该环境未装 CPL/执行器而跳过 |
+| FITS 完整性 | 7 个最终产品全部 HDU checksum/datasum、科学指纹及读回通过 |
+| 失败写出 | DFS 临时头后失败、读回失败、并发目标、符号链接等不覆盖/不残留 |
+| Qt6 实际窗口 | 录制 raw 帧下单次扣暗、display binning 不变性、暗场启停、二维 dark、错类别拒绝通过 |
+| 实时核心耗时 | 1024×1280 完整 raw 单帧，预热后 128 次；均值 1.104 ms，中位数 1.100 ms，P95 1.163 ms |
 
-证据文件：[逐字段对照](validation/comparison.json)、[数据及校验和摘要](validation/summary.json)、[自动测试记录](validation/tests.log)、[安装包测试记录](validation/wheel_tests.log)、[环境版本](validation/versions.json)。这组回归在冷启动对应冷启动、缓存复跑对应缓存复跑时各比较 27 个字段，共 54 个对应比较均通过。它证明在本次数据、环境和匹配执行状态下，架构及文件格式迁移保留了既有数值结果；它没有重新测定科学误差或仪器精度。
+实时计时包含扣暗、提取、P2VM 和 flags，不包含采集/界面绘制，也未计算
+GD/差分相位。GUI 默认 fake 刷新 30 ms、台架设置默认 500 ms；此处耗时只
+证明核心计算在本机该工作负载下足够快，真实台架采集仍需部署验证。
 
-### Numba 缓存复现条件
+![实际 Qt6 可见度窗口](validation/gui_visibility.png)
 
-复跑发现，旧版自身在首次编译与缓存加载之间并非逐位相同。控制实验使用同一份原始源码、同一环境、同一组输入，并将 `NUMBA_CACHE_DIR` 指向同一个新建目录连续运行两次，复现了相同差异。flat 的其他五个数组以及提取 mask 完全相同，trace 最大变化为 `3.8544e-7` pixel；沿处理链传播后，visibility amplitude 最大变化约 `1.2854e-7`，差分相位约 `1.4255e-5` deg。
+逐字段证据：[冷启动](validation/comparison_schema_final_cold.json)、
+[缓存复跑](validation/comparison_schema_final_warm.json)、
+[Python 与 ESO](validation/comparison_python_eso.json)。
+其他记录：[测试](validation/tests.log)、[GUI 环境](validation/gui_environment_tests.log)、
+[GUI 验证与计时](validation/gui_results.json)、[产品完整性](validation/summary.json)、
+[环境](validation/versions.json)、[执行记录](validation/recipe_execution.json)。
+完整日志和产品保留在本机：
+`reduced/restructure_validation/20261027_132125/schema_final_cold`、
+`schema_final_warm`、`schema_python_cold`。
 
-两版的冷结果对应相同、热结果也对应相同。该实验确定了缓存状态这个触发条件，没有定位到 Numba 内部具体的指令差异。本轮保留原来的 `cache=True` 和 `fastmath=True`；若需要消除这一既有的跨缓存状态差异，应作为独立数值问题验证，不能在接口迁移中直接改变它们或放宽比较阈值。完全逐位复现应固定环境并匹配缓存状态。
+旧版自身的冷编译与热缓存结果存在小差异。对应状态下逐位比较通过；本次未用
+容差放宽掩盖差异，也未更换算法参数。原控制实验保留在
+[历史记录](history/v0.2/validation/cache_probe.json)。跨数值环境运行也不据此
+宣称逐位相同。
 
-证据：[两种状态的 54 个比较](validation/comparison_cache_matched.json)、[旧源码冷缓存控制实验](validation/cache_probe.json)。
+## 备份、Git 和恢复
 
-实际 SOF、完整日志和新旧产品保存在：
+本轮开始前冻结 v0.2 源码和外部 GUI：
+`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_132125_restructure/`。
+包含 `source.tar`、`source/`、原 GUI 文件、冻结计划和逐文件 SHA256；
+[68 个备份文件重新核验全部相符](validation/backup_verification.json)。
+最初的旧版备份 `20261027_095248/` 仍保留。生成物 build/lib 和旧 recipes 缓存
+移至本轮备份的 generated/，不作为第二份源码维护。
 
-`reduced/eso_v02_validation/20261027_095248/`
+核心整理提交为 `967e324`，分支为 `codex/scientific-core-restructure`。
+Qt6 viewer 所在 devel 目录未由 Git 管理，其精确补丁、原/新哈希和恢复说明
+单独保存，见 [GUI 集成](GUI_INTEGRATION.md)。旧 Qt5 viewer 和采集代码保留。
 
-## 使用和后续边界
+## 使用与后续
 
-[README](../README.md) 给出安装、四个 recipe 的输入标签、参数和绘图接口。[examples](../examples/) 提供可填写绝对路径的 SOF 模板。执行时进入新的输出目录再调用 PyEsoRex，可同时避免覆盖已有产品和 CPL 对过长日志文件名的限制。
+[README](../README.md) 提供五个 recipe、完整 Python 链与实时调用示例；
+[examples](../examples/) 提供新 SOF 模板。用 schema 2 从 raw 重新生成标定，
+不要将旧文件重命名充当新产品。发布目录提供源码归档、wheel 和哈希。wheel 已在项目外安装并通过完整测试，
+五个 recipe 均可发现，实际 wave 执行使用了安装包内的默认静态参考。
+见 [安装测试](validation/wheel_tests.log) 和 [默认参考验证](validation/installed_reference.json)。
 
-这个版本完成了四步运行接口和 FITS 产品迁移。`planetes_reduced.fits` 仍是仪器级结果，通量单位保留 ADU，并标记 `PLTLEVEL=INSTRUMENTAL`。后续需要与仪器采集端确定 ESO 分类及观测元数据、曝光单位和逐帧时间，制定 EDPS 分类和校准关联规则，并补齐误差传播、天文传递函数标定、闭合相位/OIFITS 和 Phase 3 验收。产品类别、QC 定义、字典以及正式交付的依赖和版权声明需要 ESO 审核。
-
-原来的旧字段 NPZ 产品保留不动。新流程从原始数据生成新 FITS，不通过猜测旧字段含义来迁移已有科学产品。代码、报告、流程图和测试记录由 Git 维护，并另行提供源代码归档和 wheel；原始数据、运行环境、科学输出及旧版备份保留在本机。
+下一阶段应与采集端/ESO 明确 raw 观测元数据、曝光与时间单位、分类字典和
+EDPS 关联规则，再分别验证误差传播、天文传递函数、闭合相位/OIFITS 和
+Phase 3。本轮没有新定义这些科学量，也未连接或操作台架硬件。

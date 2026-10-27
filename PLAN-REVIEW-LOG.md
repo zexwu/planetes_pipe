@@ -1,5 +1,7 @@
 # Plan Review Log: PLANETES 科学处理与 ESO 接口整理
 
+Status: the user subsequently approved implementation on 2026-10-27. The text below records the planning stage. See docs/CHANGE_REPORT.md for the completed implementation.
+
 Act 1 (grill) complete — 14 decisions locked with the user. MAX_ROUNDS=5.
 PLAN_FILE=PLAN.md
 LOG_FILE=PLAN-REVIEW-LOG.md

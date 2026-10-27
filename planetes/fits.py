@@ -104,22 +104,23 @@ def encode_product(product, header=None):
             hdu.header["PLTAXES"] = item.metadata["axes"]
             hdus.append(hdu)
     if isinstance(product, (P2VMCalibration, ReducedObservables)):
+        baselines = sorted(product.baseline_regions)
         table = afits.BinTableHDU.from_columns(
             [
                 afits.Column(
                     name="BASELINE_INDEX",
                     format="J",
-                    array=list(product.baseline_regions),
+                    array=baselines,
                 ),
                 afits.Column(
                     name="TELESCOPE_INDICES",
                     format="2J",
-                    array=list(product.baseline_telescopes.values()),
+                    array=[product.baseline_telescopes[b] for b in baselines],
                 ),
                 afits.Column(
                     name="OUTPUT_INDICES",
                     format="4J",
-                    array=list(product.baseline_regions.values()),
+                    array=[product.baseline_regions[b] for b in baselines],
                 ),
             ],
             name="BASELINE_MAP",

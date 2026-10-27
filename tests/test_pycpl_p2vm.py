@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 
+import planetes
 import numpy as np
 from astropy.io import fits
 
@@ -96,7 +97,7 @@ class PyCPLP2VMTests(unittest.TestCase):
         find_spec("pyesorex") is not None, "PyEsoRex runtime not installed"
     )
     def test_pyesorex_discovers_and_runs_recipe_without_yaml(self):
-        recipe_directory = Path(__file__).resolve().parents[1] / "planetes" / "eso"
+        recipe_directory = Path(planetes.__file__).parent / "eso"
         sof = self.root / "p2vm.sof"
         sof.write_text("".join(f"{path} {tag}\n" for tag, path in self.paths.items()))
         result = subprocess.run(

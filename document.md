@@ -1,317 +1,99 @@
-# Calibration Procedures
-
-Version 0.2 uses PyCPL recipes and FITS products. Scientific operations below retain the numerical definitions from the original implementation. The recipes communicate through FITS; extracted calibration spectra remain in memory inside the P2VM recipe.
-
-
-This note summarizes the algorithms used by the calibration recipes and their in-memory extraction step:
-
-- `flat`
-- `wave`
-- calibration-spectrum extraction
-- `p2vm`
-
-The description follows the implementation in the codebase and is meant to explain what is actually computed, in what order, and with what assumptions.
-
-## 1. `flat`: detector calibration and spectral tracing
-
-Implemented in [planetes/algorithms/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/algorithms/flat.py).
-
-### Inputs
-
-- dark cube: the `DARK_RAW` input
-- one named flat cube per telescope: the `TEL_FLAT_*` inputs
-
-### Procedure
-
-1. Compute the mean dark frame:
-   - `dark_map = mean(dark_cube, axis=0)`
-   - `dark_std = std(dark_cube, axis=0)`
-
-2. Build a simple bad-pixel map from dark statistics:
-   - hot pixels: unusually large mean signal
-   - dead pixels: unusually low mean signal
-   - noisy pixels: unusually large temporal RMS
-
-3. Build the mean flat image:
-   - for each telescope flat cube, compute `mean(cube) - dark_map`
-   - average all telescope flat maps into one `flat_map`
-
-4. Detect the approximate spectral output positions:
-   - collapse `flat_map` along the dispersion direction
-   - detect peaks in the spatial profile with `scipy.signal.find_peaks`
-   - keep the strongest `n_reg = 4 * n_bsl` peaks
-
-5. Trace each spectrum across the detector:
-   - starting from the reference peak, scan in `x`
-   - in each column, fit a Gaussian profile in `y`
-   - propagate the current centroid from one column to the next
-   - smooth the traced center with a median filter plus a cubic polynomial fit
-
-6. Build a binary extraction mask for each output:
-   - pixels within `profile_width / 2` of the traced center are accepted
-   - bad pixels are removed from the mask
-
-### Products
-
-- `dark_map_adu`
-- `bad_pixel_flags`
-- `flat_map_adu`
-- sparse extraction coordinates: `profile_x_pixels`, `profile_y_pixels` (`-1` marks excluded bad pixels)
-- traced spatial centroids: `trace_y_pixels` (the corresponding `x` coordinate is the detector pixel index)
-
-### Main assumption
-
-Each interferometric output is well approximated by a narrow, smooth trace in the detector plane, and the trace can be followed column-by-column from the flat image.
-
-## 2. `wave`: wavelength calibration
-
-Implemented in [planetes/algorithms/wavelength.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/algorithms/wavelength.py).
-
-### Inputs
-
-- `flat` product:
-  - sparse extraction coordinates
-  - traced output geometry
-- wave lamp cube: the `WAVE_RAW` input
-- wave dark cube: the `WAVE_DARK` input
-
-### Procedure
-
-1. Build the mean wave-lamp image:
-   - `wave_img = mean(wave_cube) - mean(wave_dark)`
-
-2. Extract one 1D spectrum per detector output:
-   - use the sparse extraction masks from the `flat` step
-
-3. Detect emission lines in a reference spectrum:
-   - take the mean of the last four extracted outputs as a reference spectrum
-   - detect peaks above `median + sigma * MAD`
-
-4. Match detected peaks to a laboratory line list:
-   - known line wavelengths are loaded from the static `PLANETES_LINE_LIST` FITS, generated without changing the values in `planetes/data/wavelength_lines.ecsv`
-   - a quadratic wavelength-to-pixel mapping is estimated with a RANSAC-like search
-   - this provides a reference mapping between known wavelengths and mean-spectrum peaks
-
-5. For each detector output:
-   - detect peaks in the extracted spectrum
-   - refine peak positions to sub-pixel precision using a local logarithmic parabola
-   - match the output peaks to the mean-spectrum peaks using a constrained quadratic grid search
-   - combine that result with the global line identification to obtain `(x, y, wavelength)` samples
-
-6. Fit a global 2D wavelength solution:
-   - fit `wavelength = f(x, y)` with the recipe's cubic polynomial
-   - reject outliers iteratively using residual clipping
-   - evaluate the fitted polynomial on the traced output coordinates
-
-### Products
-
-- `planetes_wave.fits`: `wavelength_map_um`
-
-### Main assumptions
-
-- the detector-to-wavelength mapping is smooth and well represented by a low-order polynomial
-- line ordering is preserved across outputs
-
-## 3. Calibration-spectrum extraction and common-grid interpolation
-
-Implemented in [planetes/processing.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/processing.py).
-
-### Inputs
-
-- `flat` product:
-  - `dark_map_adu`
-  - sparse extraction coordinates
-  - `flat_map_adu`
-- `wave` product:
-  - `wavelength_map_um`
-- calibration cubes:
-  - one P2VM cube per baseline
-  - one photometric flat cube per telescope
-  - optional `PHASE_REFERENCE` cube
-
-### Procedure
-
-1. Define a common wavelength grid:
-   - `wl_grid = linspace(min_wave, max_wave, nwave)`
-
-2. Extract the flat spectrum for every output:
-   - use the sparse extraction masks on `flat_map`
-
-3. Interpolate from pixel space to wavelength space:
-   - interpolation is done in wavenumber, not wavelength
-   - this uses `wavelength_map_um` and the target wavelength grid
-
-4. For each input calibration cube:
-   - subtract `dark_map`
-   - extract all outputs with the sparse masks
-   - divide by the flat spectrum in detector space
-   - interpolate to the common wavelength grid
-   - multiply by the interpolated flat response to keep the original flux scale
-
-5. Identify which detector outputs belong to which telescope:
-   - use the photometric telescope flats
-   - for each telescope, compute the mean extracted flux per output
-   - assign the brightest half of the outputs to that telescope
-
-6. Identify which detector outputs belong to which baseline:
-   - use the baseline calibration cubes
-   - for each baseline, compute the temporal standard deviation per output
-   - assign the four most modulated outputs to that baseline
-
-7. Cross-check the mapping:
-   - the outputs inferred from telescope intersections must match the outputs inferred from baseline modulation
-
-### In-memory result
-
-- `telescope_spectra`: extracted telescope calibration spectra
-- `baseline_spectra`: extracted baseline calibration spectra
-- `phase_reference`: extracted optional phase-reference spectra
-- `baseline_regions`, `baseline_telescopes`
-- `wavelength_um`
-
-These arrays form `CalibrationSpectra` and are passed directly to `compute_p2vm`;
-there is no preprocessing product on disk.
-
-### Main assumptions
-
-- a telescope photometric flat illuminates all outputs containing that telescope
-- a baseline calibration cube produces strong temporal modulation only in the four ABCD outputs of that baseline
-
-## 4. `p2vm`: pixel-to-visibility matrix calibration
-
-Implemented in [planetes/algorithms/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/algorithms/p2vm.py).
-
-### Inputs
-
-- in-memory `CalibrationSpectra`:
-  - `telescope_spectra`
-  - `baseline_spectra`
-  - optional `phase_reference`
-  - `baseline_regions`
-  - `baseline_telescopes`
-  - `wavelength_um`
-
-### Procedure
-
-1. For each baseline, isolate its four ABCD outputs.
-
-2. Estimate fringe phase and amplitude by ellipse fitting:
-   - form transformed coordinates from the four outputs:
-     - `X = C - A`
-     - `Y = D - B`
-   - for each wavelength channel, fit a conic model that maps the cloud onto a unit circle
-   - derive:
-     - `phase(frame, wave)`
-     - `visamp(frame, wave)`
-
-3. Estimate OPD and group delay for that baseline:
-   - use the middle 50% of the band
-   - compute OPD from the phase slope
-   - compute group delay from coherent-flux phasor summation
-   - remove the OPD zero-point by fitting OPD against group delay
-
-4. Fit the visibility-to-pixel coefficients:
-   - for each wavelength, fit each output as
-     - `c + a cos(phi) + b sin(phi)`
-   - store:
-     - DC term
-     - coherence amplitude `sqrt(a^2 + b^2)`
-     - coherence phase `atan2(b, a)`
-
-5. Fit the photometric transmission terms:
-   - for each telescope, take the median photometric response across frames
-
-6. Normalize the model:
-   - phase normalization: set the A output as the phase reference within each baseline
-   - transmission normalization: normalize telescope transmission terms
-   - coherence normalization: scale fringe terms by the geometric mean of the contributing photometric fluxes
-
-7. Convert the polar fringe representation into Cartesian form:
-   - real term: `coh * cos(phase)`
-   - imaginary term: `coh * sin(phase)`
-
-8. Invert the per-wavelength V2PM:
-   - compute the pseudoinverse for every wavelength channel
-   - this yields the final P2VM
-
-9. Optional phase correction:
-   - if `phase_reference` is available, apply an additional phase-reference correction and rebuild the P2VM
-
-The V2PM is persisted through its physical calibration terms: photometric
-transmission, coherence amplitude, and coherence phase. The recipe expands
-these into a Cartesian matrix only while computing the per-wavelength P2VM.
-
-### Products
-
-- `p2vm`
-- `wavelength_um`
-- `baseline_regions`
-- `baseline_telescopes`
-- `transmission`
-- `coherence_amplitude`
-- `coherence_phase_rad`
-- `opd_um`
-- `group_delay_um`
-- `ellipse_phase_rad`
-- `ellipse_amplitude`
-
-### Main assumptions
-
-- each baseline is encoded as four ABCD outputs
-- the coherent signal at fixed wavelength traces an ellipse in the transformed ABCD plane
-- the instrument response is separable into photometric terms plus sinusoidal fringe terms
-
-## Summary of calibration flow
-
-The calibration steps are chained as follows:
-
-1. `flat`
-   - detector background, bad pixels, and output traces
-2. `wave`
-   - detector-coordinate to wavelength mapping
-3. calibration-spectrum extraction
-   - extract and interpolate all calibration cubes onto a common spectral grid
-4. `p2vm`
-   - derive the visibility-to-pixel model and its inverse
-
-After these steps, science reduction can consume:
-
-- sparse extraction geometry from `flat`
-- wavelength calibration from `wave`
-- inversion matrices from `p2vm`
-
-Only `planetes_flat.fits`, `planetes_wave.fits`, and `planetes_p2vm.fits` are persisted by calibration;
-extracted calibration spectra remain in memory.
-
-## Persisted array contract
-
-Axis names below describe the current scientific meaning and are encoded by the versioned FITS product schema.
-
-| Product | Field | Axes | Unit / meaning |
-| --- | --- | --- | --- |
-| Flat | `profile_x_pixels` | output, sample | detector pixel; `-1` is invalid |
-| Flat | `profile_y_pixels` | output, sample | detector pixel; `-1` is invalid |
-| Flat | `flat_map_adu` | detector-y, detector-x | ADU |
-| Flat | `dark_map_adu` | detector-y, detector-x | ADU |
-| Flat | `bad_pixel_flags` | detector-y, detector-x | bit flags: hot=1, dead=2, noisy=4 |
-| Flat | `trace_y_pixels` | output, detector-x | detector pixel |
-| Wave | `wavelength_map_um` | output, detector-x | micrometre |
-| P2VM | `transmission` | output, telescope, wavelength | normalized photometric V2PM term |
-| P2VM | `p2vm` | data-channel, output, wavelength | inverse of the expanded Cartesian V2PM |
-| P2VM | `wavelength_um` | wavelength | micrometre |
-| P2VM | `coherence_amplitude` | output, baseline, wavelength | normalized amplitude, including cross-talk terms |
-| P2VM | `coherence_phase_rad` | output, baseline, wavelength | radian; includes optional phase-reference correction |
-| P2VM | `opd_um` | baseline, frame | micrometre |
-| P2VM | `group_delay_um` | baseline, frame | micrometre |
-| P2VM | `ellipse_phase_rad` | baseline, frame, wavelength | radian |
-| P2VM | `ellipse_amplitude` | baseline, frame, wavelength | dimensionless unit-circle radius |
-| Reduced | `photometric_flux_adu` | frame, telescope, wavelength | ADU |
-| Reduced | `coherent_flux_adu` | frame, baseline, wavelength | complex ADU |
-| Reduced | `visibility_amplitude` | frame, baseline, wavelength | dimensionless |
-| Reduced | `flags` | frame, baseline, wavelength | boolean; true means invalid |
-| Reduced | `wavelength_um` | wavelength | micrometre |
-| Reduced | `group_delay_um` | frame, baseline | micrometre |
-| Reduced | `differential_phase_deg` | frame, baseline, wavelength | degree |
-
-`baseline_regions` records the four detector outputs in A, C, B, D order;
-`baseline_telescopes` records the two telescope indices for each baseline.
+# Scientific methods in PLANETES 0.3
+
+This note describes the retained numerical operations. Public arrays, units,
+FITS encoding and parameters are defined in [the product contract](docs/PRODUCT_CONTRACT.md).
+File tasks and array calculations live together in the corresponding scientific
+module. PyCPL and the GUI call these functions.
+
+## Dark statistics (`dark.py`)
+
+Read the complete raw stack, accumulate sum and squared sum in float64, and
+return float32 temporal mean and population RMS. The variance is
+`max(E[x²] - E[x]², 0)`. Complete calibration requires at least two frames.
+
+The original bad-pixel rule uses the spatial median of the mean image and of
+the temporal RMS. Mean values above/below median mean ± threshold × median RMS
+set hot/dead bits 1/2; RMS above threshold × median RMS sets noisy bit 4.
+The default threshold remains 5. This RMS includes whatever temporal variations
+are present in the stack; it is not independently calibrated readout noise.
+A subtraction-only DarkImage carries neither an RMS nor inferred BPM.
+
+## Flat and traces (`flat.py`)
+
+Subtract the explicit complete dark from each telescope's mean flat and average
+those four maps. Collapse along dispersion, select the strongest 24 spatial
+peaks, trace a Gaussian centroid column by column, then smooth with the retained
+median filter and cubic fit. Gaussian iteration counts and arithmetic are unchanged.
+
+Accept pixels under the original strict inequality
+`abs(y - trace_y) < profile_width / 2`, excluding the dark BPM. Sparse X/Y arrays
+retain the original accumulation order. Paired (-1,-1) entries represent invalid
+pixels and padding when different outputs have different sample counts. The
+flat product contains response and geometry; dark statistics are a separate product.
+
+## Wavelength solution (`wavelength.py`)
+
+Subtract the selected lamp dark from the complete mean lamp image and extract
+using flat's geometry. Use the mean of the last four outputs as the reference
+spectrum. Detect lines above the retained median/MAD threshold and match to the
+30 laboratory lines with the original quadratic RANSAC search. Refine individual
+output line positions using a logarithmic parabola and match them to the reference
+with the constrained quadratic grid search.
+
+Fit the global cubic `wavelength = f(detector_x, trace_y)` with the retained
+iterative residual clipping. Evaluate at each traced output. The result is a
+24 × detector-x wavelength map in um. Smooth mapping and preserved line order
+are assumptions; coverage alone is not a wavelength-accuracy measurement.
+
+## Extraction and interpolation (`extraction.py`)
+
+Prepare sparse geometry and flat response once. Subtract the explicitly selected
+dark once, accumulate selected pixels, divide the extracted spectrum by the
+flat spectrum in detector coordinates, interpolate in wavenumber, and multiply
+by the interpolated flat response to preserve the original flux scale.
+
+P2VM calibration defines its explicit target grid (default 1.15–1.30 um, 151
+channels). Science and live processing consume this saved grid. Every output
+must cover it fully; parent flat/wave relations and wavelength ordering are
+checked before extraction. No extension of boundary values is accepted.
+
+Photometric telescope flats identify illuminated outputs; modulation in baseline
+cubes identifies four outputs per baseline. Their intersections must agree.
+The resulting CalibrationSpectra stays in memory, without a preprocessing file.
+The main dark applies to telescope and baseline cubes. A phase reference has
+its independently selected dark, or records reuse of the main dark.
+
+## P2VM (`p2vm.py`)
+
+For each baseline, use its A,C,B,D detector outputs. Ellipse fitting operates on
+`X=C-A`, `Y=D-B` at each wavelength to estimate phase and radius. The middle
+half of the band supplies OPD phase slope and coherent-sum group delay. Fit
+OPD against GD to remove the OPD zero point.
+
+At each wavelength, fit each of all 24 detector outputs as
+`c + a*cos(phi) + b*sin(phi)`. Persist coherence amplitude `sqrt(a²+b²)` and
+phase `atan2(b,a)`, including cross-talk outputs. Fit photometric transmission
+from telescope flats, apply the original transmission/coherence normalizations,
+and set the A output's phase reference within each baseline.
+
+Expand these physical terms transiently into the Cartesian V2PM and compute
+its per-wavelength pseudoinverse. Persist the inverse and physical terms;
+there is no duplicate Cartesian matrix product. Optional phase-reference
+correction rebuilds the P2VM and records whether it was actually applied.
+
+## Instrumental science and live frames (`reduction.py`)
+
+Apply P2VM to extracted spectra to obtain four photometric channels and six
+complex coherent channels. Use the retained visibility normalization and
+invalid-data rule: nonpositive/nonfinite photometric products or nonfinite
+coherent flux yield NaN and flags. Full reduction also computes coherent-sum
+GD with Newton refinement and the original differential phase.
+
+Default coarse GD ranges are ±30 um for calibration and ±100 um for science,
+with the retained 0.01 um step. Newton refinement is unconstrained by these
+initialization bounds. Real-time reduction can skip GD/phase diagnostics while
+sharing extraction, normalization and flags. It always receives raw unbinned
+frames. GUI binning affects only display.
+
+Flux is instrumental ADU. No new uncertainty model, transfer-function correction,
+closure-phase definition or OIFITS/Phase 3 product is introduced here.

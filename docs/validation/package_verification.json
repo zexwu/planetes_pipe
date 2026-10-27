@@ -1,0 +1,18 @@
+{
+  "wheel_files": 25,
+  "source_files": 117,
+  "five_recipe_modules": true,
+  "no_retired_modules": true,
+  "no_raw_data_environments_or_pdfs": true,
+  "artifacts": {
+    "planetes-0.3.0-py3-none-any.whl": {
+      "bytes": 45136,
+      "sha256": "6486a5fedb69eb42f7573b803993179610490fae29bf83f4ee78a257b1243ec5"
+    },
+    "planetes-0.3.0.tar.gz": {
+      "bytes": 1479758,
+      "sha256": "03f475d02a33d3b5b026684576d4d731e0227c68f9edfa001ad38672ab30448a"
+    }
+  },
+  "sdist_rebuild_wheel_contents_exact": true
+}

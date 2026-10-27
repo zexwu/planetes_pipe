@@ -1,0 +1,19 @@
+{
+  "checks": [
+    "raw frame / single dark subtraction",
+    "display binning invariance",
+    "dark-off pause",
+    "current-frame DarkImage",
+    "wrong-category rejection"
+  ],
+  "all_passed": true,
+  "frames_timed": 128,
+  "raw_frame_shape": [
+    1024,
+    1280
+  ],
+  "mean_ms": 1.1035367706426769,
+  "median_ms": 1.100166526157409,
+  "p95_ms": 1.1629728367552161,
+  "hardware_connected": false
+}
