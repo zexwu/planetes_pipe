@@ -8,7 +8,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from . import log
 from .instrument import BASELINES, N_BASELINES, N_TELESCOPES, TELESCOPES
-from .models import ReducedObservables
+from .products import ReducedObservables
 
 
 def genfig(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):

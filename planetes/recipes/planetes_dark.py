@@ -1,14 +1,14 @@
 """PyCPL binding for the ordinary dark scientific task."""
 
 from cpl import ui
+
 from planetes import __version__
-from planetes.dark import calibrate_dark_file
-from planetes.eso.common import (
-    parameter_list,
-    scientific_settings,
-    select_inputs,
+from planetes.recipes.dfs import (
     save_products,
+    select_inputs,
 )
+from planetes.recipes.parameters import make_parameters, read_parameters
+from planetes.tasks import calibrate_dark_file
 
 
 class PlanetesDark(ui.PyRecipe):
@@ -24,10 +24,10 @@ class PlanetesDark(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = parameter_list("dark", calibrate_dark_file, ["bad_threshold"])
+        self.parameters = make_parameters("dark", calibrate_dark_file)
 
     def run(self, frameset, settings):
-        options = scientific_settings(self, settings)
+        options = read_parameters(self, settings)
         paths, _, used = select_inputs(frameset, {"DARK_RAW": None})
         dark, bad = calibrate_dark_file(paths["DARK_RAW"], **options)
         return save_products(

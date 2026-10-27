@@ -1,15 +1,15 @@
 """PyCPL binding for the ordinary flat scientific task."""
 
 from cpl import ui
+
 from planetes import __version__
-from planetes.flat import calibrate_flat_file
-from planetes.models import DarkCalibration, BadPixelMap
-from planetes.eso.common import (
-    parameter_list,
-    scientific_settings,
-    select_inputs,
+from planetes.products import BadPixelMap, DarkCalibration
+from planetes.recipes.dfs import (
     save_product,
+    select_inputs,
 )
+from planetes.recipes.parameters import make_parameters, read_parameters
+from planetes.tasks import calibrate_flat_file
 
 
 class PlanetesFlat(ui.PyRecipe):
@@ -25,10 +25,10 @@ class PlanetesFlat(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = parameter_list("flat", calibrate_flat_file, ["profile_width"])
+        self.parameters = make_parameters("flat", calibrate_flat_file)
 
     def run(self, frameset, settings):
-        options = scientific_settings(self, settings)
+        options = read_parameters(self, settings)
         paths, cal, used = select_inputs(
             frameset, {"DARK": DarkCalibration, "BAD": BadPixelMap, "FLAT_RAW": None}
         )

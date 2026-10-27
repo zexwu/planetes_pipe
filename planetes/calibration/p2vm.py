@@ -5,8 +5,8 @@ from collections.abc import Mapping
 import numpy as np
 from numpy.typing import NDArray
 
-from . import log
-from .instrument import (
+from .. import log
+from ..instrument import (
     IMAG_SLICE,
     N_BASELINES,
     N_DATA,
@@ -14,14 +14,13 @@ from .instrument import (
     N_TELESCOPES,
     REAL_SLICE,
 )
-from .reduction import compute_gdelay
-from .models import (
+from ..products import (
     CalibrationSpectra,
     P2VMCalibration,
     Provenance,
-    wavelength_grid,
     validate_gd_range,
 )
+from ..reduction import compute_gdelay
 
 
 def compute_p2vm(
@@ -358,56 +357,3 @@ def fit_ellipse_linear(spec: NDArray, envs: NDArray) -> tuple[NDArray, NDArray]:
         visamp[:, iwl] = np.sqrt(X_fit**2 + Y_fit**2)
 
     return phase, visamp
-
-
-def calibrate_p2vm_file(
-    flat,
-    wave,
-    main_dark,
-    *,
-    telescope_flats,
-    baseline_cubes,
-    phase_reference=None,
-    phase_dark=None,
-    phase_correction=True,
-    wavelength_min_um=1.15,
-    wavelength_max_um=1.30,
-    wavelength_channels=151,
-    gd_search_min_um=-30.0,
-    gd_search_max_um=30.0,
-) -> P2VMCalibration:
-    """Run the complete file-level P2VM task on explicitly selected input roles."""
-    from dataclasses import replace
-    from .extraction import extract_calibration_files
-
-    if phase_dark is not None and phase_reference is None:
-        raise ValueError("phase_dark requires phase_reference")
-    if not isinstance(phase_correction, bool):
-        raise ValueError("phase_correction must be bool")
-    grid = wavelength_grid(wavelength_min_um, wavelength_max_um, wavelength_channels)
-    spectra = extract_calibration_files(
-        flat,
-        wave,
-        main_dark,
-        telescope_flats=telescope_flats,
-        baseline_cubes=baseline_cubes,
-        wavelength_um=grid,
-        phase_reference=phase_reference if phase_correction else None,
-        phase_dark=phase_dark if phase_correction else None,
-    )
-    result = compute_p2vm(
-        spectra,
-        phase_correction=phase_correction,
-        gd_search_min_um=gd_search_min_um,
-        gd_search_max_um=gd_search_max_um,
-    )
-    params = {
-        **result.provenance.parameters,
-        "wavelength_min_um": wavelength_min_um,
-        "wavelength_max_um": wavelength_max_um,
-        "wavelength_channels": wavelength_channels,
-        "phase_dark_reused": bool(
-            phase_reference is not None and phase_correction and phase_dark is None
-        ),
-    }
-    return replace(result, provenance=replace(result.provenance, parameters=params))

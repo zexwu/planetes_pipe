@@ -5,17 +5,16 @@ from pathlib import Path
 
 import numpy as np
 
-from planetes.instrument import BASELINES, TELESCOPES
-from planetes.fits import write_product, write_raw
-from planetes.models import (
-    FlatCalibration,
-    DetectorSetup,
-    RawMetadata,
-    WavelengthCalibration,
-    DarkCalibration,
-    Provenance,
-    fingerprint,
+from planetes.identity import fingerprint
+from planetes.instrument import BASELINES, TELESCOPES, DetectorSetup
+from planetes.io.fits import write_product
+from planetes.io.raw import RawMetadata, write_raw
+from planetes.products import (
     CalibrationSpectra,
+    DarkCalibration,
+    FlatCalibration,
+    Provenance,
+    WavelengthCalibration,
 )
 
 
@@ -56,7 +55,7 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
         n_frame,
         setup=setup(n_wave),
     )
-    from planetes.dark import compute_badpix
+    from planetes.calibration.dark import compute_badpix
 
     bad = compute_badpix(dark)
     flat = FlatCalibration(

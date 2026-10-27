@@ -5,34 +5,29 @@ This module handles the reduction of science target data, including
 visibility extraction, group delay computation, and phase calculation.
 """
 
-from dataclasses import dataclass, field, replace
-from pathlib import Path
-from .extraction import prepare_extraction
-
 from collections.abc import Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
 
 from . import log
+from .extraction import prepare_extraction
 from .instrument import IMAG_SLICE, N_BASELINES, N_TELESCOPES, REAL_SLICE
-from .models import (
+from .products import (
+    P2VMCalibration,
+    ReducedObservables,
     VisibilityObservables,
-    Provenance,
-    fingerprint,
     require_parent,
     validate,
     validate_gd_range,
-)
-from .models import (
-    P2VMCalibration,
-    ReducedObservables,
 )
 
 GROUP_DELAY_RANGE_UM = (-100.0, 100.0)
 
 
-def compute_reduce(
+def reduce_spectra(
     spectra: NDArray,
     p2vm: P2VMCalibration,
     *,
@@ -173,8 +168,8 @@ class FrameReducer:
         self.extractor = prepare_extraction(
             self.flat, self.wave, self.p2vm.wavelength_um
         )
-        from dataclasses import fields
         from copy import deepcopy
+        from dataclasses import fields
 
         snapshots = {}
         for item in fields(self.p2vm):
@@ -186,19 +181,6 @@ class FrameReducer:
                 value = deepcopy(value)
             snapshots[item.name] = value
         self.p2vm = P2VMCalibration(**snapshots)
-
-    @classmethod
-    def from_directory(cls, directory: Path):
-        """Load only new FITS products from an explicitly selected calibration directory."""
-        from .fits import read_product
-
-        directory = Path(directory).expanduser().resolve()
-        return cls(
-            read_product(directory / "planetes_flat.fits"),
-            read_product(directory / "planetes_wave.fits"),
-            read_product(directory / "planetes_p2vm.fits"),
-            directory,
-        )
 
     @property
     def n_baselines(self):
@@ -220,52 +202,10 @@ class FrameReducer:
         """Reduce one RAW frame; caller must not subtract its selected dark beforehand."""
         cube = np.asarray(raw, dtype=np.float32)[None, :, :]
         spectra = self.extractor.extract(cube, dark)
-        return compute_reduce(
+        return reduce_spectra(
             spectra,
             self.p2vm,
             diagnostics=diagnostics,
             gd_search_min_um=gd_search_min_um,
             gd_search_max_um=gd_search_max_um,
         )
-
-
-def reduce_file(
-    path: Path,
-    dark,
-    flat,
-    wave,
-    p2vm: P2VMCalibration,
-    *,
-    gd_search_min_um=-100.0,
-    gd_search_max_um=100.0,
-) -> ReducedObservables:
-    """Read the complete raw science cube, apply explicit calibrations and return results."""
-    from .fits import check_raw_calibrations
-
-    unknown = check_raw_calibrations(path, dark, flat, category="SINGLE_SCI_RAW")
-    validate(dark)
-    validate_gd_range((gd_search_min_um, gd_search_max_um))
-    reducer = FrameReducer(flat, wave, p2vm)
-    spectra = reducer.extractor.extract_file(path, dark)
-    result = compute_reduce(
-        spectra,
-        p2vm,
-        gd_search_min_um=gd_search_min_um,
-        gd_search_max_um=gd_search_max_um,
-    )
-    info = Provenance(
-        producer="planetes.reduction",
-        unverified=unknown,
-        parameters={
-            "gd_search_min_um": gd_search_min_um,
-            "gd_search_max_um": gd_search_max_um,
-        },
-        inputs={"science_raw": str(path)},
-        dependencies={
-            "dark": fingerprint(dark),
-            "flat": fingerprint(flat),
-            "wave": fingerprint(wave),
-            "p2vm": fingerprint(p2vm),
-        },
-    )
-    return replace(result, provenance=info)

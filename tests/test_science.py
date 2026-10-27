@@ -5,6 +5,8 @@ import unittest
 import numpy as np
 from p2vm_fixture import calibration_spectra
 
+from planetes.calibration.p2vm import build_v2pm_matrix, compute_p2vm
+from planetes.calibration.wavelength import match_lines_grid
 from planetes.extraction import extract_spec_sparse
 from planetes.instrument import (
     IMAG_SLICE,
@@ -14,9 +16,7 @@ from planetes.instrument import (
     N_TELESCOPES,
     REAL_SLICE,
 )
-from planetes.p2vm import build_v2pm_matrix, compute_p2vm
 from planetes.reduction import normalize_visibility
-from planetes.wavelength import match_lines_grid
 
 
 class ScienceTests(unittest.TestCase):
@@ -89,3 +89,40 @@ class ScienceTests(unittest.TestCase):
                 np.eye(N_DATA),
                 atol=1e-12,
             )
+
+
+class StandaloneScienceTests(unittest.TestCase):
+    def test_science_runs_without_fits_cpl_or_task_layer(self):
+        """Array calculations must remain usable without any file or executor dependency."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        code = """
+import importlib.abc
+import sys
+class NoFileOrExecutorImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {'astropy', 'cpl', 'pyesorex'} or fullname in {
+            'planetes.io', 'planetes.tasks', 'planetes.recipes'
+        }:
+            raise ImportError(f'Forbidden scientific dependency: {fullname}')
+sys.meta_path.insert(0, NoFileOrExecutorImports())
+import numpy as np
+from planetes.calibration import dark, flat, wavelength, p2vm
+from planetes import extraction, reduction, qc
+measured = dark.compute_dark([np.arange(24, dtype=np.float32).reshape(2,3,4)])
+assert measured.n_frames == 2
+assert dark.compute_badpix(measured).bad_pixel_flags.shape == (3,4)
+values, _ = qc.measure_quality(measured)
+assert values['dark_median_adu'][0] == 11.5
+assert not any(key.startswith('ESO ') for key in values)
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

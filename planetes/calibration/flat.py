@@ -5,16 +5,16 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks, medfilt
 
-from . import log
-from .instrument import N_OUTPUTS
-from .models import (
-    FlatCalibration,
-    DarkCalibration,
+from .. import log
+from ..identity import fingerprint
+from ..instrument import N_OUTPUTS
+from ..products import (
     BadPixelMap,
-    require_parent,
+    DarkCalibration,
+    FlatCalibration,
     Provenance,
-    fingerprint,
     positive,
+    require_parent,
     validate,
 )
 
@@ -242,52 +242,3 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y, *, diagnostics=False)
     _scan(ref_x - 1, -1, -1, p0)
 
     return (y_centers, y_errs, widths) if diagnostics else (y_centers, y_errs)
-
-
-def calibrate_flat_file(
-    telescope_flats,
-    dark: DarkCalibration,
-    bad: BadPixelMap,
-    *,
-    profile_width: float = PROFILE_WIDTH,
-) -> FlatCalibration:
-    """Resolve four FLAT_RAW shutters and return geometry, without saving products."""
-    from dataclasses import replace
-    from .dark import frame_mean
-    from .fits import (
-        iter_raw_cube,
-        identify_raw,
-        read_raw_metadata,
-        check_raw_calibrations,
-    )
-    from .instrument import TELESCOPES
-
-    telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
-    unknown = []
-    maps = []
-    setup = read_raw_metadata(telescope_flats[TELESCOPES[0]]).setup
-    for name in TELESCOPES:
-        unknown.extend(check_raw_calibrations(telescope_flats[name], dark))
-        from .models import check_setup
-
-        unknown.extend(
-            check_setup(
-                read_raw_metadata(telescope_flats[name]).setup,
-                setup,
-                exposure=False,
-                role="flat sequence",
-            )
-        )
-        maps.append(frame_mean(iter_raw_cube(telescope_flats[name])) - dark.mean_adu)
-    result = compute_flat(dark, bad, maps, profile_width=profile_width)
-    return replace(
-        result,
-        setup=setup,
-        provenance=replace(
-            result.provenance,
-            inputs={
-                f"flat_raw_T{name}": str(telescope_flats[name]) for name in TELESCOPES
-            },
-            unverified=tuple(sorted(set(unknown))),
-        ),
-    )

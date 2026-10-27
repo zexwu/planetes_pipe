@@ -10,19 +10,21 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import calibration_arrays, calibration_spectra, metadata, setup
 
-from planetes.dark import calibrate_dark_file, load_dark, compute_badpix
+from planetes.calibration.dark import compute_badpix
+from planetes.calibration.flat import compute_flat
+from planetes.calibration.p2vm import compute_p2vm
 from planetes.extraction import prepare_extraction
-from planetes.fits import read_product, write_product, write_raw
-from planetes.flat import compute_flat
-from planetes.models import (
+from planetes.identity import fingerprint
+from planetes.io.fits import read_product, write_product
+from planetes.io.raw import write_raw
+from planetes.products import (
     DarkCalibration,
     DarkImage,
-    fingerprint,
     validate_gd_range,
     wavelength_grid,
 )
-from planetes.p2vm import compute_p2vm
-from planetes.reduction import FrameReducer, reduce_file
+from planetes.reduction import FrameReducer
+from planetes.tasks import calibrate_dark_file, load_dark, reduce_file
 
 
 class CalibrationTests(unittest.TestCase):
@@ -181,7 +183,7 @@ class CalibrationTests(unittest.TestCase):
             calls.append(kwargs["search_range"])
             return compute_gdelay(data, wavelength, **kwargs)
 
-        with patch("planetes.p2vm.compute_gdelay", side_effect=measured):
+        with patch("planetes.calibration.p2vm.compute_gdelay", side_effect=measured):
             compute_p2vm(
                 calibration_spectra(n_wave=15),
                 phase_correction=True,
@@ -207,7 +209,7 @@ class CalibrationTests(unittest.TestCase):
                 (np.full(nx, center), np.zeros(nx), np.ones(nx)),
                 (np.full(nx, 8.0), np.zeros(nx), np.ones(nx)),
             ]
-            with patch("planetes.flat.trace_spectrum", side_effect=traces):
+            with patch("planetes.calibration.flat.trace_spectrum", side_effect=traces):
                 flat = compute_flat(dark, bpm, [image], n_outputs=2, profile_width=3.5)
             Y, X = np.indices((ny, nx))
             actual = extract_spec_sparse(
@@ -237,8 +239,8 @@ class CalibrationTests(unittest.TestCase):
     def test_phase_dark_is_independent_from_main_dark(self):
         from p2vm_fixture import write_recipe_inputs
 
-        from planetes.extraction import extract_calibration_files
-        from planetes.models import wavelength_grid
+        from planetes.products import wavelength_grid
+        from planetes.tasks import extract_calibration_files
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -280,7 +282,7 @@ class CalibrationTests(unittest.TestCase):
 
 class SetupAndQualityTests(unittest.TestCase):
     def test_known_exposure_roi_conflicts_and_explicit_legacy_unknown(self):
-        from planetes.models import check_setup, DetectorSetup
+        from planetes.instrument import DetectorSetup, check_setup
 
         known = setup(15)
         for field, value in [
@@ -309,15 +311,15 @@ class SetupAndQualityTests(unittest.TestCase):
             compute_flat(replace(dark, mean_adu=np.ones((24, 15))), bad, [])
 
     def test_qc_uses_population_dark_rms_and_sample_wave_residual_stdev(self):
+        from planetes.products import WavelengthCalibration
         from planetes.qc import measure_quality
-        from planetes.models import WavelengthCalibration
 
         dark = DarkCalibration(
             np.array([[1.0, 2.0], [3.0, 40.0]]), np.array([[2.0, 4.0], [6.0, 80.0]]), 4
         )
         quality, _ = measure_quality(dark)
-        self.assertEqual(quality["ESO QC MEDIANDARK SC"][0], 2.5)
-        self.assertEqual(quality["ESO QC DARKRMS SC"][0], 5.0)
+        self.assertEqual(quality["dark_median_adu"][0], 2.5)
+        self.assertEqual(quality["dark_rms_median_adu"][0], 5.0)
         wave = replace(
             calibration_arrays(n_wave=15)[-1],
             wavelength_map_um=np.vstack(
@@ -329,11 +331,11 @@ class SetupAndQualityTests(unittest.TestCase):
         )
         self.assertIsInstance(wave, WavelengthCalibration)
         quality, _ = measure_quality(wave)
-        self.assertEqual(quality["ESO QC MINWAVE SC"][0], 1.023 / 1e6)
-        self.assertEqual(quality["ESO QC MAXWAVE SC"][0], 2.0 / 1e6)
-        self.assertAlmostEqual(quality["ESO QC RMSWAVE UM SC"][0], np.sqrt(7 / 3))
+        self.assertEqual(quality["wavelength_min_m"][0], 1.023 / 1e6)
+        self.assertEqual(quality["wavelength_max_m"][0], 2.0 / 1e6)
+        self.assertAlmostEqual(quality["wavelength_residual_std_um"][0], np.sqrt(7 / 3))
         _, missing = measure_quality(replace(wave, fit_residual_um=np.empty(0)))
-        self.assertIn("RMSWAVE", missing)
+        self.assertIn("wavelength_residual_std", missing)
 
     def test_p2vm_coherence_qc_has_independent_normalization_and_quantiles(self):
         from planetes.qc import measure_quality
@@ -346,7 +348,7 @@ class SetupAndQualityTests(unittest.TestCase):
         quality, _ = measure_quality(
             replace(product, transmission=transmission, coherence_amplitude=amplitude)
         )
-        self.assertEqual(quality["ESO QC P2VM_COHERENCE_SC43"][0], 2.0)
-        self.assertAlmostEqual(quality["ESO QC P2VM_MINCOHERENCE_SC43"][0], 0.25)
-        self.assertAlmostEqual(quality["ESO QC P2VM_MAXCOHERENCE_SC43"][0], 3.75)
-        self.assertEqual(quality["ESO QC P2VM_TRANS_AVG_SC"][0], 1.0)
+        self.assertEqual(quality["p2vm_coherence_mean_b43"][0], 2.0)
+        self.assertAlmostEqual(quality["p2vm_coherence_min_b43"][0], 0.25)
+        self.assertAlmostEqual(quality["p2vm_coherence_max_b43"][0], 3.75)
+        self.assertEqual(quality["p2vm_transmission_mean"][0], 1.0)

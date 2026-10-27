@@ -1,7 +1,7 @@
-# PLANETES 0.4 product and raw contract (format 3)
+# PLANETES 0.4.1 product and raw contract (format 3)
 
-Science functions return named Python objects. `models.py` defines their units,
-axes and parent relationships; `fits.py` maps them to files. `eso/` binds SOF and
+Science functions return named Python objects. `products.py` defines their units,
+axes and parent relationships; `io/fits.py` maps them to files. `recipes/` binds SOF and
 parameters to those ordinary functions and asks CPL DFS to sign/register results.
 Numerical code imports neither PyCPL nor Qt. No YAML scheduler is added.
 
@@ -145,12 +145,12 @@ The two names do not form a crash-atomic filesystem transaction.
 
 ## Parameters
 
-Canonical names and aliases are explicitly registered in eso/common.py. Python
+Canonical names and aliases are explicitly registered in recipes/parameters.py. Python
 keyword defaults remain the authority; no spelling-based inference is used.
 
 | Python keyword | Canonical CPL name | Default |
 | --- | --- | --- |
-| bad_threshold | planetes.calib.bad-dark-threshold | 5.0 |
+| bad_pixel_threshold | planetes.calib.bad-dark-threshold | 5.0 |
 | profile_width | planetes.calib.profile-width | 10.0 pixel full aperture |
 | phase_correction | planetes.calib.phase-correction | true |
 | wavelength_min_um / max_um / channels | planetes.calib.wavelength-min-um / wavelength-max-um / wavelength-channels | 1.15 / 1.30 um / 151 |
@@ -168,3 +168,14 @@ are documented project roles where no strictly equivalent GRAVITY input exists.
 A phase DARK without reference fails; a disabled reference never enters the used
 input provenance. Repeated FLAT_RAW/P2VM_RAW tags are required; duplicate physical
 shutter combinations or incomplete sets fail.
+
+## Python organization in 0.4.1
+
+All file operations live in tasks.py and io/. Calibration, extraction and reduction
+accept arrays/scientific objects and import neither Astropy nor CPL. RawMetadata
+belongs to io/raw.py; DetectorSetup and configuration matching belong to instrument.py.
+Scientific identity/retained encoding belongs to identity.py; its cached encoding
+is private (`Provenance._encoding`) and is never serialized as a second array copy.
+CPL-specific DFS stub filling lives in recipes/dfs.py, outside the product codec.
+Numerical QC returns scientific names, while io/keywords.py maps them to the existing
+FITS names. Format 3 and parent fingerprints remain unchanged by this reorganization.

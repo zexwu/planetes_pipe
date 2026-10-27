@@ -1,22 +1,16 @@
 """Array-only spectral extraction and wavelength resampling."""
 
 from dataclasses import dataclass
-from pathlib import Path
-from .fits import iter_raw_cube
-from .instrument import BASELINES, TELESCOPES, N_OUTPUTS, N_TELESCOPES
-from .models import (
-    CalibrationSpectra,
-    Provenance,
-    fingerprint,
-    require_parent,
-    validate,
-    validate_wavelength,
-)
-
 
 import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
+
+from .products import (
+    require_parent,
+    validate,
+    validate_wavelength,
+)
 
 
 @njit(parallel=True, fastmath=True, cache=True)
@@ -50,7 +44,7 @@ def extract_spec_sparse(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
 
 
 @njit(parallel=True, cache=True)
-def twopx_interp(spec: NDArray, wave_map: NDArray, wl_grid: NDArray) -> NDArray:
+def resample_spectra(spec: NDArray, wave_map: NDArray, wl_grid: NDArray) -> NDArray:
     """
     Resample spectra from detector pixels onto a uniform wavelength grid.
 
@@ -112,22 +106,13 @@ class SpectralExtractor:
         spec = extract_spec_sparse(
             cube - dark.mean_adu, self.profile_y_pixels, self.profile_x_pixels
         )
-        aligned = twopx_interp(
+        aligned = resample_spectra(
             spec / self.detector_flat_spectra,
             self.wavelength_map_um,
             self.wavelength_um,
         )
         aligned *= self.resampled_flat_spectra
         return aligned
-
-    def extract_file(self, path: Path, dark) -> NDArray:
-        """Read and extract a whole file, retaining all frames and the 16-frame chunking."""
-        from .fits import check_raw_calibrations
-
-        check_raw_calibrations(path, dark, flat_setup=self.setup)
-        return np.concatenate(
-            [self.extract(chunk, dark) for chunk in iter_raw_cube(path)], axis=1
-        )
 
 
 def prepare_extraction(flat, wave, wavelength_um: NDArray) -> SpectralExtractor:
@@ -147,7 +132,7 @@ def prepare_extraction(flat, wave, wavelength_um: NDArray) -> SpectralExtractor:
     wave_map, grid = _snapshot(wave.wavelength_map_um), _snapshot(wavelength_um)
     spec_flat_detector = extract_spec_sparse(flat.flat_map_adu[None, :, :], ys, xs)
     spec_flat_detector = np.clip(spec_flat_detector, a_min=1e-8, a_max=None)
-    spec_flat = 1 / twopx_interp(1 / spec_flat_detector, wave_map, grid)
+    spec_flat = 1 / resample_spectra(1 / spec_flat_detector, wave_map, grid)
     return SpectralExtractor(
         xs,
         ys,
@@ -157,104 +142,4 @@ def prepare_extraction(flat, wave, wavelength_um: NDArray) -> SpectralExtractor:
         grid,
         _snapshot(spec_flat_detector),
         _snapshot(spec_flat),
-    )
-
-
-def extract_calibration_files(
-    flat,
-    wave,
-    main_dark,
-    *,
-    telescope_flats,
-    baseline_cubes,
-    wavelength_um,
-    phase_reference=None,
-    phase_dark=None,
-) -> CalibrationSpectra:
-    """Extract calibration files and infer the retained physical output mapping."""
-    from .fits import identify_raw, check_raw_calibrations, read_raw_metadata
-    from .models import DarkCalibration
-
-    if not isinstance(main_dark, DarkCalibration) or (
-        phase_dark is not None and not isinstance(phase_dark, DarkCalibration)
-    ):
-        raise ValueError("Formal file tasks require complete DARK calibrations")
-    telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
-    baseline_cubes = identify_raw(baseline_cubes, "P2VM_RAW")
-    validate(main_dark)
-    if phase_dark is not None and phase_reference is None:
-        raise ValueError("phase_dark requires phase_reference")
-    model = prepare_extraction(flat, wave, wavelength_um)
-    spec_bsl = np.asarray(
-        [model.extract_file(baseline_cubes[name], main_dark) for name in BASELINES]
-    )
-    spec_tel = np.asarray(
-        [model.extract_file(telescope_flats[name], main_dark) for name in TELESCOPES]
-    )
-    phase_reference_spectra = np.empty(
-        (N_OUTPUTS, 0, len(model.wavelength_um)), dtype=np.float64
-    )
-    dependencies = {
-        "flat": fingerprint(flat),
-        "wave": fingerprint(wave),
-        "main_dark": fingerprint(main_dark),
-    }
-    unknown = []
-    for path in [*telescope_flats.values(), *baseline_cubes.values()]:
-        unknown.extend(check_raw_calibrations(path, main_dark, flat))
-    inputs = {
-        **{f"tel_flat_{k}": str(v) for k, v in telescope_flats.items()},
-        **{f"baseline_{k}": str(v) for k, v in baseline_cubes.items()},
-    }
-    if phase_reference is not None:
-        read_raw_metadata(phase_reference, category="SINGLE_SCI_RAW")
-        selected_dark = main_dark if phase_dark is None else phase_dark
-        phase_reference_spectra = model.extract_file(phase_reference, selected_dark)
-        unknown.extend(check_raw_calibrations(phase_reference, selected_dark, flat))
-        dependencies["phase_dark"] = fingerprint(selected_dark)
-        inputs["phase_reference"] = str(phase_reference)
-    tel_regs = {}
-    for telescope, flux in enumerate(spec_tel):
-        mean_flux = flux.mean(axis=(1, 2))
-        active = np.argsort(mean_flux)[-N_OUTPUTS // 2 :]
-        tel_regs[telescope] = np.sort(active).tolist()
-
-    bsl_regs = {}
-    for baseline, flux in enumerate(spec_bsl):
-        std_flux = flux.std(axis=1).mean(axis=-1)
-        active = np.argsort(std_flux)[-4:]
-        bsl_regs[baseline] = np.sort(active).tolist()
-
-    bsl_to_reg = {}
-    bsl_to_tel = {}
-    for telescope_1 in range(N_TELESCOPES):
-        for telescope_2 in range(N_TELESCOPES):
-            if telescope_1 >= telescope_2:
-                continue
-            baseline_name = TELESCOPES[telescope_1] + TELESCOPES[telescope_2]
-            baseline = BASELINES.index(baseline_name)
-            from_telescopes = set(tel_regs[telescope_1]) & set(tel_regs[telescope_2])
-            from_modulation = set(bsl_regs[baseline])
-            if from_telescopes != from_modulation:
-                raise ValueError(
-                    f"Region mapping mismatch for baseline {baseline_name}: "
-                    f"{sorted(from_telescopes)} from flats, "
-                    f"{sorted(from_modulation)} from modulation"
-                )
-            bsl_to_reg[baseline] = sorted(bsl_regs[baseline])
-            bsl_to_tel[baseline] = (telescope_1, telescope_2)
-
-    return CalibrationSpectra(
-        spec_tel,
-        spec_bsl,
-        phase_reference_spectra,
-        bsl_to_reg,
-        bsl_to_tel,
-        model.wavelength_um,
-        provenance=Provenance(
-            producer="planetes.extraction",
-            inputs=inputs,
-            dependencies=dependencies,
-            unverified=tuple(sorted(set(unknown))),
-        ),
     )

@@ -12,12 +12,13 @@ from unittest.mock import patch
 
 import numpy as np
 from astropy.io import fits
-from p2vm_fixture import write_recipe_inputs, input_rows, metadata
+from p2vm_fixture import input_rows, metadata, write_recipe_inputs
 
 import planetes
-from planetes.extraction import extract_calibration_files
-from planetes.fits import read_product, write_product, write_raw
-from planetes.models import (
+from planetes.calibration.p2vm import compute_p2vm
+from planetes.io.fits import read_product, write_product
+from planetes.io.raw import write_raw
+from planetes.products import (
     DarkCalibration,
     FlatCalibration,
     P2VMCalibration,
@@ -25,8 +26,7 @@ from planetes.models import (
     WavelengthCalibration,
     wavelength_grid,
 )
-from planetes.p2vm import compute_p2vm
-from planetes.reduction import reduce_file
+from planetes.tasks import extract_calibration_files, reduce_file
 
 
 @unittest.skipUnless(
@@ -34,7 +34,7 @@ from planetes.reduction import reduce_file
 )
 class ESOChainTests(unittest.TestCase):
     def test_all_five_recipes_are_discoverable(self):
-        recipes = Path(planetes.__file__).parent / "eso"
+        recipes = Path(planetes.__file__).parent / "recipes"
         result = subprocess.run(
             [sys.executable, "-m", "pyesorex", f"--recipe-dir={recipes}", "--recipes"],
             capture_output=True,
@@ -52,7 +52,7 @@ class ESOChainTests(unittest.TestCase):
             self.assertIn(name, result.stdout)
 
     def test_science_recipe_preserves_dark_subtraction_and_masks(self):
-        recipes = Path(planetes.__file__).parent / "eso"
+        recipes = Path(planetes.__file__).parent / "recipes"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             inputs = write_recipe_inputs(root / "inputs")
@@ -158,7 +158,7 @@ class P2VMRecipeTests(unittest.TestCase):
     def setUp(self):
         from cpl import ui
 
-        from planetes.eso.p2vm import PlanetesP2VM
+        from planetes.recipes.planetes_p2vm import PlanetesP2VM
 
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -230,7 +230,7 @@ class P2VMRecipeTests(unittest.TestCase):
         find_spec("pyesorex") is not None, "PyEsoRex runtime not installed"
     )
     def test_executor_applies_phase_correction_parameter(self):
-        recipe_directory = Path(planetes.__file__).parent / "eso"
+        recipe_directory = Path(planetes.__file__).parent / "recipes"
         sof = self.root / "p2vm.sof"
         sof.write_text(
             "".join(f"{path} {tag}\n" for tag, path in input_rows(self.paths))
@@ -261,11 +261,25 @@ class P2VMRecipeTests(unittest.TestCase):
 
 @unittest.skipUnless(find_spec("cpl") is not None, "PyCPL runtime not installed")
 class DFSFailureTests(unittest.TestCase):
+    def test_append_cannot_modify_a_raw_file(self):
+        from p2vm_fixture import calibration_arrays
+
+        from planetes.recipes.dfs import fill_dfs_product
+
+        product = calibration_arrays(n_wave=15)[-1]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "raw.fits"
+            fits.PrimaryHDU(np.ones((3, 4))).writeto(path)
+            original = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, "new empty DFS"):
+                fill_dfs_product(path, product)
+            self.assertEqual(path.read_bytes(), original)
+
     def test_failure_after_dfs_header_is_cleaned_and_retry_succeeds(self):
         from cpl import ui
 
-        from planetes.eso.common import save_product
-        from planetes.eso.dark import PlanetesDark
+        from planetes.recipes.dfs import save_product
+        from planetes.recipes.planetes_dark import PlanetesDark
 
         product = DarkCalibration(
             np.ones((2, 3), dtype=np.float32),
@@ -279,7 +293,7 @@ class DFSFailureTests(unittest.TestCase):
                 [ui.Frame(file=str(raw), tag="DARK_RAW", group=ui.Frame.FrameGroup.RAW)]
             )
             with patch(
-                "planetes.eso.common.fill_dfs_product",
+                "planetes.recipes.dfs.fill_dfs_product",
                 side_effect=ValueError("injected payload failure"),
             ):
                 with self.assertRaisesRegex(ValueError, "injected"):
@@ -296,9 +310,9 @@ class DFSFailureTests(unittest.TestCase):
     def test_nondefault_dark_and_flat_parameters_use_public_task_defaults(self):
         from cpl import ui
 
-        from planetes.eso.dark import PlanetesDark
-        from planetes.eso.flat import PlanetesFlat
-        from planetes.fits import read_product
+        from planetes.io.fits import read_product
+        from planetes.recipes.planetes_dark import PlanetesDark
+        from planetes.recipes.planetes_flat import PlanetesFlat
 
         with tempfile.TemporaryDirectory() as temporary, chdir(temporary):
             ny, nx = 576, 128

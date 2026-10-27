@@ -1,20 +1,20 @@
 """PyCPL binding for the ordinary reduce scientific task."""
 
 from cpl import ui
+
 from planetes import __version__
-from planetes.reduction import reduce_file
-from planetes.models import (
+from planetes.products import (
     DarkCalibration,
     FlatCalibration,
-    WavelengthCalibration,
     P2VMCalibration,
+    WavelengthCalibration,
 )
-from planetes.eso.common import (
-    parameter_list,
-    scientific_settings,
-    select_inputs,
+from planetes.recipes.dfs import (
     save_product,
+    select_inputs,
 )
+from planetes.recipes.parameters import make_parameters, read_parameters
+from planetes.tasks import reduce_file
 
 
 class PlanetesReduce(ui.PyRecipe):
@@ -30,12 +30,10 @@ class PlanetesReduce(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = parameter_list(
-            "reduce", reduce_file, ["gd_search_min_um", "gd_search_max_um"]
-        )
+        self.parameters = make_parameters("reduce", reduce_file)
 
     def run(self, frameset, settings):
-        options = scientific_settings(self, settings)
+        options = read_parameters(self, settings)
         paths, cal, used = select_inputs(
             frameset,
             {

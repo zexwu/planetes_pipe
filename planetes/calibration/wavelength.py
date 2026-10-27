@@ -8,23 +8,18 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
-from . import log
-from .instrument import N_OUTPUTS
-from .models import (
-    FlatCalibration,
-    WavelengthCalibration,
-    Provenance,
-    fingerprint,
-    validate,
-)
-from .extraction import extract_spec_sparse
+from .. import log
+from ..extraction import extract_spec_sparse
+from ..identity import fingerprint
+from ..instrument import N_OUTPUTS
+from ..products import FlatCalibration, Provenance, WavelengthCalibration, validate
 
 DETECTION_SIGMA = 3.0
 SURFACE_DEGREE = 3
 RANSAC_ITERATIONS = 1_000_000
 
 
-def compute_wave(
+def compute_wavelength(
     wave_image_adu: NDArray,
     flat: FlatCalibration,
     reference_wavelength_um: NDArray,
@@ -448,51 +443,3 @@ def _grid_search_kernel(
                     if best_score == n_mod:
                         return best_params
     return best_params
-
-
-def wavelength_reference_path():
-    """Return the installed, format-3 static line-list file."""
-    from importlib.resources import files
-    from pathlib import Path
-
-    return Path(str(files("planetes").joinpath("data/wavelength_lines.fits")))
-
-
-def load_wavelength_reference(path=None):
-    """Load the packaged or explicitly supplied static reference, including origin labels."""
-    from .fits import read_product
-    from .models import WavelengthReference
-
-    return read_product(
-        wavelength_reference_path() if path is None else path, WavelengthReference
-    )
-
-
-def calibrate_wavelength_file(
-    path, dark, flat, *, reference=None
-) -> WavelengthCalibration:
-    """Read a lamp cube and return a wavelength solution, without writing files."""
-    from dataclasses import replace
-    from .dark import frame_mean
-    from .fits import iter_raw_cube, check_raw_calibrations
-
-    unknown = check_raw_calibrations(path, dark, flat, category="WAVELAMP_RAW")
-    validate(dark)
-    reference = load_wavelength_reference() if reference is None else reference
-    validate(reference)
-    image = frame_mean(iter_raw_cube(path))
-    if image.shape != dark.mean_adu.shape or image.shape != flat.flat_map_adu.shape:
-        raise ValueError("Lamp/dark/flat detector shapes differ")
-    image = image - dark.mean_adu
-    result = compute_wave(image, flat, reference.wavelength_um)
-    info = Provenance(
-        producer="planetes.wavelength",
-        inputs={"wavelamp_raw": str(path)},
-        unverified=unknown,
-        dependencies={
-            "flat": fingerprint(flat),
-            "dark": fingerprint(dark),
-            "line_list": fingerprint(reference),
-        },
-    )
-    return replace(result, provenance=info)

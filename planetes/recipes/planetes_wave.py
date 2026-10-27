@@ -1,20 +1,19 @@
 """PyCPL binding for the ordinary wave scientific task."""
 
 from cpl import ui
+
 from planetes import __version__
-from planetes.wavelength import calibrate_wavelength_file
-from planetes.models import (
+from planetes.products import (
     DarkCalibration,
     FlatCalibration,
     WavelengthReference,
 )
-from planetes.eso.common import (
-    parameter_list,
-    scientific_settings,
-    select_inputs,
+from planetes.recipes.dfs import (
     save_product,
+    select_inputs,
 )
-from planetes.wavelength import wavelength_reference_path
+from planetes.recipes.parameters import make_parameters, read_parameters
+from planetes.tasks import calibrate_wavelength_file, wavelength_reference_path
 
 
 class PlanetesWave(ui.PyRecipe):
@@ -30,10 +29,10 @@ class PlanetesWave(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = parameter_list("wave", calibrate_wavelength_file, [])
+        self.parameters = make_parameters("wave", calibrate_wavelength_file)
 
     def run(self, frameset, settings):
-        options = scientific_settings(self, settings)
+        options = read_parameters(self, settings)
         frames = ui.FrameSet(list(frameset))
         if not any(frame.tag == "LINE_LIST" for frame in frames):
             frames.append(

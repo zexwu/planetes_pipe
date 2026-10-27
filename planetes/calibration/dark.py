@@ -1,25 +1,14 @@
 """Temporal detector statistics and explicit full versus subtraction-only darks."""
 
 from collections.abc import Iterable
-from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from astropy.io import fits as afits
 
-from .fits import iter_raw_cube, read_product, read_raw_metadata
-from .models import (
-    DarkCalibration,
-    DarkImage,
-    BadPixelMap,
-    Provenance,
-    DetectorSetup,
-    fingerprint,
-    positive,
-    validate,
-)
+from ..identity import fingerprint
+from ..products import BadPixelMap, DarkCalibration, Provenance, positive, validate
 
-BAD_THRESHOLD = 5.0
+BAD_PIXEL_THRESHOLD = 5.0
 
 
 def frame_mean(
@@ -105,76 +94,5 @@ def compute_dark(chunks) -> DarkCalibration:
         count,
         provenance=Provenance(producer="planetes.dark"),
     )
-    validate(result)
-    return result
-
-
-def calibrate_dark_file(
-    path: Path, *, bad_threshold: float = BAD_THRESHOLD
-) -> tuple[DarkCalibration, BadPixelMap]:
-    """Return complete DARK and independent BAD from a declared raw dark stack."""
-    from dataclasses import replace
-
-    metadata = read_raw_metadata(path, category="DARK_RAW")
-    dark = compute_dark(iter_raw_cube(path))
-    dark = replace(
-        dark,
-        setup=metadata.setup,
-        provenance=replace(
-            dark.provenance, inputs={"dark_raw": str(Path(path).absolute())}
-        ),
-    )
-    return dark, compute_badpix(dark, threshold=bad_threshold)
-
-
-def load_dark(path: Path):
-    """GUI loader: complete new DARK, or explicitly selected raw/image subtraction data."""
-    from dataclasses import replace
-
-    path = Path(path)
-    with afits.open(path, memmap=True) as hdus:
-        head = hdus[0].header
-        if "ESO PRO CATG" in head:
-            return read_product(path, DarkCalibration)
-        role = str(head.get("ESO DPR TYPE", "")).upper()
-        if role and role != "DARK":
-            raise ValueError("Expected dark input, FITS declares another raw category")
-        index = next((i for i, h in enumerate(hdus) if h.data is not None), None)
-        if index is None:
-            raise ValueError("Dark FITS has no data")
-        data = hdus[index].data
-        unit = str(hdus[index].header.get("BUNIT", "adu")).lower()
-        if unit != "adu":
-            raise ValueError("Dark subtraction expects ADU")
-        if data.ndim == 3 and len(data) >= 2:
-            result = compute_dark(
-                np.asarray(data[i : i + 16], dtype=np.float32)
-                for i in range(0, len(data), 16)
-            )
-            setup = (
-                read_raw_metadata(path).setup
-                if "PLANETES FORMAT" in head
-                else DetectorSetup(
-                    width=data.shape[2], height=data.shape[1], legacy=True
-                )
-            )
-            return replace(
-                result,
-                setup=setup,
-                provenance=replace(
-                    result.provenance, inputs={"dark_raw": str(path.absolute())}
-                ),
-            )
-        if data.ndim == 3 and len(data) == 1:
-            data = data[0]
-        if data.ndim != 2:
-            raise ValueError("A GUI dark must be a 2-D image or nonempty cube")
-        result = DarkImage(
-            np.array(data, dtype=np.float32, copy=True),
-            provenance=Provenance(
-                producer="planetes.dark.load_image",
-                inputs={"dark_image": str(path.absolute())},
-            ),
-        )
     validate(result)
     return result

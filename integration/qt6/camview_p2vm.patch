@@ -9,10 +9,14 @@
  from pathlib import Path
  
  import numpy as np
-@@ -57,6 +57,7 @@
+@@ -55,8 +55,9 @@
+ 
+ from camview import INIT_REFRESH_RATE, MainWindow, TestbedProxy, rebin
  from planetes.reduction import FrameReducer
- from planetes.dark import load_dark
- from planetes.models import DarkImage
+-from planetes.dark import load_dark
+-from planetes.models import DarkImage
++from planetes.tasks import load_dark, load_reducer
++from planetes.products import DarkImage
 +from scripts import utils as capture_utils
  from planetes.instrument import BASELINES, ABCD_ORDER
  
@@ -120,3 +124,21 @@
  
      def _add_p2vm_camera_controls(self, camera_widget: QtWidgets.QWidget) -> None:
          """Add unified dark-source and overlay controls below the Camera tab.
+@@ -600,7 +690,7 @@
+     def _load_reducer_dir(self, path: Path) -> None:
+         """Load a new reducer and refresh all calibration-dependent UI state."""
+         try:
+-            reducer = FrameReducer.from_directory(path)
++            reducer = load_reducer(path)
+         except Exception as exc:
+             self.p2vm_ready = False
+             self._clear_current_visibility()
+@@ -1129,7 +1219,7 @@
+     app = QtWidgets.QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
+     _set_dark_palette(app)
+ 
+-    reducer = FrameReducer.from_directory(config.reduced_dir)
++    reducer = load_reducer(config.reduced_dir)
+     cam, source_label = _make_camera(config)
+ 
+     if config.source == "bench":

@@ -10,20 +10,15 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import calibration_arrays, calibration_spectra, metadata
 
-from planetes.dark import frame_statistics
-from planetes.fits import (
-    destinations,
-    fill_dfs_product,
-    product_destination,
-    read_product,
-    write_product,
-    write_raw,
-)
-from planetes.fits import iter_raw_cube as iter_cube
-from planetes.models import ReducedObservables
-from planetes.p2vm import compute_p2vm
-from planetes.reduction import compute_reduce
-from planetes.wavelength import load_wavelength_reference
+from planetes.calibration.dark import frame_statistics
+from planetes.calibration.p2vm import compute_p2vm
+from planetes.io.fits import read_product, write_product
+from planetes.io.publication import destinations
+from planetes.io.raw import iter_raw_cube as iter_cube
+from planetes.io.raw import write_raw
+from planetes.products import ReducedObservables
+from planetes.reduction import reduce_spectra
+from planetes.tasks import load_wavelength_reference
 
 
 class ScienceProductTests(unittest.TestCase):
@@ -33,7 +28,7 @@ class ScienceProductTests(unittest.TestCase):
         p2vm = compute_p2vm(spectra, phase_correction=False)
         science = spectra.phase_reference.copy()
         science[:, 0] = 0
-        cls.product = compute_reduce(science, p2vm)
+        cls.product = reduce_spectra(science, p2vm)
 
     def test_complex_flux_and_invalid_flags_round_trip_exactly(self):
         coherent = self.product.coherent_flux_adu.copy()
@@ -113,15 +108,6 @@ class ScienceProductTests(unittest.TestCase):
             actual = read_product(path)
             self.assertEqual(actual.baseline_regions, product.baseline_regions)
             self.assertEqual(actual.baseline_telescopes, product.baseline_telescopes)
-
-    def test_append_cannot_modify_a_raw_file(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "raw.fits"
-            fits.PrimaryHDU(np.ones((3, 4))).writeto(path)
-            original = path.read_bytes()
-            with self.assertRaisesRegex(ValueError, "new empty DFS"):
-                fill_dfs_product(path, self.product)
-            self.assertEqual(path.read_bytes(), original)
 
     def test_static_reference_retains_original_values(self):
         lines = load_wavelength_reference().wavelength_um
@@ -233,7 +219,7 @@ class PublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "wave.fits"
             with patch(
-                "planetes.fits.read_product",
+                "planetes.io.fits.read_product",
                 side_effect=ValueError("injected readback failure"),
             ):
                 with self.assertRaisesRegex(ValueError, "injected"):
@@ -247,8 +233,8 @@ class PublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "wave.fits"
             with self.assertRaises(FileExistsError):
-                with product_destination(path) as candidate:
-                    write_product(candidate, self.wave)
+                with destinations([path], verify=read_product) as staged:
+                    write_product(staged[0], self.wave)
                     path.write_bytes(b"existing winner")
             self.assertEqual(path.read_bytes(), b"existing winner")
 
@@ -272,11 +258,11 @@ class PublicationTests(unittest.TestCase):
                     raise OSError("injected second publication failure")
                 return link(source, target)
 
-            with patch("planetes.fits.os.link", side_effect=fail_second):
+            with patch("planetes.io.publication.os.link", side_effect=fail_second):
                 with self.assertRaisesRegex(OSError, "second publication"):
-                    with destinations(paths) as staged:
+                    with destinations(paths, verify=read_product) as staged:
                         # Stage directly to avoid counting nested single-product publication.
-                        from planetes.fits import encode_product
+                        from planetes.io.fits import encode_product
 
                         for path in staged:
                             encode_product(self.wave).writeto(path, checksum=True)
@@ -285,7 +271,7 @@ class PublicationTests(unittest.TestCase):
 
 class CanonicalAndRawTests(unittest.TestCase):
     def test_rewrites_retain_valid_metres_and_inplace_changes_invalidate_hash(self):
-        from planetes.models import fingerprint, retain_representation
+        from planetes.identity import fingerprint, retain_representation
 
         wave = calibration_arrays(n_wave=15)[-1]
         metres = np.nextafter(wave.wavelength_map_um / 1e6, np.inf)
@@ -314,7 +300,7 @@ class CanonicalAndRawTests(unittest.TestCase):
             )
 
     def test_raw_pixels_metadata_and_duplicate_shutters(self):
-        from planetes.fits import read_raw_metadata, identify_raw
+        from planetes.io.raw import identify_raw, read_raw_metadata
 
         data = np.array([[[40000.0, -2.0, 3.5]], [[1.0, 2.0, 3.0]]], dtype=np.float32)
         with tempfile.TemporaryDirectory() as temporary:
@@ -337,7 +323,7 @@ class CanonicalAndRawTests(unittest.TestCase):
                 read_raw_metadata(path)
 
     def test_operator_exposure_is_requested_and_legacy_missing_stays_unknown(self):
-        from planetes.fits import read_raw_metadata
+        from planetes.io.raw import read_raw_metadata
 
         with tempfile.TemporaryDirectory() as temporary:
             data = np.zeros((2, 1, 3), dtype=np.uint16)
@@ -365,7 +351,7 @@ class CanonicalAndRawTests(unittest.TestCase):
 
     def test_invalid_fits_logical_bytes_are_rejected(self):
         spectra = calibration_spectra(n_wave=15)
-        product = compute_reduce(
+        product = reduce_spectra(
             spectra.phase_reference, compute_p2vm(spectra, phase_correction=False)
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -379,7 +365,8 @@ class CanonicalAndRawTests(unittest.TestCase):
 
     def test_rollback_preserves_a_concurrent_replacement(self):
         import os
-        from planetes.fits import encode_product
+
+        from planetes.io.fits import encode_product
 
         wave = calibration_arrays(n_wave=15)[-1]
         link = os.link
@@ -393,9 +380,11 @@ class CanonicalAndRawTests(unittest.TestCase):
                     raise OSError("injected second failure")
                 return link(source, target)
 
-            with patch("planetes.fits.os.link", side_effect=replace_first_then_fail):
+            with patch(
+                "planetes.io.publication.os.link", side_effect=replace_first_then_fail
+            ):
                 with self.assertRaisesRegex(OSError, "injected"):
-                    with destinations(paths) as staged:
+                    with destinations(paths, verify=read_product) as staged:
                         for path in staged:
                             encode_product(wave).writeto(path, checksum=True)
             self.assertEqual(paths[0].read_bytes(), b"concurrent winner")

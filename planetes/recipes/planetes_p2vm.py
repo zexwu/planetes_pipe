@@ -1,19 +1,19 @@
 """PyCPL binding for the ordinary p2vm scientific task."""
 
 from cpl import ui
+
 from planetes import __version__
-from planetes.p2vm import calibrate_p2vm_file
-from planetes.models import (
+from planetes.products import (
     DarkCalibration,
     FlatCalibration,
     WavelengthCalibration,
 )
-from planetes.eso.common import (
-    parameter_list,
-    scientific_settings,
-    select_inputs,
+from planetes.recipes.dfs import (
     save_product,
+    select_inputs,
 )
+from planetes.recipes.parameters import make_parameters, read_parameters
+from planetes.tasks import calibrate_p2vm_file
 
 
 class PlanetesP2VM(ui.PyRecipe):
@@ -29,21 +29,10 @@ class PlanetesP2VM(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = parameter_list(
-            "p2vm",
-            calibrate_p2vm_file,
-            [
-                "phase_correction",
-                "wavelength_min_um",
-                "wavelength_max_um",
-                "wavelength_channels",
-                "gd_search_min_um",
-                "gd_search_max_um",
-            ],
-        )
+        self.parameters = make_parameters("p2vm", calibrate_p2vm_file)
 
     def run(self, frameset, settings):
-        options = scientific_settings(self, settings)
+        options = read_parameters(self, settings)
         roles = {
             "DARK": DarkCalibration,
             "FLAT": FlatCalibration,

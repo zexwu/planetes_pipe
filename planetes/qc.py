@@ -5,74 +5,75 @@ gravi_wave.c:2027-2045,2266; gravi_p2vm.c:1180-1303.
 """
 
 import numpy as np
-from .models import (
-    DarkCalibration,
+
+from .calibration.p2vm import build_v2pm_matrix
+from .instrument import BASELINES, TELESCOPES
+from .products import (
     BadPixelMap,
+    DarkCalibration,
     FlatCalibration,
-    WavelengthCalibration,
     P2VMCalibration,
     VisibilityObservables,
+    WavelengthCalibration,
 )
-from .instrument import BASELINES, TELESCOPES
-from .p2vm import build_v2pm_matrix
 
 
 def measure_quality(product):
-    """Return keyword -> (measurement, definition/unit comment), and missing reasons."""
+    """Return scientific metric -> (value, unit/definition comment), and missing reasons."""
     values, missing = {}, {}
 
     def put(key, number, comment):
         if np.isfinite(number):
-            values["ESO QC " + key] = (
+            values[key] = (
                 int(number) if isinstance(number, (int, np.integer)) else float(number),
                 comment,
             )
         else:
-            missing["ESO QC " + key] = "unavailable: non-finite statistic"
+            missing[key] = "unavailable: non-finite statistic"
 
     if isinstance(product, DarkCalibration):
         put(
-            "MEDIANDARK SC",
+            "dark_median_adu",
             np.median(product.mean_adu),
             "[ADU] Spatial median of temporal mean",
         )
         put(
-            "DARKRMS SC",
+            "dark_rms_median_adu",
             np.median(product.temporal_rms_adu),
             "[ADU] Spatial median of temporal population RMS",
         )
-        missing["RON"] = (
+        missing["readout_noise"] = (
             "not applicable: raw temporal RMS is not independently measured readout noise"
         )
     elif isinstance(product, BadPixelMap):
         flags = product.bad_pixel_flags
         put(
-            "BADPIX SC",
+            "bad_pixel_count",
             int(np.count_nonzero(flags)),
             "Number of actual flagged detector pixels",
         )
         put(
-            "BADPIX_DARK SC",
+            "bad_dark_pixel_count",
             int(np.count_nonzero(flags & 3)),
             "Number with retained hot or dead bits",
         )
         put(
-            "BADPIX_RMS SC",
+            "bad_rms_pixel_count",
             int(np.count_nonzero(flags & 4)),
             "Number with retained noisy bit",
         )
-        missing["ESO QC BADPIX_FLAT SC"] = (
+        missing["bad_flat_pixel_count"] = (
             "not applicable: retained mask has no flat-based rejection rule"
         )
     elif isinstance(product, FlatCalibration):
         for i, flux in enumerate(product.telescope_flux_adu):
             put(
-                f"FLATFLUX SC{i+1}",
+                f"flat_flux_t{TELESCOPES[i]}_adu",
                 flux,
                 f"[ADU/DIT] Mean-frame total flux, T{TELESCOPES[i]}",
             )
         if not product.telescope_flux_adu.size:
-            missing["FLATFLUX"] = "unavailable: individual flat images not retained"
+            missing["flat_flux"] = "unavailable: individual flat images not retained"
         for reg in range(0, len(product.trace_y_pixels), 12):
             trace = (
                 product.trace_y_pixels[reg] + 1
@@ -83,7 +84,7 @@ def measure_quality(product):
                 ("RIGHT", trace[5 * len(trace) // 6]),
             ]:
                 put(
-                    f"PROFILE_CENTER SC{reg+1} {suffix}",
+                    f"profile_center_region{reg+1}_{suffix.lower()}_pixels",
                     np.floor(number * 1e6) * 1e-6,
                     "[pixel] One-based spatial trace center",
                 )
@@ -92,46 +93,50 @@ def measure_quality(product):
                 valid = widths[np.isfinite(widths)]
                 if len(valid):
                     put(
-                        f"PROFILE_WIDTH SC{reg+1} MED",
+                        f"profile_sigma_region{reg+1}_pixels",
                         np.floor(np.median(valid) * 1e6) * 1e-6,
                         f"[pixel] Fitted Gaussian sigma; N={len(valid)}",
                     )
                 else:
-                    missing[f"PROFILE_WIDTH SC{reg+1}"] = (
+                    missing[f"profile_sigma_region{reg+1}_pixels"] = (
                         "unavailable: no accepted Gaussian fits"
                     )
             else:
-                missing[f"PROFILE_WIDTH SC{reg+1}"] = (
+                missing[f"profile_sigma_region{reg+1}_pixels"] = (
                     "unavailable: fitted sigma not provided; aperture width is different"
                 )
     elif isinstance(product, WavelengthCalibration):
         low = np.max(np.min(product.wavelength_map_um, axis=1))
         high = np.min(np.max(product.wavelength_map_um, axis=1))
-        for name, number in [("MINWAVE", low), ("MAXWAVE", high)]:
+        for name, number in [("min", low), ("max", high)]:
             put(
-                name + " SC",
+                f"wavelength_{name}_m",
                 number / 1e6,
                 "[m] Coverage shared by every detector output",
             )
             put(
-                name + " UM SC", number, "[um] Coverage shared by every detector output"
+                f"wavelength_{name}_um",
+                number,
+                "[um] Coverage shared by every detector output",
             )
         residual = product.fit_residual_um
         if residual.size >= 2:
             rms = np.std(residual, ddof=1)
             put(
-                "RMSWAVE SC",
+                "wavelength_residual_std_m",
                 rms / 1e6,
                 f"[m] Sample stdev of accepted lamp fit residuals; N={len(residual)}",
             )
             put(
-                "RMSWAVE UM SC",
+                "wavelength_residual_std_um",
                 rms,
                 f"[um] Sample stdev of accepted lamp fit residuals; N={len(residual)}",
             )
         else:
-            missing["RMSWAVE"] = "unavailable: accepted fit residuals not provided"
-        missing["REFWAVE"] = (
+            missing["wavelength_residual_std"] = (
+                "unavailable: accepted fit residuals not provided"
+            )
+        missing["reference_wavelength"] = (
             "not applicable: GRAVITY K-band reference lines are outside PLANETES coverage"
         )
     elif isinstance(product, P2VMCalibration):
@@ -155,61 +160,61 @@ def measure_quality(product):
                 nw = ratio.shape[-1]
                 # gravi_array_get_quantile chooses floor(p*N), not numpy linear interpolation.
                 put(
-                    f"P2VM_COHERENCE_SC{BASELINES[b]}",
+                    f"p2vm_coherence_mean_b{BASELINES[b]}",
                     ratio.mean(),
                     "Mean normalized coherence over four outputs and wavelengths",
                 )
                 put(
-                    f"P2VM_MINCOHERENCE_SC{BASELINES[b]}",
+                    f"p2vm_coherence_min_b{BASELINES[b]}",
                     ordered[:, int(0.05 * nw)].min(),
                     "Minimum across outputs of spectral 5-percent order statistic",
                 )
                 put(
-                    f"P2VM_MAXCOHERENCE_SC{BASELINES[b]}",
+                    f"p2vm_coherence_max_b{BASELINES[b]}",
                     ordered[:, int(0.95 * nw)].max(),
                     "Maximum across outputs of spectral 95-percent order statistic",
                 )
             else:
-                missing[f"P2VM_COHERENCE_SC{BASELINES[b]}"] = (
+                missing[f"p2vm_coherence_mean_b{BASELINES[b]}"] = (
                     "unavailable: nonpositive associated transmission"
                 )
         tm = np.asarray(trans_mean)
         if tm.mean() > 0:
             put(
-                "P2VM_COHERENCE_AVG_SC",
+                "p2vm_coherence_mean",
                 np.mean(coh_mean) / (2 * tm.mean()),
                 "Mean spectral coherence / twice mean associated transmission",
             )
             put(
-                "P2VM_COHERENCERMS_AVG_SC",
+                "p2vm_coherence_spectral_std",
                 np.mean(coh_std) / (2 * tm.mean()),
                 "Mean spectral sample stdev / twice mean transmission",
             )
         put(
-            "P2VM_PHASERMS_AVG_SC",
+            "p2vm_phase_spectral_std_rad",
             np.mean(phase_std),
             "[rad] Mean spectral sample stdev across detector regions",
         )
-        for name, number in [("AVG", tm.mean()), ("MIN", tm.min()), ("MAX", tm.max())]:
+        for name, number in [("mean", tm.mean()), ("min", tm.min()), ("max", tm.max())]:
             put(
-                "P2VM_TRANS_" + name + "_SC",
+                f"p2vm_transmission_{name}",
                 number / 2,
                 "Associated transmission averaged over wavelength, divided by two",
             )
-        missing["P2VM CHI2"] = (
-            "unavailable: retained fit has no propagated variance; fit RMS is in PLANETES_P2VM_FIT_RMS"
+        missing["p2vm_chi_square"] = (
+            "unavailable: retained fit has no propagated variance; fit RMS is retained separately"
         )
-        missing["P2VM GD MAX"] = (
+        missing["p2vm_group_delay_rejection"] = (
             "not applicable: coarse initialization bounds are not GRAVITY GD rejection limits"
         )
     elif isinstance(product, VisibilityObservables):
-        missing["VISAMP/VISPHI AVG"] = (
+        missing["averaged_visibility"] = (
             "not applicable: GRAVITY final-VIS QC is measured after its averaging; this product is per-frame instrumental P2VMRED"
         )
-        missing["REJECTED RATIO"] = (
+        missing["rejected_frame_ratio"] = (
             "not applicable: wavelength-sample invalid flags are not GRAVITY frame rejection percentages"
         )
-        missing["SNR/FLUX RATE"] = (
+        missing["snr_and_flux_rate"] = (
             "unavailable: no propagated error model/electron gain and possibly no measured exposure timing"
         )
     return values, missing

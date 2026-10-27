@@ -1,6 +1,6 @@
 {
   "baseline_commit": "61f519f",
-  "pipeline_version": "0.4.0",
+  "pipeline_version": "0.4.1",
   "files": [
     {
       "path": "camview.py",
@@ -13,14 +13,14 @@
       "path": "camview_p2vm.py",
       "patch": "camview_p2vm.patch",
       "original_sha256": "bbd3137136208e001ad1fddc9b94f8efe91dbe44f95adce675aa5b7b74ee2c40",
-      "updated_sha256": "8f26684380ab31ac0c652dc18b02083a2646e82ba9bef9aac190cf5c2b9c5acf",
+      "updated_sha256": "d754bfd140f5e868715bd9a3f87e7f12379ebd984a24c9f953a057525b93b3af",
       "backup": "/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/devel/camview_p2vm.py"
     },
     {
       "path": "scripts/utils.py",
       "patch": "acquisition-utils.patch",
       "original_sha256": "7167baba543e7beeea99b39a167da651e5bb49e8b3d74a7f4f0de97b8a5edb1d",
-      "updated_sha256": "a3b26de302c79da1ad7f4c32afd40c5e401830e78e0a8815d2b100841b4c36c2",
+      "updated_sha256": "34c132947687cea75cf0a2ab5e1ad6189015db1643f22cf66bdedf6ceeb6572e",
       "backup": "/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/devel/scripts/utils.py"
     },
     {

@@ -1,11 +1,11 @@
-# Scientific methods in PLANETES 0.4
+# Scientific methods in PLANETES 0.4.1
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
-File tasks and array calculations live together in the corresponding scientific
-module. PyCPL and the GUI call these functions.
+File tasks live in tasks.py. Numerical modules accept arrays and scientific objects,
+without FITS or CPL dependencies. Python recipes and the GUI share those calculations.
 
-## Dark statistics (`dark.py`)
+## Dark statistics (`calibration/dark.py`)
 
 Read the complete raw stack, accumulate sum and squared sum in float64, and
 return float32 temporal mean and population RMS. The variance is
@@ -18,7 +18,7 @@ The default threshold remains 5. This RMS includes whatever temporal variations
 are present in the stack; it is not independently calibrated readout noise.
 A subtraction-only DarkImage carries neither an RMS nor inferred BPM.
 
-## Flat and traces (`flat.py`)
+## Flat and traces (`calibration/flat.py`)
 
 Subtract the explicit complete dark from each telescope's mean flat and average
 those four maps. Collapse along dispersion, select the strongest 24 spatial
@@ -33,7 +33,7 @@ flat product contains response, geometry and retained Gaussian fit sigmas;
 DARK statistics and BAD flags are separate products. Fit sigmas are descriptive
 QC; the extraction aperture remains profile_width.
 
-## Wavelength solution (`wavelength.py`)
+## Wavelength solution (`calibration/wavelength.py`)
 
 Subtract the selected lamp dark from the complete mean lamp image and extract
 using flat's geometry. Use the mean of the last four outputs as the reference
@@ -65,7 +65,7 @@ The resulting CalibrationSpectra stays in memory, without a preprocessing file.
 The main dark applies to telescope and baseline cubes. A phase reference has
 its independently selected dark, or records reuse of the main dark.
 
-## P2VM (`p2vm.py`)
+## P2VM (`calibration/p2vm.py`)
 
 For each baseline, use its A,C,B,D detector outputs. Ellipse fitting operates on
 `X=C-A`, `Y=D-B` at each wavelength to estimate phase and radius. The middle

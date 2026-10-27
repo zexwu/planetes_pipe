@@ -76,10 +76,15 @@ actual bench deployment remains a separate hardware acceptance step.
 
 On another machine, verify the original hashes, back up all four files and run
 `git apply --check` for each patch from the devel directory before applying.
-Do not apply again to already updated files. Install the matching PLANETES version
+Do not apply again to already updated files. Install the matching PLANETES 0.4.1 version
 without replacing existing camera/Qt dependencies. To restore, preserve later local
 edits and recover the four original files from:
 
 `/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/devel/`
 
 Restore the matching 0.3 pipeline/calibrations too if reverting to format 2.
+
+The current viewer imports `load_reducer`/`load_dark` from planetes.tasks and passes
+raw arrays to FrameReducer. Acquisition imports RawMetadata/write_raw from
+planetes.io.raw and DetectorSetup from planetes.instrument. These local consumers
+and their portable patches are updated together; no compatibility shim is required.

@@ -1,6 +1,8 @@
 # QC：GRAVITY 1.9.6 定义与 PLANETES 适用范围
 
-`qc.measure_quality()` 返回数值、单位说明以及不可用原因，Python 与 CPL 共用。
+`qc.measure_quality()` 返回物理量名称、数值、单位说明以及不可用原因。
+例如 `dark_median_adu` 在 `io/keywords.py` 映射为 `ESO QC MEDIANDARK SC`；
+QC 计算本身不拼装 FITS keyword，Python 与 CPL 写出共用同一映射。
 这些指标不修改拟合、mask、剔除或阈值。参考源码固定为本机
 `/Users/zexwu/software/gravi_pipeline/gravity-1.9.6/gravi/`；关键词见 gravi_pfits.h。
 SC 仅指本仪器唯一光谱相机。指标名称相同不代表已通过 ESO 的 PLANETES 字典审核。
