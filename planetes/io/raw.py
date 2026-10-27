@@ -8,7 +8,7 @@ from astropy.io import fits as afits
 from astropy.time import Time
 
 from ..instrument import BASELINES, TELESCOPES, DetectorSetup
-from ..products import DarkCalibration, validate
+from ..products import DarkCalibration
 from . import keywords as kw
 from .hdu import _checksums, _json_hdu, _read_json
 from .publication import destinations
@@ -115,7 +115,7 @@ def raw_header(metadata: RawMetadata, shape):
         (kw.DPR_TECHNIQUE, technique),
     ):
         h["HIERARCH " + key] = value
-    h["HIERARCH " + kw.FORMAT_KEY] = kw.SCHEMA_VERSION
+    h["HIERARCH " + kw.FORMAT_KEY] = kw.RAW_FORMAT
     h["HIERARCH " + kw.NDIT] = shape[0]
     for key, value in zip(kw.SHUTTER_KEYS, metadata.shutters, strict=True):
         h["HIERARCH " + key] = value
@@ -149,7 +149,7 @@ def read_raw_metadata(path: Path, *, category=None) -> RawMetadata:
     with afits.open(path, memmap=True) as hdus:
         h = hdus[0].header
         if (
-            h.get(kw.FORMAT_KEY) != kw.SCHEMA_VERSION
+            h.get(kw.FORMAT_KEY) != kw.RAW_FORMAT
             or h.get("INSTRUME") != "PLANETES"
             or kw.PRO_CATEGORY in h
         ):
@@ -162,7 +162,6 @@ def read_raw_metadata(path: Path, *, category=None) -> RawMetadata:
         raw = RawMetadata(**info)
         image = hdus[kw.RAW_IMAGE]
         shape = tuple(image.shape)
-        validate_raw_metadata(raw, shape)
         if category is not None and raw.category != category:
             raise ValueError(f"Expected raw category {category}, got {raw.category}")
         expected = raw_header(raw, shape)
@@ -196,9 +195,10 @@ def identify_raw(paths, category):
 
 def iter_raw_cube(path: Path):
     """Read every named detector frame as float32, retaining 16-frame arithmetic."""
-    read_raw_metadata(path)
     with afits.open(path, memmap=True) as hdus:
         data = hdus[kw.RAW_IMAGE].data
+        if data.ndim != 3:
+            raise ValueError("Expected a three-dimensional raw detector cube")
         for start in range(0, len(data), CHUNK_FRAMES):
             yield np.asarray(data[start : start + CHUNK_FRAMES], dtype=np.float32)
 
@@ -228,9 +228,8 @@ def check_raw_calibrations(path, dark, flat=None, *, flat_setup=None, category=N
     """Shared formal task boundary: known DIT/ROI conflicts are scientific errors."""
     from ..instrument import check_setup
 
-    if not isinstance(dark, DarkCalibration):
+    if not isinstance(dark, DarkCalibration) or dark.n_frames < 2:
         raise ValueError("Formal file tasks require complete DARK calibrations")
-    validate(dark)
     raw = read_raw_metadata(path, category=category)
     unknown = list(check_setup(raw.setup, dark.setup, exposure=True, role="DARK"))
     geometry = flat.setup if flat is not None else flat_setup

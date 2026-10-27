@@ -11,7 +11,7 @@ mandatory pipeline import; the current viewer supplies the new hooks.
 ## Viewer
 
 Use the existing Python 3.12 GUI environment; numerical and Qt dependencies have
-not been upgraded. PLANETES is already editable there. Put format-3 FLAT, WAVE
+not been upgraded. PLANETES is already editable there. Put format-4 FLAT, WAVE
 and P2VM products together with their ordinary `planetes_*.fits` filenames:
 
 ```bash
@@ -38,7 +38,7 @@ created. External unobservable shutter changes cannot be detected by this interf
 Unbinned raw frames feed the common FrameReducer. Dark off, a wrong-category dark
 or incompatible calibration pauses updates and clears the current spectrum.
 Taking the current frame as dark creates subtraction-only DarkImage. Explicitly
-selected 2-D/one-frame darks stay valid for live subtraction; formal file tasks
+selected 2-D/one-frame darks stay valid for live subtraction; file entry points
 require full measured DARK. Invalid channels remain flagged/gaps in curves.
 
 ## Automated take_p2vm
@@ -76,7 +76,7 @@ actual bench deployment remains a separate hardware acceptance step.
 
 On another machine, verify the original hashes, back up all four files and run
 `git apply --check` for each patch from the devel directory before applying.
-Do not apply again to already updated files. Install the matching PLANETES 0.4.1 version
+Do not apply again to already updated files. Install the matching PLANETES 0.5.0 version
 without replacing existing camera/Qt dependencies. To restore, preserve later local
 edits and recover the four original files from:
 
@@ -84,7 +84,11 @@ edits and recover the four original files from:
 
 Restore the matching 0.3 pipeline/calibrations too if reverting to format 2.
 
-The current viewer imports `load_reducer`/`load_dark` from planetes.tasks and passes
+The current viewer imports `load_reducer` from planetes.reduction and `load_dark` from planetes.dark and passes
 raw arrays to FrameReducer. Acquisition imports RawMetadata/write_raw from
 planetes.io.raw and DetectorSetup from planetes.instrument. These local consumers
 and their portable patches are updated together; no compatibility shim is required.
+
+Version 0.5 uses `FrameReducer.wavelength_m` and `extractor.wavelength_map_m`.
+The viewer consumes those metre arrays directly and labels its axes accordingly.
+Regenerate calibration products for format 4 before launching this version.

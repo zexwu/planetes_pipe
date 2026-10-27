@@ -45,7 +45,8 @@ META_EXT = "PLANETES_META"
 FORMAT_KEY = "PLANETES FORMAT"
 HASH_KEY = "PLANETES CONTENT SHA256"
 SHUTTER_KEYS = tuple(f"PLANETES INS SHUT{n} ST" for n in range(1, 5))
-SCHEMA_VERSION = 3
+RAW_FORMAT = 3
+PRODUCT_FORMAT = 4
 
 
 CATEGORIES = {
@@ -70,11 +71,8 @@ QC_KEYWORDS = {
     "p2vm_coherence_spectral_std": "ESO QC P2VM_COHERENCERMS_AVG_SC",
     "p2vm_phase_spectral_std_rad": "ESO QC P2VM_PHASERMS_AVG_SC",
     "wavelength_residual_std_m": "ESO QC RMSWAVE SC",
-    "wavelength_residual_std_um": "ESO QC RMSWAVE UM SC",
     "wavelength_min_m": "ESO QC MINWAVE SC",
-    "wavelength_min_um": "ESO QC MINWAVE UM SC",
     "wavelength_max_m": "ESO QC MAXWAVE SC",
-    "wavelength_max_um": "ESO QC MAXWAVE UM SC",
     "p2vm_transmission_mean": "ESO QC P2VM_TRANS_AVG_SC",
     "p2vm_transmission_min": "ESO QC P2VM_TRANS_MIN_SC",
     "p2vm_transmission_max": "ESO QC P2VM_TRANS_MAX_SC",

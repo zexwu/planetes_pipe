@@ -1,6 +1,8 @@
-"""Wavelength-calibration recipe and line-matching numerics."""
+"""WAVE step: lamp/reference inputs, line matching and wavelength surface fit."""
 
 from collections.abc import Sequence
+from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -8,21 +10,57 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
-from .. import log
-from ..extraction import extract_spec_sparse
-from ..identity import fingerprint
-from ..instrument import N_OUTPUTS
-from ..products import FlatCalibration, Provenance, WavelengthCalibration, validate
+from . import log
+from .dark import frame_mean
+from .extraction import extract_spec_sparse
+from .instrument import N_OUTPUTS
+from .io.fits import read_product
+from .io.raw import check_raw_calibrations, iter_raw_cube
+from .products import (
+    FlatCalibration,
+    Provenance,
+    WavelengthCalibration,
+    WavelengthReference,
+    fingerprint,
+    validate,
+)
+
+PARAMETERS = {}
 
 DETECTION_SIGMA = 3.0
 SURFACE_DEGREE = 3
 RANSAC_ITERATIONS = 1_000_000
 
 
+def calibrate_wavelength_file(
+    path, dark, flat, *, reference=None
+) -> WavelengthCalibration:
+    """Read a lamp cube and return a wavelength solution, without writing files."""
+
+    unknown = check_raw_calibrations(path, dark, flat, category="WAVELAMP_RAW")
+    reference = load_wavelength_reference() if reference is None else reference
+    image = frame_mean(iter_raw_cube(path))
+    if image.shape != dark.mean_adu.shape or image.shape != flat.flat_map_adu.shape:
+        raise ValueError("Lamp/dark/flat detector shapes differ")
+    image = image - dark.mean_adu
+    result = compute_wavelength(image, flat, reference.wavelength_m)
+    info = Provenance(
+        producer="planetes.wavelength",
+        inputs={"wavelamp_raw": str(path)},
+        unverified=unknown,
+        dependencies={
+            "flat": fingerprint(flat),
+            "dark": fingerprint(dark),
+            "line_list": fingerprint(reference),
+        },
+    )
+    return replace(result, provenance=info)
+
+
 def compute_wavelength(
     wave_image_adu: NDArray,
     flat: FlatCalibration,
-    reference_wavelength_um: NDArray,
+    reference_wavelength_m: NDArray,
 ) -> WavelengthCalibration:
     """Fit the retained wavelength solution from a dark-subtracted lamp image."""
 
@@ -38,7 +76,7 @@ def compute_wavelength(
     ]
 
     # --- 2. Identify and match lines in the mean spectrum ---
-    line_pos = reference_wavelength_um
+    line_pos = reference_wavelength_m
 
     x_centroids = []  # To store x-centroids for all lines
     y_centroids = []  # To store y-centroids for all lines
@@ -138,7 +176,7 @@ def compute_wavelength(
     wavemap_coeffs, _, _, _ = np.linalg.lstsq(design_matrix, wl_flat, rcond=None)
     residuals = wl_flat - design_matrix @ wavemap_coeffs
     std = np.std(residuals)
-    log.info(f"Initial std dev of residuals: {std * 1e3:.2f} nm")
+    log.info(f"Initial std dev of residuals: {std * 1e9:.2f} nm")
     for iteration in range(3):
         log.info(f"Performing outlier rejection [{iteration + 1}/3]")
         reject = abs(residuals) > 3 * std
@@ -148,7 +186,7 @@ def compute_wavelength(
         residuals = wl_flat - design_matrix @ wavemap_coeffs
         std = np.std(residuals[~reject])
         log.info(
-            f"    Std dev of residuals: {std * 1e3:.2f} nm "
+            f"    Std dev of residuals: {std * 1e9:.2f} nm "
             f"after rejecting {reject.sum()} outliers"
         )
 
@@ -159,8 +197,8 @@ def compute_wavelength(
     wavemap = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix)
 
     wave_product = WavelengthCalibration(
-        wavelength_map_um=wavemap,
-        fit_residual_um=residuals[~reject].copy(),
+        wavelength_map_m=wavemap,
+        fit_residual_m=residuals[~reject].copy(),
         fit_x_pixels=x_flat[~reject].copy(),
         fit_y_pixels=y_flat[~reject].copy(),
         provenance=Provenance(
@@ -443,3 +481,18 @@ def _grid_search_kernel(
                     if best_score == n_mod:
                         return best_params
     return best_params
+
+
+def wavelength_reference_path():
+    """Return the installed static line-list file."""
+    from importlib.resources import files
+
+    return Path(str(files("planetes").joinpath("data/wavelength_lines.fits")))
+
+
+def load_wavelength_reference(path=None):
+    """Load the packaged or explicitly supplied static reference, including origin labels."""
+
+    return read_product(
+        wavelength_reference_path() if path is None else path, WavelengthReference
+    )

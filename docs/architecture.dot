@@ -1,28 +1,23 @@
 digraph Architecture {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.5, fontname="PingFang SC", fontsize=20, label="PLANETES 0.4.1 — 入口、科学计算与文件边界", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.5 — 每个步骤自己负责输入、参数和计算", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.16,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   python [label="Python / 研究脚本"];
-  recipes [label="PyEsoRex → recipes/planetes_*.py\nparameters.py · dfs.py\n全部 CPL 操作限定在这里"];
-  gui [label="Qt6 GUI / 自动采集"];
-  tasks [label="tasks.py\n读取、配置关联、调用计算\n返回具名科学产品", style="rounded,filled", fillcolor="#eff6ff"];
-  science [label="数组科学计算\ncalibration/ · extraction.py · reduction.py\n不读取文件，不导入 Astropy/CPL", style="rounded,filled", fillcolor="#eff6ff"];
-  live [label="FrameReducer\n原始未 bin 帧 + 明确 dark"];
-  io [label="io/raw.py · io/fits.py\n原始元数据 / 产品编解码\npublication.py：校验、不覆盖发布"];
-  qc [label="qc.py：质量统计\n物理量名称、数值和缺失原因"];
-  keywords [label="io/keywords.py\nFITS 类别、扩展名\n物理 QC 名称 → ESO keyword"];
-  products [label="products.py · instrument.py · identity.py\n科学对象、单位、轴、物理配置与内容身份"];
+  recipes [label="PyEsoRex → recipes/\nSOF · 参数翻译 · DFS 登记\n全部 CPL import 限定在这里"];
+  gui [label="Qt6 GUI\n载入标定 → FrameReducer.reduce_frame"];
+  steps [label="五个同级科学步骤\ndark.py · flat.py · wavelength.py · p2vm.py · reduction.py\n\n文件输入 → 调用本文件计算函数 → 返回具名结果\n每个文件保留自己的参数、算法和 helper\n波长 / OPD / GD 全部使用 m", style="rounded,filled", fillcolor="#eff6ff"];
+  extraction [label="extraction.py\n共用像素提取 · 波数重采样\n16 帧分块读取与提取"];
+  io [label="io/raw.py · io/fits.py\n原始数据元信息 / 产品 FITS\n单位、checksum、不覆盖写入"];
+  products [label="products.py · instrument.py\n具名数组、单位、轴、通道约定\n标定父关系与内容指纹"];
+  qc [label="qc.py → io/keywords.py\n报告质量统计 → FITS keyword\n不修改拟合、mask 或权重"];
   {rank=same; python; recipes; gui;}
-  python -> tasks; recipes -> tasks;
-  gui -> tasks [label="载入标定 / dark"];
-  gui -> live [label="逐帧"];
-  tasks -> science;
-  tasks -> io [label="显式 I/O"];
+  python -> steps;
+  recipes -> steps;
+  gui -> steps;
+  steps -> extraction;
+  steps -> products;
+  steps -> io [label="读 raw / 载入已有标定"];
+  python -> io [label="显式保存结果"];
   recipes -> io [label="共用产品编码"];
-  gui -> io [label="统一 raw writer"];
-  live -> science;
-  io -> keywords;
-  io -> qc [label="写出时测量"];
-  science -> products;
-  qc -> products;
+  io -> qc;
 }

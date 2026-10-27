@@ -14,7 +14,7 @@ from planetes.recipes.dfs import (
     select_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
-from planetes.tasks import reduce_file
+from planetes.reduction import PARAMETERS, reduce_file
 
 
 class PlanetesReduce(ui.PyRecipe):
@@ -30,10 +30,10 @@ class PlanetesReduce(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = make_parameters("reduce", reduce_file)
+        self.parameters = make_parameters(PARAMETERS, reduce_file)
 
     def run(self, frameset, settings):
-        options = read_parameters(self, settings)
+        options = read_parameters(self, settings, PARAMETERS)
         paths, cal, used = select_inputs(
             frameset,
             {

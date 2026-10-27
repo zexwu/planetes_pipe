@@ -1,11 +1,13 @@
-"""Array-only spectral extraction and wavelength resampling."""
+"""Shared spectral extraction, resampling and calibration-sequence reading."""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
+from .io.raw import iter_raw_cube
 from .products import (
     require_parent,
     validate,
@@ -90,8 +92,8 @@ class SpectralExtractor:
     profile_y_pixels: NDArray
     detector_shape: tuple[int, int]
     setup: object
-    wavelength_map_um: NDArray
-    wavelength_um: NDArray
+    wavelength_map_m: NDArray
+    wavelength_m: NDArray
     detector_flat_spectra: NDArray
     resampled_flat_spectra: NDArray
 
@@ -108,28 +110,28 @@ class SpectralExtractor:
         )
         aligned = resample_spectra(
             spec / self.detector_flat_spectra,
-            self.wavelength_map_um,
-            self.wavelength_um,
+            self.wavelength_map_m,
+            self.wavelength_m,
         )
         aligned *= self.resampled_flat_spectra
         return aligned
 
 
-def prepare_extraction(flat, wave, wavelength_um: NDArray) -> SpectralExtractor:
+def prepare_extraction(flat, wave, wavelength_m: NDArray) -> SpectralExtractor:
     """Validate scientific parents and coverage once, then snapshot the required arrays."""
     validate(flat)
     validate(wave)
-    validate_wavelength(wavelength_um)
+    validate_wavelength(wavelength_m)
     require_parent(wave, "flat", flat)
-    if wave.wavelength_map_um.shape[1] != flat.flat_map_adu.shape[1]:
+    if wave.wavelength_map_m.shape[1] != flat.flat_map_adu.shape[1]:
         raise ValueError("Flat and wavelength detector dimensions differ")
-    for output, row in enumerate(wave.wavelength_map_um):
-        if wavelength_um[0] < row[0] or wavelength_um[-1] > row[-1]:
+    for output, row in enumerate(wave.wavelength_map_m):
+        if wavelength_m[0] < row[0] or wavelength_m[-1] > row[-1]:
             raise ValueError(
-                f"Output {output}: target {wavelength_um[0]:.9g}..{wavelength_um[-1]:.9g} um outside calibration {row[0]:.9g}..{row[-1]:.9g} um"
+                f"Output {output}: target {wavelength_m[0]:.9g}..{wavelength_m[-1]:.9g} m outside calibration {row[0]:.9g}..{row[-1]:.9g} m"
             )
     xs, ys = _snapshot(flat.profile_x_pixels), _snapshot(flat.profile_y_pixels)
-    wave_map, grid = _snapshot(wave.wavelength_map_um), _snapshot(wavelength_um)
+    wave_map, grid = _snapshot(wave.wavelength_map_m), _snapshot(wavelength_m)
     spec_flat_detector = extract_spec_sparse(flat.flat_map_adu[None, :, :], ys, xs)
     spec_flat_detector = np.clip(spec_flat_detector, a_min=1e-8, a_max=None)
     spec_flat = 1 / resample_spectra(1 / spec_flat_detector, wave_map, grid)
@@ -142,4 +144,12 @@ def prepare_extraction(flat, wave, wavelength_um: NDArray) -> SpectralExtractor:
         grid,
         _snapshot(spec_flat_detector),
         _snapshot(spec_flat),
+    )
+
+
+def extract_file(path: Path, extractor, dark) -> NDArray:
+    """Read and extract a whole file, retaining all frames and the 16-frame chunking."""
+
+    return np.concatenate(
+        [extractor.extract(chunk, dark) for chunk in iter_raw_cube(path)], axis=1
     )

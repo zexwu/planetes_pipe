@@ -1,6 +1,6 @@
 {
   "baseline_commit": "61f519f",
-  "pipeline_version": "0.4.1",
+  "pipeline_version": "0.5.0",
   "files": [
     {
       "path": "camview.py",
@@ -13,7 +13,7 @@
       "path": "camview_p2vm.py",
       "patch": "camview_p2vm.patch",
       "original_sha256": "bbd3137136208e001ad1fddc9b94f8efe91dbe44f95adce675aa5b7b74ee2c40",
-      "updated_sha256": "d754bfd140f5e868715bd9a3f87e7f12379ebd984a24c9f953a057525b93b3af",
+      "updated_sha256": "e1d4dde3834b82955280ffda70935772557a1c3a7ed65c29d86299b6358de6ac",
       "backup": "/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/devel/camview_p2vm.py"
     },
     {

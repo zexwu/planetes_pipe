@@ -1,4 +1,4 @@
-# PLANETES 0.4.1 product and raw contract (format 3)
+# PLANETES 0.5.0 product and raw contract (products 4 / raw 3)
 
 Science functions return named Python objects. `products.py` defines their units,
 axes and parent relationships; `io/fits.py` maps them to files. `recipes/` binds SOF and
@@ -70,7 +70,7 @@ historical local saving times do not become observation timestamps.
 
 ## Products and layouts
 
-All products have empty primary, format 3, ESO PRO CATG/TYPE/SCIENCE and private
+All products have empty primary, format 4, ESO PRO CATG/TYPE/SCIENCE and private
 `PLANETES CONTENT SHA256`. Every HDU has CHECKSUM/DATASUM. PLANETES_META holds
 producer, software version, actual parameters, all source roles, parent scientific
 fingerprints, unverified associations and unavailable QC reasons. Known DARK/FLAT
@@ -86,7 +86,7 @@ signature. Standalone Python uses the same payload, units, QC and validation.
 | WavelengthCalibration / WAVE | WAVE_DATA_SC, one row, DATA1..DATA24 metre vectors; PLANETES_WAVE_FIT(RESIDUAL [m], X/Y [zero-based pixel]) for accepted lines |
 | P2VMCalibration / P2VM | P2VM_SC, 24 REGNAME rows; TRANSMISSION (4,nwave), COHERENCE/PHASE/C_MATRIX (6,nwave); PHASE rad and DC C_MATRIX ADU |
 | ReducedObservables / SINGLE_SCI_P2VMRED | PLANETES_FLUX: FRAME, physical STA_INDEX, FLUXDATA [ADU]; PLANETES_VIS: FRAME, station pair, VISDATA [complex ADU], VISAMP, FLAG, GDELAY [m], DIFFPHASE [deg] |
-| WavelengthReference / LINE_LIST | LINE_LIST(WAVELENGTH [m], ORIGIN), unchanged 30 ECSV values/source labels subject only to boundary conversion; ECSV SHA in provenance |
+| WavelengthReference / LINE_LIST | LINE_LIST(WAVELENGTH [m], ORIGIN), 30 laboratory wavelengths in metres with original ECSV source labels; ECSV SHA in provenance |
 
 FLAT/WAVE contain IMAGING_DETECTOR_SC with REG01..REG24 labels until the output
 mapping is measured. P2VM/science use actual baseline-phase labels such as 43-A;
@@ -117,7 +117,7 @@ reference field:
 
 DarkImage, CalibrationSpectra and live VisibilityObservables remain memory-only.
 A two-dimensional or single-frame explicitly selected GUI dark is subtraction-only;
-all formal file tasks require a full DARK. Old v0.3/schema-2 products are rejected;
+all file entry points require a full DARK. Earlier product formats are rejected;
 regenerate them from standardized raw. This format does not implement final OIFITS.
 
 ## Relationships, hashing and publication
@@ -130,13 +130,12 @@ DARK. No dark scaling is added. Unknown matching fields only pass for explicitly
 legacy data/calibrations and remain recorded as unverified. Exposure matching
 permits only four ULP of encoding roundoff, no arbitrary physical tolerance.
 
-Scientific fingerprints include quantities in canonical file units/coordinates,
-units, axes, fixed mappings, parameters, detector setup and parent fingerprints.
-Paths, producer and derived QC status do not change scientific identity. Loaded
-metre/coordinate quantities are held as immutable arrays with a decoded-state
-digest. An unchanged object reuses those originals when saved. Array/parameter/
-parent changes invalidate reuse and generate a new hash. No per-frame hashing or
-extra disk precision copy is introduced.
+Scientific fingerprints identify arrays, units, axes, fixed mappings, parameters,
+detector setup and parent fingerprints. Paths, producer and derived QC status do
+not change them. `products.fingerprint()` computes this directly; there is no
+retained representation or decoded-state cache. `read_product()` verifies the
+recorded hash once after decoding, in addition to FITS checksums and unit checks.
+Lengths are already metres, so reading and saving never rescale them.
 
 DARK and BAD are fully encoded, signed and read back before either final name is
 published. Existing targets are refused. An ordinary second publication failure
@@ -145,20 +144,21 @@ The two names do not form a crash-atomic filesystem transaction.
 
 ## Parameters
 
-Canonical names and aliases are explicitly registered in recipes/parameters.py. Python
-keyword defaults remain the authority; no spelling-based inference is used.
+Each step declares canonical names and aliases in its own `PARAMETERS` dictionary.
+Python function signatures supply defaults. `recipes/parameters.py` only translates
+these ordinary definitions into CPL parameters; steps import no CPL code.
 
 | Python keyword | Canonical CPL name | Default |
 | --- | --- | --- |
 | bad_pixel_threshold | planetes.calib.bad-dark-threshold | 5.0 |
 | profile_width | planetes.calib.profile-width | 10.0 pixel full aperture |
 | phase_correction | planetes.calib.phase-correction | true |
-| wavelength_min_um / max_um / channels | planetes.calib.wavelength-min-um / wavelength-max-um / wavelength-channels | 1.15 / 1.30 um / 151 |
-| gd_search_min_um / max_um (P2VM) | planetes.calib.gd-search-min-um / gd-search-max-um | -30 / +30 um |
-| gd_search_min_um / max_um (science) | planetes.reduce.gd-search-min-um / gd-search-max-um | -100 / +100 um |
+| wavelength_min_m / max_m / channels | planetes.calib.wavelength-min-m / wavelength-max-m / wavelength-channels | 1.15e-6 / 1.30e-6 m / 151 |
+| gd_search_min_m / max_m (P2VM) | planetes.calib.gd-search-min-m / gd-search-max-m | -30e-6 / +30e-6 m |
+| gd_search_min_m / max_m (science) | planetes.reduce.gd-search-min-m / gd-search-max-m | -100e-6 / +100e-6 m |
 
 CLI aliases are the final hyphenated component. The coarse GD step remains
-0.01 um; Newton refinement can leave initialization bounds. No clipping rule,
+1e-8 m; Newton refinement can leave initialization bounds. No clipping rule,
 mask, line rejection, weighting or scientific default is changed.
 
 SOF quantities and allowed classes are stated in README and implemented in each
@@ -169,13 +169,16 @@ A phase DARK without reference fails; a disabled reference never enters the used
 input provenance. Repeated FLAT_RAW/P2VM_RAW tags are required; duplicate physical
 shutter combinations or incomplete sets fail.
 
-## Python organization in 0.4.1
+## Python organization in 0.5.0
 
-All file operations live in tasks.py and io/. Calibration, extraction and reduction
-accept arrays/scientific objects and import neither Astropy nor CPL. RawMetadata
-belongs to io/raw.py; DetectorSetup and configuration matching belong to instrument.py.
-Scientific identity/retained encoding belongs to identity.py; its cached encoding
-is private (`Provenance._encoding`) and is never serialized as a second array copy.
-CPL-specific DFS stub filling lives in recipes/dfs.py, outside the product codec.
-Numerical QC returns scientific names, while io/keywords.py maps them to the existing
-FITS names. Format 3 and parent fingerprints remain unchanged by this reorganization.
+DARK, FLAT, WAVE, P2VM and REDUCE are peer step modules at package root. Each owns
+its input handling, parameters, scientific functions and returned products. Shared
+extraction stays in extraction.py; the P2VM input sequence and output mapping stay
+in p2vm.py. Saving uses io/fits.py explicitly. RawMetadata belongs to io/raw.py;
+DetectorSetup belongs to instrument.py; products and their fingerprints belong to
+products.py. Every CPL import and DFS operation stays inside recipes/.
+
+Checks cover physical associations, array/index safety and external file contracts.
+They are not a separate validation workflow. QC reports measurements and missing
+reasons without changing scientific cuts. Product format 4 records the new metre
+field/parameter names and fingerprints; standardized raw remain format 3.

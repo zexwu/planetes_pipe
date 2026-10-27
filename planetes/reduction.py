@@ -6,33 +6,88 @@ visibility extraction, group delay computation, and phase calculation.
 """
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
 
 from . import log
-from .extraction import prepare_extraction
+from .extraction import extract_file, prepare_extraction
 from .instrument import IMAG_SLICE, N_BASELINES, N_TELESCOPES, REAL_SLICE
+from .io.fits import read_product
+from .io.raw import check_raw_calibrations
 from .products import (
     P2VMCalibration,
+    Provenance,
     ReducedObservables,
     VisibilityObservables,
+    fingerprint,
     require_parent,
     validate,
     validate_gd_range,
 )
 
-GROUP_DELAY_RANGE_UM = (-100.0, 100.0)
+PARAMETERS = {
+    "gd_search_min_m": (
+        "planetes.reduce.gd-search-min-m",
+        "gd-search-min-m",
+        "Coarse science GD lower initialization [m]",
+    ),
+    "gd_search_max_m": (
+        "planetes.reduce.gd-search-max-m",
+        "gd-search-max-m",
+        "Coarse science GD upper initialization [m]",
+    ),
+}
+
+
+def reduce_file(
+    path: Path,
+    dark,
+    flat,
+    wave,
+    p2vm: P2VMCalibration,
+    *,
+    gd_search_min_m=-100e-6,
+    gd_search_max_m=100e-6,
+) -> ReducedObservables:
+    """Read the complete raw science cube, apply explicit calibrations and return results."""
+
+    unknown = check_raw_calibrations(path, dark, flat, category="SINGLE_SCI_RAW")
+    validate(dark)
+    reducer = FrameReducer(flat, wave, p2vm)
+    spectra = extract_file(path, reducer.extractor, dark)
+    result = reduce_spectra(
+        spectra,
+        p2vm,
+        gd_search_min_m=gd_search_min_m,
+        gd_search_max_m=gd_search_max_m,
+    )
+    info = Provenance(
+        producer="planetes.reduction",
+        unverified=unknown,
+        parameters={
+            "gd_search_min_m": gd_search_min_m,
+            "gd_search_max_m": gd_search_max_m,
+        },
+        inputs={"science_raw": str(path)},
+        dependencies={
+            "dark": fingerprint(dark),
+            "flat": fingerprint(flat),
+            "wave": fingerprint(wave),
+            "p2vm": fingerprint(p2vm),
+        },
+    )
+    return replace(result, provenance=info)
 
 
 def reduce_spectra(
     spectra: NDArray,
     p2vm: P2VMCalibration,
     *,
-    gd_search_min_um=-100.0,
-    gd_search_max_um=100.0,
+    gd_search_min_m=-100e-6,
+    gd_search_max_m=100e-6,
     diagnostics=True,
 ):
     """Apply P2VM and calculate the retained instrumental visibility observables."""
@@ -52,22 +107,22 @@ def reduce_spectra(
             coherent_flux_adu,
             visibility_amplitude,
             flags,
-            p2vm.wavelength_um,
+            p2vm.wavelength_m,
             p2vm.baseline_regions,
             p2vm.baseline_telescopes,
         )
 
-    group_delay_um = np.zeros((len(coherent_flux_adu), N_BASELINES))
+    group_delay_m = np.zeros((len(coherent_flux_adu), N_BASELINES))
     log.info("Computing group delay for science spectra...")
     for baseline in range(N_BASELINES):
-        group_delay_um[:, baseline] = compute_gdelay(
+        group_delay_m[:, baseline] = compute_gdelay(
             coherent_flux_adu[:, baseline],
-            p2vm.wavelength_um,
-            search_range=(gd_search_min_um, gd_search_max_um),
+            p2vm.wavelength_m,
+            search_range=(gd_search_min_m, gd_search_max_m),
         )
 
     differential_phase_deg = coherent_flux_adu * np.exp(
-        -2j * np.pi * group_delay_um[:, :, None] / p2vm.wavelength_um[None, :]
+        -2j * np.pi * group_delay_m[:, :, None] / p2vm.wavelength_m[None, :]
     )
     differential_phase_deg *= differential_phase_deg.mean(axis=2)[:, :, None].conj()
     differential_phase_deg = np.angle(differential_phase_deg, deg=True)
@@ -79,8 +134,8 @@ def reduce_spectra(
         coherent_flux_adu=coherent_flux_adu,
         visibility_amplitude=visibility_amplitude,
         flags=flags,
-        wavelength_um=p2vm.wavelength_um,
-        group_delay_um=group_delay_um,
+        wavelength_m=p2vm.wavelength_m,
+        group_delay_m=group_delay_m,
         differential_phase_deg=differential_phase_deg,
         baseline_regions=p2vm.baseline_regions,
         baseline_telescopes=p2vm.baseline_telescopes,
@@ -118,7 +173,7 @@ def normalize_visibility(
 def compute_gdelay(
     visdata: NDArray,
     wavelength: NDArray,
-    search_range: tuple[float, float] = (-30, 30),
+    search_range: tuple[float, float] = (-30e-6, 30e-6),
     n_newton: int = 5,
 ) -> NDArray:
     """Estimate group delay by grid search followed by Newton refinement."""
@@ -126,7 +181,7 @@ def compute_gdelay(
     k = -2j * np.pi / wavelength
     w = -2 * np.pi / wavelength
 
-    gd_grid = np.arange(search_range[0], search_range[1], 0.01)
+    gd_grid = np.arange(search_range[0], search_range[1], 1e-8)
     phasors_grid = np.exp(gd_grid[:, None] * k[None, :])
     coherence = np.abs(np.tensordot(visdata, phasors_grid, axes=([-1], [-1])))
 
@@ -166,7 +221,7 @@ class FrameReducer:
         require_parent(self.p2vm, "flat", self.flat)
         require_parent(self.p2vm, "wave", self.wave)
         self.extractor = prepare_extraction(
-            self.flat, self.wave, self.p2vm.wavelength_um
+            self.flat, self.wave, self.p2vm.wavelength_m
         )
         from copy import deepcopy
         from dataclasses import fields
@@ -187,8 +242,8 @@ class FrameReducer:
         return len(self.p2vm.baseline_telescopes)
 
     @property
-    def wavelength_um(self):
-        return self.extractor.wavelength_um
+    def wavelength_m(self):
+        return self.extractor.wavelength_m
 
     def reduce_frame(
         self,
@@ -196,8 +251,8 @@ class FrameReducer:
         *,
         dark,
         diagnostics=False,
-        gd_search_min_um=-100.0,
-        gd_search_max_um=100.0,
+        gd_search_min_m=-100e-6,
+        gd_search_max_m=100e-6,
     ):
         """Reduce one RAW frame; caller must not subtract its selected dark beforehand."""
         cube = np.asarray(raw, dtype=np.float32)[None, :, :]
@@ -206,6 +261,17 @@ class FrameReducer:
             spectra,
             self.p2vm,
             diagnostics=diagnostics,
-            gd_search_min_um=gd_search_min_um,
-            gd_search_max_um=gd_search_max_um,
+            gd_search_min_m=gd_search_min_m,
+            gd_search_max_m=gd_search_max_m,
         )
+
+
+def load_reducer(directory: Path) -> FrameReducer:
+    """Read a calibration directory and prepare one array-only live reducer."""
+    directory = Path(directory).expanduser().resolve()
+    return FrameReducer(
+        read_product(directory / "planetes_flat.fits"),
+        read_product(directory / "planetes_wave.fits"),
+        read_product(directory / "planetes_p2vm.fits"),
+        directory,
+    )

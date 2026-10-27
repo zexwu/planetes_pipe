@@ -10,15 +10,15 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import calibration_arrays, calibration_spectra, metadata
 
-from planetes.calibration.dark import frame_statistics
-from planetes.calibration.p2vm import compute_p2vm
+from planetes.dark import frame_statistics
 from planetes.io.fits import read_product, write_product
 from planetes.io.publication import destinations
 from planetes.io.raw import iter_raw_cube as iter_cube
 from planetes.io.raw import write_raw
+from planetes.p2vm import compute_p2vm
 from planetes.products import ReducedObservables
 from planetes.reduction import reduce_spectra
-from planetes.tasks import load_wavelength_reference
+from planetes.wavelength import load_wavelength_reference
 
 
 class ScienceProductTests(unittest.TestCase):
@@ -47,11 +47,7 @@ class ScienceProductTests(unittest.TestCase):
                     getattr(loaded, field.name),
                 )
                 if isinstance(before, np.ndarray):
-                    expected = (
-                        before / 1e6 * 1e6
-                        if field.metadata and field.metadata["unit"] == "um"
-                        else before
-                    )
+                    expected = before
                     np.testing.assert_array_equal(expected, after)
                 else:
                     self.assertEqual(before, after)
@@ -60,26 +56,6 @@ class ScienceProductTests(unittest.TestCase):
             )
             self.assertTrue(loaded.flags[0].all())
             self.assertEqual(loaded.flags.dtype, bool)
-
-    def test_corrupt_boolean_encoding_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "science.fits"
-            write_product(path, self.product)
-            with fits.open(path, mode="update") as hdus:
-                hdus["PLANETES_VIS"].data["FLAG"][0, 0] = False
-                hdus["PLANETES_VIS"].add_checksum()
-            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
-                read_product(path, ReducedObservables)
-
-    def test_scientific_edit_with_valid_checksums_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "science.fits"
-            write_product(path, self.product)
-            with fits.open(path, mode="update") as hdus:
-                hdus["PLANETES_VIS"].data["VISAMP"][0, 0] = 42.0
-                hdus["PLANETES_VIS"].add_checksum()
-            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
-                read_product(path)
 
     def test_science_rows_use_physical_station_ids_and_frame_order(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -110,10 +86,30 @@ class ScienceProductTests(unittest.TestCase):
             self.assertEqual(actual.baseline_telescopes, product.baseline_telescopes)
 
     def test_static_reference_retains_original_values(self):
-        lines = load_wavelength_reference().wavelength_um
+        lines = load_wavelength_reference().wavelength_m
         self.assertEqual(len(lines), 30)
-        self.assertAlmostEqual(lines[0], 0.965780)
-        self.assertAlmostEqual(lines[-1], 1.409370)
+        self.assertAlmostEqual(lines[0], 0.965780e-6, delta=1e-20)
+        self.assertAlmostEqual(lines[-1], 1.409370e-6, delta=1e-20)
+
+    def test_changed_visibility_flag_with_updated_checksum_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "science.fits"
+            write_product(path, self.product)
+            with fits.open(path, mode="update") as hdus:
+                hdus["PLANETES_VIS"].data["FLAG"][0, 0] = False
+                hdus["PLANETES_VIS"].add_checksum()
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                read_product(path, ReducedObservables)
+
+    def test_scientific_edit_with_valid_checksums_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "science.fits"
+            write_product(path, self.product)
+            with fits.open(path, mode="update") as hdus:
+                hdus["PLANETES_VIS"].data["VISAMP"][0, 0] = 42.0
+                hdus["PLANETES_VIS"].add_checksum()
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                read_product(path)
 
 
 class CalibrationFitsTests(unittest.TestCase):
@@ -141,11 +137,7 @@ class CalibrationFitsTests(unittest.TestCase):
                         getattr(loaded, field.name),
                     )
                     if isinstance(before, np.ndarray):
-                        expected = (
-                            before / 1e6 * 1e6
-                            if field.metadata and field.metadata["unit"] == "um"
-                            else before
-                        )
+                        expected = before
                         np.testing.assert_array_equal(expected, after)
                         self.assertTrue(after.dtype.isnative)
                     else:
@@ -206,7 +198,9 @@ class RawFitsTests(unittest.TestCase):
                 ]
             ).writeto(path)
 
-            with self.assertRaisesRegex(ValueError, "new PLANETES raw FITS"):
+            with self.assertRaisesRegex(
+                ValueError, "three-dimensional raw detector cube"
+            ):
                 list(iter_cube(path))
 
 
@@ -271,12 +265,11 @@ class PublicationTests(unittest.TestCase):
 
 class CanonicalAndRawTests(unittest.TestCase):
     def test_rewrites_retain_valid_metres_and_inplace_changes_invalidate_hash(self):
-        from planetes.identity import fingerprint, retain_representation
+        from planetes.products import fingerprint
 
         wave = calibration_arrays(n_wave=15)[-1]
-        metres = np.nextafter(wave.wavelength_map_um / 1e6, np.inf)
-        wave = replace(wave, wavelength_map_um=metres * 1e6)
-        wave = retain_representation(wave, {"wavelength_map_um": metres})
+        metres = np.nextafter(wave.wavelength_map_m, np.inf)
+        wave = replace(wave, wavelength_map_m=metres)
         original = fingerprint(wave)
         with tempfile.TemporaryDirectory() as temporary:
             for i in range(3):
@@ -288,7 +281,7 @@ class CanonicalAndRawTests(unittest.TestCase):
                     np.testing.assert_array_equal(
                         hdus["WAVE_DATA_SC"].data["DATA1"][0], metres[0]
                     )
-            wave.wavelength_map_um[0, 0] += 1e-6
+            wave.wavelength_map_m[0, 0] += 1e-6
             self.assertNotEqual(fingerprint(wave), original)
             self.assertNotEqual(
                 fingerprint(

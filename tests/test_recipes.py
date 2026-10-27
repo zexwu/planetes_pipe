@@ -15,18 +15,17 @@ from astropy.io import fits
 from p2vm_fixture import input_rows, metadata, write_recipe_inputs
 
 import planetes
-from planetes.calibration.p2vm import compute_p2vm
 from planetes.io.fits import read_product, write_product
 from planetes.io.raw import write_raw
+from planetes.p2vm import compute_p2vm, extract_calibration_files, wavelength_grid
 from planetes.products import (
     DarkCalibration,
     FlatCalibration,
     P2VMCalibration,
     ReducedObservables,
     WavelengthCalibration,
-    wavelength_grid,
 )
-from planetes.tasks import extract_calibration_files, reduce_file
+from planetes.reduction import reduce_file
 
 
 @unittest.skipUnless(
@@ -139,11 +138,7 @@ class ESOChainTests(unittest.TestCase):
                     getattr(actual, field.name),
                 )
                 if isinstance(before, np.ndarray):
-                    expected_array = (
-                        before / 1e6 * 1e6
-                        if field.metadata and field.metadata["unit"] == "um"
-                        else before
-                    )
+                    expected_array = before
                     np.testing.assert_array_equal(expected_array, after)
                 else:
                     self.assertEqual(before, after)
@@ -179,7 +174,7 @@ class P2VMRecipeTests(unittest.TestCase):
             flat,
             wave,
             read_product(self.paths["DARK"]),
-            wavelength_um=wavelength_grid(),
+            wavelength_m=wavelength_grid(),
             telescope_flats=self.paths["FLAT_RAW"],
             baseline_cubes=self.paths["P2VM_RAW"],
             phase_reference=self.paths["PHASE_REFERENCE"],
@@ -196,11 +191,7 @@ class P2VMRecipeTests(unittest.TestCase):
                 continue
             before, after = getattr(expected, field.name), getattr(actual, field.name)
             if isinstance(before, np.ndarray):
-                expected_array = (
-                    before / 1e6 * 1e6
-                    if field.metadata and field.metadata["unit"] == "um"
-                    else before
-                )
+                expected_array = before
                 np.testing.assert_array_equal(expected_array, after)
             else:
                 self.assertEqual(before, after)
@@ -327,7 +318,7 @@ class DFSFailureTests(unittest.TestCase):
             read_product(Path("planetes_dark.fits"))
             self.assertEqual(
                 read_product(Path("planetes_bad.fits")).provenance.parameters[
-                    "bad_threshold"
+                    "bad_pixel_threshold"
                 ],
                 6.5,
             )

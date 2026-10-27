@@ -39,7 +39,7 @@ Dark temporal RMS 使用 population 定义；上述谱域/残差 sample stdev �
 - GRAVITY GD rejection 指标：本仪器只有 coarse initialization 区间，Newton 不被截断。
 - 最终 VISAMP/VISPHI 平均、REJECTED RATIO：产品仍为逐帧仪器级结果；channel invalid flags 不是 GRAVITY 的 frame rejection 百分比。
 
-矩阵条件数和 channel-level flag fraction 保留在普通 `qc.diagnostics()` 中，
+保存的 P2VM 逆矩阵条件数和 channel-level flag fraction 保留在普通 `qc.diagnostics()` 中，
 不再写成自行命名的 ESO QC。相位校正的请求/实际执行状态在具名 provenance
 参数中保存，不继续发明 ESO DRS 关键词。普通拟合 RMS 保存在
 PLANETES_P2VM_FIT_RMS [ADU]，不冒称有权重的 chi-square。

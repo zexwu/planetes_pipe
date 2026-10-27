@@ -5,8 +5,6 @@ import unittest
 import numpy as np
 from p2vm_fixture import calibration_spectra
 
-from planetes.calibration.p2vm import build_v2pm_matrix, compute_p2vm
-from planetes.calibration.wavelength import match_lines_grid
 from planetes.extraction import extract_spec_sparse
 from planetes.instrument import (
     IMAG_SLICE,
@@ -16,7 +14,9 @@ from planetes.instrument import (
     N_TELESCOPES,
     REAL_SLICE,
 )
+from planetes.p2vm import build_v2pm_matrix, compute_p2vm
 from planetes.reduction import normalize_visibility
+from planetes.wavelength import match_lines_grid
 
 
 class ScienceTests(unittest.TestCase):
@@ -83,7 +83,7 @@ class ScienceTests(unittest.TestCase):
             p2vm.coherence_amplitude,
             p2vm.coherence_phase_rad,
         )
-        for wave in range(len(p2vm.wavelength_um)):
+        for wave in range(len(p2vm.wavelength_m)):
             np.testing.assert_allclose(
                 p2vm.p2vm[:, :, wave] @ matrix[:, :, wave],
                 np.eye(N_DATA),
@@ -92,8 +92,8 @@ class ScienceTests(unittest.TestCase):
 
 
 class StandaloneScienceTests(unittest.TestCase):
-    def test_science_runs_without_fits_cpl_or_task_layer(self):
-        """Array calculations must remain usable without any file or executor dependency."""
+    def test_steps_run_without_cpl(self):
+        """Each step remains usable from ordinary Python without CPL."""
         import subprocess
         import sys
         from pathlib import Path
@@ -103,13 +103,11 @@ import importlib.abc
 import sys
 class NoFileOrExecutorImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'astropy', 'cpl', 'pyesorex'} or fullname in {
-            'planetes.io', 'planetes.tasks', 'planetes.recipes'
-        }:
+        if fullname.split('.')[0] in {'cpl', 'pyesorex'}:
             raise ImportError(f'Forbidden scientific dependency: {fullname}')
 sys.meta_path.insert(0, NoFileOrExecutorImports())
 import numpy as np
-from planetes.calibration import dark, flat, wavelength, p2vm
+from planetes import dark, flat, wavelength, p2vm
 from planetes import extraction, reduction, qc
 measured = dark.compute_dark([np.arange(24, dtype=np.float32).reshape(2,3,4)])
 assert measured.n_frames == 2

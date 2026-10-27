@@ -10,21 +10,19 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import calibration_arrays, calibration_spectra, metadata, setup
 
-from planetes.calibration.dark import compute_badpix
-from planetes.calibration.flat import compute_flat
-from planetes.calibration.p2vm import compute_p2vm
+from planetes.dark import calibrate_dark_file, compute_badpix, load_dark
 from planetes.extraction import prepare_extraction
-from planetes.identity import fingerprint
+from planetes.flat import compute_flat
 from planetes.io.fits import read_product, write_product
 from planetes.io.raw import write_raw
+from planetes.p2vm import compute_p2vm, extract_calibration_files, wavelength_grid
 from planetes.products import (
     DarkCalibration,
     DarkImage,
+    fingerprint,
     validate_gd_range,
-    wavelength_grid,
 )
-from planetes.reduction import FrameReducer
-from planetes.tasks import calibrate_dark_file, load_dark, reduce_file
+from planetes.reduction import FrameReducer, reduce_file
 
 
 class CalibrationTests(unittest.TestCase):
@@ -38,21 +36,19 @@ class CalibrationTests(unittest.TestCase):
     def test_same_shape_different_flat_is_rejected(self):
         wrong = replace(self.flat, flat_map_adu=self.flat.flat_map_adu + 1)
         with self.assertRaisesRegex(ValueError, "dependency"):
-            prepare_extraction(wrong, self.wave, self.p2vm.wavelength_um)
+            prepare_extraction(wrong, self.wave, self.p2vm.wavelength_m)
 
     def test_same_shape_different_wave_is_rejected(self):
-        wrong = replace(
-            self.wave, wavelength_map_um=self.wave.wavelength_map_um + 0.001
-        )
+        wrong = replace(self.wave, wavelength_map_m=self.wave.wavelength_map_m + 0.001)
         with self.assertRaisesRegex(ValueError, "dependency"):
             FrameReducer(self.flat, wrong, self.p2vm)
 
     def test_coverage_is_strict_and_target_grid_is_explicit(self):
         with self.assertRaisesRegex(ValueError, "Output 0.*outside"):
-            prepare_extraction(self.flat, self.wave, np.linspace(1.1, 1.3, 15))
-        grid = np.linspace(1.16, 1.29, 17)
+            prepare_extraction(self.flat, self.wave, np.linspace(1.1e-6, 1.3e-6, 15))
+        grid = np.linspace(1.16e-6, 1.29e-6, 17)
         prepared = prepare_extraction(self.flat, self.wave, grid)
-        np.testing.assert_array_equal(prepared.wavelength_um, grid)
+        np.testing.assert_array_equal(prepared.wavelength_m, grid)
         self.assertEqual(
             prepared.extract(np.ones((1, 24, 15), dtype=np.float32), self.dark).shape,
             (24, 1, 17),
@@ -63,22 +59,22 @@ class CalibrationTests(unittest.TestCase):
         parent = replace(
             self.p2vm,
             p2vm=self.p2vm.p2vm.copy(),
-            wavelength_um=self.p2vm.wavelength_um.copy(),
+            wavelength_m=self.p2vm.wavelength_m.copy(),
         )
         reducer = FrameReducer(flat, self.wave, parent)
         geometry = reducer.extractor.profile_x_pixels.copy()
         inverse = reducer.p2vm.p2vm.copy()
-        grid = reducer.wavelength_um.copy()
+        grid = reducer.wavelength_m.copy()
         flat.profile_x_pixels[:] = -1
-        parent.wavelength_um[:] = 2
+        parent.wavelength_m[:] = 2
         parent.p2vm[:] = 0
         np.testing.assert_array_equal(reducer.extractor.profile_x_pixels, geometry)
         np.testing.assert_array_equal(reducer.p2vm.p2vm, inverse)
-        np.testing.assert_array_equal(reducer.wavelength_um, grid)
+        np.testing.assert_array_equal(reducer.wavelength_m, grid)
         for values in (
             reducer.extractor.profile_x_pixels,
             reducer.p2vm.p2vm,
-            reducer.wavelength_um,
+            reducer.wavelength_m,
         ):
             self.assertFalse(values.flags.writeable)
 
@@ -110,7 +106,7 @@ class CalibrationTests(unittest.TestCase):
                         getattr(one, name),
                     )
                     self.assertEqual(a.tobytes(), b.tobytes(), name)
-                self.assertFalse(hasattr(one, "group_delay_um"))
+                self.assertFalse(hasattr(one, "group_delay_m"))
             self.assertTrue(complete.flags[0].all())
 
     def test_2d_dark_has_no_invented_noise_and_cannot_build_flat(self):
@@ -183,15 +179,15 @@ class CalibrationTests(unittest.TestCase):
             calls.append(kwargs["search_range"])
             return compute_gdelay(data, wavelength, **kwargs)
 
-        with patch("planetes.calibration.p2vm.compute_gdelay", side_effect=measured):
+        with patch("planetes.p2vm.compute_gdelay", side_effect=measured):
             compute_p2vm(
                 calibration_spectra(n_wave=15),
                 phase_correction=True,
-                gd_search_min_um=-12.0,
-                gd_search_max_um=12.0,
+                gd_search_min_m=-12e-6,
+                gd_search_max_m=12e-6,
             )
         self.assertGreater(len(calls), 6)
-        self.assertTrue(all(value == (-12.0, 12.0) for value in calls))
+        self.assertTrue(all(value == (-12e-6, 12e-6) for value in calls))
 
     def test_nondefault_width_pads_profiles_without_changing_pixels(self):
         from planetes.extraction import extract_spec_sparse
@@ -209,7 +205,7 @@ class CalibrationTests(unittest.TestCase):
                 (np.full(nx, center), np.zeros(nx), np.ones(nx)),
                 (np.full(nx, 8.0), np.zeros(nx), np.ones(nx)),
             ]
-            with patch("planetes.calibration.flat.trace_spectrum", side_effect=traces):
+            with patch("planetes.flat.trace_spectrum", side_effect=traces):
                 flat = compute_flat(dark, bpm, [image], n_outputs=2, profile_width=3.5)
             Y, X = np.indices((ny, nx))
             actual = extract_spec_sparse(
@@ -230,17 +226,14 @@ class CalibrationTests(unittest.TestCase):
     def test_newton_refinement_can_leave_coarse_initialization_bounds(self):
         from planetes.reduction import compute_gdelay
 
-        wave = np.linspace(1.15, 1.3, 151)
-        signal = np.exp(2j * np.pi * 2.0 / wave)[None]
-        actual = compute_gdelay(signal, wave, search_range=(0.0, 1.0))
-        np.testing.assert_allclose(actual, [2.0], atol=1e-8)
-        self.assertGreater(actual[0], 1.0)
+        wave = np.linspace(1.15e-6, 1.3e-6, 151)
+        signal = np.exp(2j * np.pi * 2e-6 / wave)[None]
+        actual = compute_gdelay(signal, wave, search_range=(0.0, 1e-6))
+        np.testing.assert_allclose(actual, [2e-6], atol=1e-14)
+        self.assertGreater(actual[0], 1e-6)
 
     def test_phase_dark_is_independent_from_main_dark(self):
         from p2vm_fixture import write_recipe_inputs
-
-        from planetes.products import wavelength_grid
-        from planetes.tasks import extract_calibration_files
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -263,7 +256,7 @@ class CalibrationTests(unittest.TestCase):
                 main,
                 telescope_flats=inputs["FLAT_RAW"],
                 baseline_cubes=inputs["P2VM_RAW"],
-                wavelength_um=wavelength_grid(),
+                wavelength_m=wavelength_grid(),
                 phase_reference=reference,
                 phase_dark=phase,
             )
@@ -322,10 +315,10 @@ class SetupAndQualityTests(unittest.TestCase):
         self.assertEqual(quality["dark_rms_median_adu"][0], 5.0)
         wave = replace(
             calibration_arrays(n_wave=15)[-1],
-            wavelength_map_um=np.vstack(
-                [np.linspace(1 + 0.001 * i, 2 + 0.001 * i, 15) for i in range(24)]
+            wavelength_map_m=np.vstack(
+                [np.linspace(1e-6 + 1e-9 * i, 2e-6 + 1e-9 * i, 15) for i in range(24)]
             ),
-            fit_residual_um=np.array([1.0, 2.0, 4.0]),
+            fit_residual_m=np.array([1e-6, 2e-6, 4e-6]),
             fit_x_pixels=np.arange(3.0),
             fit_y_pixels=np.arange(3.0),
         )
@@ -333,8 +326,10 @@ class SetupAndQualityTests(unittest.TestCase):
         quality, _ = measure_quality(wave)
         self.assertEqual(quality["wavelength_min_m"][0], 1.023 / 1e6)
         self.assertEqual(quality["wavelength_max_m"][0], 2.0 / 1e6)
-        self.assertAlmostEqual(quality["wavelength_residual_std_um"][0], np.sqrt(7 / 3))
-        _, missing = measure_quality(replace(wave, fit_residual_um=np.empty(0)))
+        self.assertAlmostEqual(
+            quality["wavelength_residual_std_m"][0], np.sqrt(7 / 3) * 1e-6
+        )
+        _, missing = measure_quality(replace(wave, fit_residual_m=np.empty(0)))
         self.assertIn("wavelength_residual_std", missing)
 
     def test_p2vm_coherence_qc_has_independent_normalization_and_quantiles(self):

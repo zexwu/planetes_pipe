@@ -1,17 +1,21 @@
 """Scientific arrays, units, axes and calibration relationships; no file or runner code."""
 
-from dataclasses import dataclass, field, fields
+import json
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from hashlib import sha256
 from itertools import combinations
 
 import numpy as np
 from numpy.typing import NDArray
 
-from .identity import CanonicalRepresentation, fingerprint
 from .instrument import (
+    ABCD_ORDER,
+    BASELINES,
     N_BASELINES,
     N_DATA,
     N_OUTPUTS,
     N_TELESCOPES,
+    TELESCOPES,
     DetectorSetup,
 )
 
@@ -33,9 +37,6 @@ class Provenance:
     dependencies: dict[str, str] = field(default_factory=dict)
     unverified: tuple[str, ...] = ()
     qc_status: dict[str, str] = field(default_factory=dict)
-    _encoding: CanonicalRepresentation | None = field(
-        default=None, repr=False, compare=False
-    )
 
 
 def provenance_field():
@@ -98,10 +99,10 @@ class FlatCalibration:
 class WavelengthCalibration:
     """Wavelength at each detector sample in the parent flat's extraction geometry."""
 
-    wavelength_map_um: Array = array("um", "output,detector_x")
-    fit_residual_um: Array = field(
+    wavelength_map_m: Array = array("m", "output,detector_x")
+    fit_residual_m: Array = field(
         default_factory=lambda: np.empty(0),
-        metadata={"unit": "um", "axes": "line"},
+        metadata={"unit": "m", "axes": "line"},
         kw_only=True,
     )
     fit_x_pixels: Array = field(
@@ -121,7 +122,7 @@ class WavelengthCalibration:
 class WavelengthReference:
     """Static laboratory wavelengths and per-line source labels."""
 
-    wavelength_um: Array = array("um", "wavelength")
+    wavelength_m: Array = array("m", "wavelength")
     origin: tuple[str, ...]
     provenance: Provenance = provenance_field()
 
@@ -131,14 +132,14 @@ class P2VMCalibration:
     """Full 24-output physical response, inverse matrix and retained fit diagnostics."""
 
     p2vm: Array = array("", "data_channel,output,wavelength")
-    wavelength_um: Array = array("um", "wavelength")
+    wavelength_m: Array = array("m", "wavelength")
     baseline_regions: dict[int, list[int]]
     baseline_telescopes: dict[int, tuple[int, int]]
     transmission: Array = array("", "output,telescope,wavelength")
     coherence_amplitude: Array = array("", "output,baseline,wavelength")
     coherence_phase_rad: Array = array("rad", "output,baseline,wavelength")
-    opd_um: Array = array("um", "baseline,frame")
-    group_delay_um: Array = array("um", "baseline,frame")
+    opd_m: Array = array("m", "baseline,frame")
+    group_delay_m: Array = array("m", "baseline,frame")
     ellipse_phase_rad: Array = array("rad", "baseline,frame,wavelength")
     ellipse_amplitude: Array = array("", "baseline,frame,wavelength")
     dc_term_adu: Array = field(
@@ -162,7 +163,7 @@ class VisibilityObservables:
     coherent_flux_adu: Array = array("adu", "frame,baseline,wavelength")
     visibility_amplitude: Array = array("", "frame,baseline,wavelength")
     flags: Array = array("", "frame,baseline,wavelength")
-    wavelength_um: Array = array("um", "wavelength")
+    wavelength_m: Array = array("m", "wavelength")
     baseline_regions: dict[int, list[int]]
     baseline_telescopes: dict[int, tuple[int, int]]
     provenance: Provenance = provenance_field()
@@ -172,7 +173,7 @@ class VisibilityObservables:
 class ReducedObservables(VisibilityObservables):
     """Complete instrumental science product, with measured GD and differential phase."""
 
-    group_delay_um: Array = array("um", "frame,baseline")
+    group_delay_m: Array = array("m", "frame,baseline")
     differential_phase_deg: Array = array("deg", "frame,baseline,wavelength")
 
 
@@ -185,7 +186,7 @@ class CalibrationSpectra:
     phase_reference: Array
     baseline_regions: dict[int, list[int]]
     baseline_telescopes: dict[int, tuple[int, int]]
-    wavelength_um: Array
+    wavelength_m: Array
     provenance: Provenance = provenance_field()
 
 
@@ -201,27 +202,6 @@ def validate_gd_range(search_range: tuple[float, float]) -> None:
     low, high = search_range
     if not np.isfinite([low, high, high - low]).all() or not low < high:
         raise ValueError("GD search requires finite lower < upper bounds")
-    if not np.isfinite(np.arange(low, high, 0.01)).all():
-        raise ValueError("GD coarse grid must be finite")
-
-
-def wavelength_grid(low=1.15, high=1.30, channels=151) -> Array:
-    """Construct the explicit P2VM grid, with enough central-band GD samples."""
-    positive(low, "wavelength minimum")
-    positive(high, "wavelength maximum")
-    if (
-        not low < high
-        or isinstance(channels, (bool, np.bool_))
-        or not isinstance(channels, (int, np.integer))
-    ):
-        raise ValueError(
-            "Wavelength grid requires minimum < maximum and integer channels"
-        )
-    if (3 * channels) // 4 - channels // 4 < 2:
-        raise ValueError("P2VM requires at least two central-band wavelength samples")
-    result = np.linspace(low, high, channels)
-    validate_wavelength(result)
-    return result
 
 
 def validate_wavelength(wave: Array) -> None:
@@ -248,38 +228,19 @@ def require_parent(child, role: str, parent) -> None:
 
 def validate(product) -> None:
     """Check scientific shapes, index safety and the fixed instrumental conventions."""
-    required = {
-        BadPixelMap: ("dark",),
-        FlatCalibration: ("dark", "bad"),
-        WavelengthCalibration: ("flat",),
-        P2VMCalibration: ("flat", "wave"),
+    critical = {
+        FlatCalibration: ("flat_map_adu", "trace_y_pixels"),
+        WavelengthCalibration: ("wavelength_map_m",),
+        P2VMCalibration: (
+            "p2vm",
+            "transmission",
+            "coherence_amplitude",
+            "coherence_phase_rad",
+        ),
     }
-    for role in required.get(type(product), ()):
-        value = product.provenance.dependencies.get(role, "")
-        if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
-            raise ValueError(
-                f"Missing scientific {role} dependency in {type(product).__name__}"
-            )
-    for item in fields(product):
-        if item.metadata:
-            value = getattr(product, item.name)
-            if not isinstance(value, np.ndarray) or value.ndim != len(
-                item.metadata["axes"].split(",")
-            ):
-                raise ValueError(
-                    f"Invalid axes for {item.name}: {item.metadata['axes']}"
-                )
-            if value.dtype.kind not in "fiucb":
-                raise ValueError(f"Non-numeric scientific array: {item.name}")
-            if not isinstance(product, VisibilityObservables) and (
-                np.iscomplexobj(value)
-                or (
-                    item.name != "profile_sigma_pixels" and not np.isfinite(value).all()
-                )
-            ):
-                raise ValueError(
-                    f"Calibration array must be finite and real: {item.name}"
-                )
+    for name in critical.get(type(product), ()):
+        if not np.isfinite(getattr(product, name)).all():
+            raise ValueError(f"Calibration array must be finite: {name}")
     if isinstance(product, (DarkImage, DarkCalibration)):
         shape = product.mean_adu.shape
         if not np.isfinite(product.mean_adu).all() or 0 in shape:
@@ -318,19 +279,6 @@ def validate(product) -> None:
             raise ValueError(
                 "Flat geometry must describe 24 outputs with matching X/Y indices"
             )
-        if product.profile_sigma_pixels.size and (
-            product.profile_sigma_pixels.shape != product.trace_y_pixels.shape
-            or np.isinf(product.profile_sigma_pixels).any()
-            or (
-                product.profile_sigma_pixels[np.isfinite(product.profile_sigma_pixels)]
-                <= 0
-            ).any()
-        ):
-            raise ValueError(
-                "Fitted profile sigma must match traces and be positive or NaN"
-            )
-        if product.telescope_flux_adu.size and product.telescope_flux_adu.shape != (4,):
-            raise ValueError("Flat flux must describe four telescopes")
         if xs.dtype.kind not in "iu" or ys.dtype.kind not in "iu":
             raise ValueError("Extraction indices must be integers")
         valid = (xs >= 0) & (ys >= 0)
@@ -342,50 +290,38 @@ def validate(product) -> None:
         ):
             raise ValueError("Invalid extraction indices or unpaired (-1,-1) sentinels")
     elif isinstance(product, WavelengthCalibration):
-        if product.wavelength_map_um.shape[0] != N_OUTPUTS:
+        if product.wavelength_map_m.shape[0] != N_OUTPUTS:
             raise ValueError("Wavelength map must describe 24 outputs")
-        validate_wavelength(product.wavelength_map_um)
-        if not (
-            product.fit_residual_um.shape
-            == product.fit_x_pixels.shape
-            == product.fit_y_pixels.shape
-        ):
-            raise ValueError(
-                "Wave fit residuals and coordinates must have matching lengths"
-            )
+        validate_wavelength(product.wavelength_map_m)
     elif isinstance(product, WavelengthReference):
-        validate_wavelength(product.wavelength_um)
-        if len(product.wavelength_um) < 3 or len(product.origin) != len(
-            product.wavelength_um
+        validate_wavelength(product.wavelength_m)
+        if len(product.wavelength_m) < 3 or len(product.origin) != len(
+            product.wavelength_m
         ):
             raise ValueError(
                 "Static wavelengths require matching source labels and >=3 lines"
             )
     elif isinstance(product, P2VMCalibration):
-        validate_wavelength(product.wavelength_um)
-        nw, nf = len(product.wavelength_um), product.opd_um.shape[1]
+        validate_wavelength(product.wavelength_m)
+        nw, nf = len(product.wavelength_m), product.opd_m.shape[1]
         expected = {
             "p2vm": (N_DATA, N_OUTPUTS, nw),
             "transmission": (N_OUTPUTS, N_TELESCOPES, nw),
             "coherence_amplitude": (N_OUTPUTS, N_BASELINES, nw),
             "coherence_phase_rad": (N_OUTPUTS, N_BASELINES, nw),
-            "opd_um": (N_BASELINES, nf),
-            "group_delay_um": (N_BASELINES, nf),
+            "opd_m": (N_BASELINES, nf),
+            "group_delay_m": (N_BASELINES, nf),
             "ellipse_phase_rad": (N_BASELINES, nf, nw),
             "ellipse_amplitude": (N_BASELINES, nf, nw),
         }
         for name, shape in expected.items():
             if getattr(product, name).shape != shape:
                 raise ValueError(f"Invalid {name} shape; expected {shape}")
-        for name in ("dc_term_adu", "fit_rms_adu"):
-            value = getattr(product, name)
-            if value.size and value.shape != (N_OUTPUTS, N_BASELINES, nw):
-                raise ValueError(f"Invalid {name} shape")
         _validate_baselines(product)
     elif isinstance(product, VisibilityObservables):
-        validate_wavelength(product.wavelength_um)
+        validate_wavelength(product.wavelength_m)
         nf, nt, nw = product.photometric_flux_adu.shape
-        if nt != N_TELESCOPES or nw != len(product.wavelength_um):
+        if nt != N_TELESCOPES or nw != len(product.wavelength_m):
             raise ValueError(
                 "Photometry must describe four telescopes on the wavelength grid"
             )
@@ -399,7 +335,7 @@ def validate(product) -> None:
                 "Visibility flags must be boolean and coherent flux complex"
             )
         if isinstance(product, ReducedObservables) and (
-            product.group_delay_um.shape != (nf, N_BASELINES)
+            product.group_delay_m.shape != (nf, N_BASELINES)
             or product.differential_phase_deg.shape != (nf, N_BASELINES, nw)
         ):
             raise ValueError("Invalid science GD/phase axes")
@@ -419,3 +355,47 @@ def _validate_baselines(product) -> None:
         x for row in rows for x in row
     ) != list(range(N_OUTPUTS)):
         raise ValueError("Each output must occur once in the six ABCD baselines")
+
+
+def fingerprint(product) -> str:
+    """Identify calibration contents and settings independently of paths and QC."""
+    digest = sha256()
+    info = {
+        "type": type(product).__name__,
+        "parameters": product.provenance.parameters,
+        "dependencies": product.provenance.dependencies,
+        "instrument": [TELESCOPES, BASELINES, ABCD_ORDER],
+    }
+    for item in fields(product):
+        if item.name == "provenance":
+            continue
+        value = getattr(product, item.name)
+        if item.metadata:
+            unit = item.metadata["unit"]
+            if item.metadata.get("offset"):
+                offset = item.metadata["offset"]
+                value = (
+                    np.where(value < 0, value, value + offset)
+                    if value.dtype.kind in "iu"
+                    else value + offset
+                )
+            values = np.ascontiguousarray(value, dtype=value.dtype.newbyteorder("<"))
+            info[item.name] = [
+                values.dtype.str,
+                values.shape,
+                unit,
+                item.metadata["axes"],
+            ]
+            digest.update(values.tobytes())
+        else:
+            info[item.name] = asdict(value) if is_dataclass(value) else value
+    digest.update(
+        json.dumps(
+            info,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+            default=lambda v: v.item(),
+        ).encode()
+    )
+    return digest.hexdigest()

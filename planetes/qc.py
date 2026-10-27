@@ -6,7 +6,6 @@ gravi_wave.c:2027-2045,2266; gravi_p2vm.c:1180-1303.
 
 import numpy as np
 
-from .calibration.p2vm import build_v2pm_matrix
 from .instrument import BASELINES, TELESCOPES
 from .products import (
     BadPixelMap,
@@ -106,31 +105,21 @@ def measure_quality(product):
                     "unavailable: fitted sigma not provided; aperture width is different"
                 )
     elif isinstance(product, WavelengthCalibration):
-        low = np.max(np.min(product.wavelength_map_um, axis=1))
-        high = np.min(np.max(product.wavelength_map_um, axis=1))
+        low = np.max(np.min(product.wavelength_map_m, axis=1))
+        high = np.min(np.max(product.wavelength_map_m, axis=1))
         for name, number in [("min", low), ("max", high)]:
             put(
                 f"wavelength_{name}_m",
-                number / 1e6,
+                number,
                 "[m] Coverage shared by every detector output",
             )
-            put(
-                f"wavelength_{name}_um",
-                number,
-                "[um] Coverage shared by every detector output",
-            )
-        residual = product.fit_residual_um
+        residual = product.fit_residual_m
         if residual.size >= 2:
             rms = np.std(residual, ddof=1)
             put(
                 "wavelength_residual_std_m",
-                rms / 1e6,
-                f"[m] Sample stdev of accepted lamp fit residuals; N={len(residual)}",
-            )
-            put(
-                "wavelength_residual_std_um",
                 rms,
-                f"[um] Sample stdev of accepted lamp fit residuals; N={len(residual)}",
+                f"[m] Sample stdev of accepted lamp fit residuals; N={len(residual)}",
             )
         else:
             missing["wavelength_residual_std"] = (
@@ -221,16 +210,11 @@ def measure_quality(product):
 
 
 def diagnostics(product):
-    """Explicit project diagnostics, not advertised as GRAVITY/ESO QC keywords."""
+    """Stored inverse condition and channel statistics; no ESO QC keyword mapping."""
     if isinstance(product, P2VMCalibration):
-        matrix = build_v2pm_matrix(
-            product.transmission,
-            product.coherence_amplitude,
-            product.coherence_phase_rad,
-        )
         return {
             "p2vm_condition_max": float(
-                np.max(np.linalg.cond(np.moveaxis(matrix, -1, 0)))
+                np.max(np.linalg.cond(np.moveaxis(product.p2vm, -1, 0)))
             )
         }
     if isinstance(product, VisibilityObservables):

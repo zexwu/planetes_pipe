@@ -3,12 +3,12 @@
 from cpl import ui
 
 from planetes import __version__
+from planetes.dark import PARAMETERS, calibrate_dark_file
 from planetes.recipes.dfs import (
     save_products,
     select_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
-from planetes.tasks import calibrate_dark_file
 
 
 class PlanetesDark(ui.PyRecipe):
@@ -24,10 +24,10 @@ class PlanetesDark(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = make_parameters("dark", calibrate_dark_file)
+        self.parameters = make_parameters(PARAMETERS, calibrate_dark_file)
 
     def run(self, frameset, settings):
-        options = read_parameters(self, settings)
+        options = read_parameters(self, settings, PARAMETERS)
         paths, _, used = select_inputs(frameset, {"DARK_RAW": None})
         dark, bad = calibrate_dark_file(paths["DARK_RAW"], **options)
         return save_products(

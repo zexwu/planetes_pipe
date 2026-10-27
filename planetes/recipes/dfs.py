@@ -13,13 +13,11 @@ from planetes.io.fits import (
 )
 from planetes.io.keywords import CATEGORIES, PRO_CATEGORY
 from planetes.io.publication import destinations
-from planetes.io.raw import read_raw_metadata
 from planetes.products import (
     P2VMCalibration,
     ReducedObservables,
     WavelengthCalibration,
     WavelengthReference,
-    validate,
 )
 
 RAW_INPUT_COUNTS = {"FLAT_RAW": 4, "P2VM_RAW": 6}
@@ -40,7 +38,7 @@ def cpl_frame_type(cls):
 
 
 def select_inputs(frameset, required, optional=None):
-    """Repeated raw categories are legal; their physical identity is read from headers."""
+    """Select SOF roles and load products; each step checks its raw metadata."""
     optional = {} if optional is None else optional
     roles = {**required, **optional}
     grouped = {}
@@ -64,17 +62,8 @@ def select_inputs(frameset, required, optional=None):
             )
         paths[role] = entries if role in RAW_INPUT_COUNTS else entries[0]
         for path in entries:
-            if allowed is None:
-                metadata = read_raw_metadata(path)
-                if role != "PHASE_REFERENCE" and metadata.category != role:
-                    raise ValueError(f"Raw category disagrees with SOF tag {role}")
-                if role == "PHASE_REFERENCE" and metadata.category != "SINGLE_SCI_RAW":
-                    raise ValueError(
-                        "Phase reference requires an explicitly classified all-open interferometric raw"
-                    )
-            else:
-                product = read_product(path, allowed)
-                objects[role] = product
+            if allowed is not None:
+                objects[role] = read_product(path, allowed)
             used.append(
                 ui.Frame(
                     file=str(path),
@@ -92,7 +81,6 @@ def save_products(outputs, used, recipe):
     """Sign all outputs before publication; rollback only newly owned links on failure."""
     prepared = []
     for output, product in outputs:
-        validate(product)
         product = replace(
             product,
             provenance=replace(product.provenance, producer=f"pyesorex:{recipe.name}"),

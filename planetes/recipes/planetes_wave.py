@@ -13,7 +13,11 @@ from planetes.recipes.dfs import (
     select_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
-from planetes.tasks import calibrate_wavelength_file, wavelength_reference_path
+from planetes.wavelength import (
+    PARAMETERS,
+    calibrate_wavelength_file,
+    wavelength_reference_path,
+)
 
 
 class PlanetesWave(ui.PyRecipe):
@@ -29,10 +33,10 @@ class PlanetesWave(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = make_parameters("wave", calibrate_wavelength_file)
+        self.parameters = make_parameters(PARAMETERS, calibrate_wavelength_file)
 
     def run(self, frameset, settings):
-        options = read_parameters(self, settings)
+        options = read_parameters(self, settings, PARAMETERS)
         frames = ui.FrameSet(list(frameset))
         if not any(frame.tag == "LINE_LIST" for frame in frames):
             frames.append(

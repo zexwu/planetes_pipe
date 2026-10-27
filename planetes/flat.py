@@ -1,24 +1,80 @@
-"""Detector-map and trace calculations on in-memory arrays."""
+"""FLAT step: telescope inputs, extraction aperture, detector response and traces."""
+
+from dataclasses import replace
 
 import numpy as np
 from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks, medfilt
 
-from .. import log
-from ..identity import fingerprint
-from ..instrument import N_OUTPUTS
-from ..products import (
+from . import log
+from .dark import frame_mean
+from .instrument import N_OUTPUTS, TELESCOPES, check_setup
+from .io.raw import (
+    check_raw_calibrations,
+    identify_raw,
+    iter_raw_cube,
+    read_raw_metadata,
+)
+from .products import (
     BadPixelMap,
     DarkCalibration,
     FlatCalibration,
     Provenance,
+    fingerprint,
     positive,
     require_parent,
     validate,
 )
 
+PARAMETERS = {
+    "profile_width": (
+        "planetes.calib.profile-width",
+        "profile-width",
+        "Full extraction aperture in detector pixels",
+    )
+}
+
 PROFILE_WIDTH = 10.0
+
+
+def calibrate_flat_file(
+    telescope_flats,
+    dark: DarkCalibration,
+    bad: BadPixelMap,
+    *,
+    profile_width: float = PROFILE_WIDTH,
+) -> FlatCalibration:
+    """Resolve four FLAT_RAW shutters and return geometry, without saving products."""
+
+    telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
+    unknown = []
+    maps = []
+    setup = read_raw_metadata(telescope_flats[TELESCOPES[0]]).setup
+    for name in TELESCOPES:
+        unknown.extend(check_raw_calibrations(telescope_flats[name], dark))
+
+        unknown.extend(
+            check_setup(
+                read_raw_metadata(telescope_flats[name]).setup,
+                setup,
+                exposure=False,
+                role="flat sequence",
+            )
+        )
+        maps.append(frame_mean(iter_raw_cube(telescope_flats[name])) - dark.mean_adu)
+    result = compute_flat(dark, bad, maps, profile_width=profile_width)
+    return replace(
+        result,
+        setup=setup,
+        provenance=replace(
+            result.provenance,
+            inputs={
+                f"flat_raw_T{name}": str(telescope_flats[name]) for name in TELESCOPES
+            },
+            unverified=tuple(sorted(set(unknown))),
+        ),
+    )
 
 
 def compute_flat(
@@ -34,7 +90,6 @@ def compute_flat(
         raise ValueError(
             "Flat construction requires complete dark RMS/bad-pixel calibration"
         )
-    validate(dark)
     validate(bad)
     require_parent(bad, "dark", dark)
     if bad.bad_pixel_flags.shape != dark.mean_adu.shape:

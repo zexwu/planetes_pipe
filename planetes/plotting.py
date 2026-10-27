@@ -39,7 +39,7 @@ def plot_reduced(
     visibility_amplitude = reduced.visibility_amplitude
     flags = reduced.flags
     differential_phase_deg = reduced.differential_phase_deg
-    group_delay_um = reduced.group_delay_um
+    group_delay_m = reduced.group_delay_m
 
     log.info(f"--- Step: PLOTTING {object_label} ---")
 
@@ -130,11 +130,11 @@ def plot_reduced(
                 2,
                 N_BASELINES // 2,
                 xlabel="#Frame",
-                ylabel="Group Delay [um]",
+                ylabel="Group Delay [m]",
                 sharey=False,
             )
             for baseline in range(N_BASELINES):
-                axes[baseline].plot(group_delay_um[:, baseline])
+                axes[baseline].plot(group_delay_m[:, baseline])
                 axes[baseline].set_title(f"Baseline {BASELINES[baseline]}")
             fig.suptitle(f"{object_label}\nGroup Delay per baseline")
             save(fig)
@@ -161,13 +161,13 @@ def plot_reduced(
                 fig, axes = genfig(
                     2,
                     N_BASELINES // 2,
-                    xlabel="Group Delay [um]",
+                    xlabel="Group Delay [m]",
                     ylabel="Differential Phase [deg]",
                     sharex=False,
                 )
                 for baseline in range(N_BASELINES):
                     axes[baseline].scatter(
-                        group_delay_um[:, baseline],
+                        group_delay_m[:, baseline],
                         differential_phase_deg[:, baseline, wavelength],
                         s=5,
                         alpha=0.7,

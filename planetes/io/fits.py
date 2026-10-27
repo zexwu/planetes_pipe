@@ -1,4 +1,4 @@
-"""Raw and science FITS with GRAVITY-derived vocabulary; no execution framework."""
+"""Science-product FITS with GRAVITY-derived vocabulary and metre-valued arrays."""
 
 from dataclasses import asdict
 from pathlib import Path
@@ -7,7 +7,6 @@ import numpy as np
 from astropy.io import fits as afits
 
 from .. import __version__
-from ..identity import canonical_quantities, fingerprint, retain_representation
 from ..instrument import ABCD_ORDER, BASELINES, TELESCOPES, DetectorSetup
 from ..products import (
     BadPixelMap,
@@ -18,6 +17,7 @@ from ..products import (
     ReducedObservables,
     WavelengthCalibration,
     WavelengthReference,
+    fingerprint,
     validate,
 )
 from . import keywords as kw
@@ -78,7 +78,7 @@ def encode_product(product, header=None):
         if key.startswith("ESO DPR "):
             del h[key]
     h["INSTRUME"] = "PLANETES"
-    h["HIERARCH " + kw.FORMAT_KEY] = kw.SCHEMA_VERSION
+    h["HIERARCH " + kw.FORMAT_KEY] = kw.PRODUCT_FORMAT
     h["HIERARCH " + kw.HASH_KEY] = fingerprint(product)
     h["HIERARCH ESO PRO CATG"] = CATEGORIES[type(product)]
     h["HIERARCH ESO PRO TYPE"] = (
@@ -98,10 +98,13 @@ def encode_product(product, header=None):
                 else kw.UIT
             )
             h["HIERARCH " + key] = (setup.exposure_s, "[s] Source in PLANETES_META")
-    canonical = canonical_quantities(product)
 
-    def value(name):
-        return canonical.get(name, getattr(product, name))
+    def one_based_pixels(values):
+        return (
+            np.where(values < 0, values, values + 1)
+            if values.dtype.kind in "iu"
+            else values + 1
+        )
 
     hdus = [afits.PrimaryHDU(header=h)]
     if isinstance(product, DarkCalibration):
@@ -122,7 +125,7 @@ def encode_product(product, header=None):
         ]
         columns = [
             _column("REGNAME", hdus[1].data["REGNAME"]),
-            _column("CENTERY", value("trace_y_pixels"), "pixel"),
+            _column("CENTERY", one_based_pixels(product.trace_y_pixels), "pixel"),
         ]
         if product.profile_sigma_pixels.size:
             columns.append(_column("WIDTH", product.profile_sigma_pixels, "pixel"))
@@ -131,8 +134,12 @@ def encode_product(product, header=None):
             _table(
                 kw.SPARSE_PROFILE,
                 [
-                    _column("PIXEL_X", value("profile_x_pixels"), "pixel"),
-                    _column("PIXEL_Y", value("profile_y_pixels"), "pixel"),
+                    _column(
+                        "PIXEL_X", one_based_pixels(product.profile_x_pixels), "pixel"
+                    ),
+                    _column(
+                        "PIXEL_Y", one_based_pixels(product.profile_y_pixels), "pixel"
+                    ),
                 ],
             ),
         ]
@@ -145,16 +152,16 @@ def encode_product(product, header=None):
                 kw.WAVE_DATA,
                 [
                     _column(f"DATA{i+1}", row[None], "m")
-                    for i, row in enumerate(value("wavelength_map_um"))
+                    for i, row in enumerate(product.wavelength_map_m)
                 ],
             ),
         ]
-        if product.fit_residual_um.size:
+        if product.fit_residual_m.size:
             hdus.append(
                 _table(
                     kw.WAVE_FIT,
                     [
-                        _column("RESIDUAL", value("fit_residual_um"), "m"),
+                        _column("RESIDUAL", product.fit_residual_m, "m"),
                         _column("X", product.fit_x_pixels, "pixel"),
                         _column("Y", product.fit_y_pixels, "pixel"),
                     ],
@@ -165,7 +172,7 @@ def encode_product(product, header=None):
             _table(
                 kw.LINE_LIST,
                 [
-                    _column("WAVELENGTH", value("wavelength_um"), "m"),
+                    _column("WAVELENGTH", product.wavelength_m, "m"),
                     _column("ORIGIN", np.asarray(product.origin)),
                 ],
             )
@@ -175,7 +182,7 @@ def encode_product(product, header=None):
             _detector(product),
             _table(
                 kw.WAVELENGTH,
-                [_column("WAVELENGTH", value("wavelength_um"), "m")],
+                [_column("WAVELENGTH", product.wavelength_m, "m")],
             ),
         ]
         if isinstance(product, P2VMCalibration):
@@ -190,14 +197,14 @@ def encode_product(product, header=None):
             hdus.append(_table(kw.P2VM_DATA, columns))
             for name, ext, unit in [
                 ("p2vm", kw.P2VM_INVERSE, ""),
-                ("opd_um", kw.OPD, "m"),
-                ("group_delay_um", kw.GROUP_DELAY, "m"),
+                ("opd_m", kw.OPD, "m"),
+                ("group_delay_m", kw.GROUP_DELAY, "m"),
                 ("ellipse_phase_rad", kw.ELLIPSE_PHASE, "rad"),
                 ("ellipse_amplitude", kw.ELLIPSE_AMPLITUDE, ""),
                 ("fit_rms_adu", kw.P2VM_FIT_RMS, "adu"),
             ]:
-                if value(name).size:
-                    hdus.append(_image(ext, value(name), unit))
+                if getattr(product, name).size:
+                    hdus.append(_image(ext, getattr(product, name), unit))
         else:
             nf, _, nw = product.photometric_flux_adu.shape
             hdus += [
@@ -233,7 +240,7 @@ def encode_product(product, header=None):
                         ),
                         _column("VISAMP", product.visibility_amplitude.reshape(-1, nw)),
                         _column("FLAG", product.flags.reshape(-1, nw)),
-                        _column("GDELAY", value("group_delay_um").reshape(-1), "m"),
+                        _column("GDELAY", product.group_delay_m.reshape(-1), "m"),
                         _column(
                             "DIFFPHASE",
                             product.differential_phase_deg.reshape(-1, nw),
@@ -264,6 +271,16 @@ def encode_product(product, header=None):
     quality, missing = measure_quality(product)
     for metric, (number, comment) in quality.items():
         hdus[0].header["HIERARCH " + kw.QC_KEYWORDS[metric]] = (number, comment)
+        if metric in (
+            "wavelength_min_m",
+            "wavelength_max_m",
+            "wavelength_residual_std_m",
+        ):
+            key = kw.QC_KEYWORDS[metric].replace(" SC", " UM SC")
+            hdus[0].header["HIERARCH " + key] = (
+                number * 1e6,
+                comment.replace("[m]", "[um]"),
+            )
     metadata["provenance"]["qc_status"] = {
         **info["qc_status"],
         **{
@@ -279,9 +296,9 @@ def read_product(path: Path, cls=None):
     """Verify checksums, physical units/identities and canonical content before use."""
     with afits.open(path, checksum=True) as hdus:
         h = hdus[0].header
-        if h.get(kw.FORMAT_KEY) != kw.SCHEMA_VERSION or h.get("INSTRUME") != "PLANETES":
+        if h.get(kw.FORMAT_KEY) != kw.PRODUCT_FORMAT or h.get("INSTRUME") != "PLANETES":
             raise ValueError(
-                "Expected new PLANETES format; regenerate old v0.3/schema-2 products"
+                f"Expected PLANETES product format {kw.PRODUCT_FORMAT}; regenerate earlier products"
             )
         actual = {v: k for k, v in CATEGORIES.items()}.get(h.get(kw.PRO_CATEGORY))
         if actual is None or (cls is not None and actual is not cls):
@@ -291,7 +308,6 @@ def read_product(path: Path, cls=None):
         info = meta["provenance"]
         info["unverified"] = tuple(info.get("unverified", ()))
         values = {"provenance": Provenance(**info)}
-        canonical = {}
 
         def image(ext, unit):
             item = hdus[ext]
@@ -309,15 +325,12 @@ def read_product(path: Path, cls=None):
                     raise ValueError("Invalid FITS logical flag encoding")
             return _native(table.data[name])
 
-        def quantity(name, v, *, offset=0):
-            canonical[name] = v
-            if offset:
-                return (
-                    np.where(v < 0, v, v - offset)
-                    if v.dtype.kind in "iu"
-                    else v - offset
-                )
-            return v * 1e6
+        def zero_based_pixels(values):
+            return (
+                np.where(values < 0, values, values - 1)
+                if values.dtype.kind in "iu"
+                else values - 1
+            )
 
         if actual is DarkCalibration:
             values.update(
@@ -332,20 +345,14 @@ def read_product(path: Path, cls=None):
         elif actual is FlatCalibration:
             values.update(
                 flat_map_adu=image(kw.FLAT_IMAGE, "adu"),
-                trace_y_pixels=quantity(
-                    "trace_y_pixels",
-                    column(kw.PROFILE_PARAMS, "CENTERY", "pixel"),
-                    offset=1,
+                trace_y_pixels=zero_based_pixels(
+                    column(kw.PROFILE_PARAMS, "CENTERY", "pixel")
                 ),
-                profile_x_pixels=quantity(
-                    "profile_x_pixels",
-                    column(kw.SPARSE_PROFILE, "PIXEL_X", "pixel"),
-                    offset=1,
+                profile_x_pixels=zero_based_pixels(
+                    column(kw.SPARSE_PROFILE, "PIXEL_X", "pixel")
                 ),
-                profile_y_pixels=quantity(
-                    "profile_y_pixels",
-                    column(kw.SPARSE_PROFILE, "PIXEL_Y", "pixel"),
-                    offset=1,
+                profile_y_pixels=zero_based_pixels(
+                    column(kw.SPARSE_PROFILE, "PIXEL_Y", "pixel")
                 ),
             )
             if "WIDTH" in hdus[kw.PROFILE_PARAMS].columns.names:
@@ -355,31 +362,22 @@ def read_product(path: Path, cls=None):
             if kw.FLAT_FLUX in hdus:
                 values["telescope_flux_adu"] = image(kw.FLAT_FLUX, "adu")
         elif actual is WavelengthCalibration:
-            values["wavelength_map_um"] = quantity(
-                "wavelength_map_um",
-                np.stack(
-                    [column(kw.WAVE_DATA, f"DATA{i+1}", "m")[0] for i in range(24)]
-                ),
+            values["wavelength_map_m"] = np.stack(
+                [column(kw.WAVE_DATA, f"DATA{i+1}", "m")[0] for i in range(24)]
             )
             if kw.WAVE_FIT in hdus:
                 values.update(
-                    fit_residual_um=quantity(
-                        "fit_residual_um", column(kw.WAVE_FIT, "RESIDUAL", "m")
-                    ),
+                    fit_residual_m=column(kw.WAVE_FIT, "RESIDUAL", "m"),
                     fit_x_pixels=column(kw.WAVE_FIT, "X", "pixel"),
                     fit_y_pixels=column(kw.WAVE_FIT, "Y", "pixel"),
                 )
         elif actual is WavelengthReference:
             values.update(
-                wavelength_um=quantity(
-                    "wavelength_um", column(kw.LINE_LIST, "WAVELENGTH", "m")
-                ),
+                wavelength_m=column(kw.LINE_LIST, "WAVELENGTH", "m"),
                 origin=tuple(str(v).strip() for v in hdus[kw.LINE_LIST].data["ORIGIN"]),
             )
         else:
-            values["wavelength_um"] = quantity(
-                "wavelength_um", column(kw.WAVELENGTH, "WAVELENGTH", "m")
-            )
+            values["wavelength_m"] = column(kw.WAVELENGTH, "WAVELENGTH", "m")
             labels = list(hdus[kw.DETECTOR_DATA].data["REGNAME"])
             values["baseline_regions"] = {
                 i: [labels.index(name + "-" + a) for a in ABCD_ORDER]
@@ -401,17 +399,17 @@ def read_product(path: Path, cls=None):
                     values["dc_term_adu"] = column(kw.P2VM_DATA, "C_MATRIX", "adu")
                 for name, ext, unit in [
                     ("p2vm", kw.P2VM_INVERSE, ""),
-                    ("opd_um", kw.OPD, "m"),
-                    ("group_delay_um", kw.GROUP_DELAY, "m"),
+                    ("opd_m", kw.OPD, "m"),
+                    ("group_delay_m", kw.GROUP_DELAY, "m"),
                     ("ellipse_phase_rad", kw.ELLIPSE_PHASE, "rad"),
                     ("ellipse_amplitude", kw.ELLIPSE_AMPLITUDE, ""),
                     ("fit_rms_adu", kw.P2VM_FIT_RMS, "adu"),
                 ]:
                     if ext in hdus:
                         v = image(ext, unit)
-                        values[name] = quantity(name, v) if unit == "m" else v
+                        values[name] = v if unit == "m" else v
             else:
-                nw = len(values["wavelength_um"])
+                nw = len(values["wavelength_m"])
                 nf = len(hdus[kw.SCIENCE_FLUX].data) // 4
                 for ext, count in [(kw.SCIENCE_FLUX, 4), (kw.SCIENCE_VISIBILITY, 6)]:
                     if not np.array_equal(
@@ -441,9 +439,8 @@ def read_product(path: Path, cls=None):
                         kw.SCIENCE_VISIBILITY, "VISAMP"
                     ).reshape(nf, 6, nw),
                     flags=column(kw.SCIENCE_VISIBILITY, "FLAG").reshape(nf, 6, nw),
-                    group_delay_um=quantity(
-                        "group_delay_um",
-                        column(kw.SCIENCE_VISIBILITY, "GDELAY", "m").reshape(nf, 6),
+                    group_delay_m=column(kw.SCIENCE_VISIBILITY, "GDELAY", "m").reshape(
+                        nf, 6
                     ),
                     differential_phase_deg=column(
                         kw.SCIENCE_VISIBILITY, "DIFFPHASE", "deg"
@@ -466,7 +463,7 @@ def read_product(path: Path, cls=None):
             )
             if h.get(key) != setup.exposure_s:
                 raise ValueError("Product exposure and header disagree")
-        product = retain_representation(actual(**values), canonical)
+        product = actual(**values)
         validate(product)
         if fingerprint(product) != h.get(kw.HASH_KEY):
             raise ValueError("Scientific content fingerprint mismatch")

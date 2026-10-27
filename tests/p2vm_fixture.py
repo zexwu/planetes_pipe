@@ -5,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 
-from planetes.identity import fingerprint
 from planetes.instrument import BASELINES, TELESCOPES, DetectorSetup
 from planetes.io.fits import write_product
 from planetes.io.raw import RawMetadata, write_raw
@@ -15,12 +14,13 @@ from planetes.products import (
     FlatCalibration,
     Provenance,
     WavelengthCalibration,
+    fingerprint,
 )
 
 
 def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
     """Return noiseless ABCD spectra with known beam identities and optical paths."""
-    wavelength = np.linspace(1.15, 1.30, n_wave)
+    wavelength = np.linspace(1.15e-6, 1.30e-6, n_wave)
     telescope_pairs = dict(enumerate(combinations(range(4), 2)))
     regions = {
         baseline: list(range(4 * baseline, 4 * baseline + 4)) for baseline in range(6)
@@ -29,9 +29,9 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
     baseline = np.zeros((6, 24, n_frame, n_wave))
     phase_reference = np.full((24, n_frame, n_wave), 1000.0)
     abcd_phase = np.array([0.0, np.pi, np.pi / 2, 3 * np.pi / 2])
-    scan = np.linspace(-7.0, 7.0, n_frame)
+    scan = np.linspace(-7e-6, 7e-6, n_frame)
     time = np.linspace(-1.0, 1.0, n_frame)
-    optical_paths = np.array([0.0, 1.0, 1.8, 3.0])[:, None] * time
+    optical_paths = np.array([0.0, 1e-6, 1.8e-6, 3e-6])[:, None] * time
     for index, (first, second) in telescope_pairs.items():
         output = regions[index]
         telescope[first, output] = 500.0
@@ -55,7 +55,7 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
         n_frame,
         setup=setup(n_wave),
     )
-    from planetes.calibration.dark import compute_badpix
+    from planetes.dark import compute_badpix
 
     bad = compute_badpix(dark)
     flat = FlatCalibration(
@@ -69,7 +69,7 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
         ),
     )
     wave = WavelengthCalibration(
-        wavelength_map_um=np.tile(wavelength, (24, 1)),
+        wavelength_map_m=np.tile(wavelength, (24, 1)),
         provenance=Provenance(dependencies={"flat": fingerprint(flat)}),
     )
     return (

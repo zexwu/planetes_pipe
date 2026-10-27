@@ -7,30 +7,29 @@
 -from dataclasses import dataclass
 +from dataclasses import dataclass, replace
  from pathlib import Path
- 
+
  import numpy as np
-@@ -55,8 +55,9 @@
- 
+@@ -56,7 +56,9 @@
  from camview import INIT_REFRESH_RATE, MainWindow, TestbedProxy, rebin
  from planetes.reduction import FrameReducer
--from planetes.dark import load_dark
+ from planetes.dark import load_dark
 -from planetes.models import DarkImage
-+from planetes.tasks import load_dark, load_reducer
++from planetes.reduction import load_reducer
 +from planetes.products import DarkImage
 +from scripts import utils as capture_utils
  from planetes.instrument import BASELINES, ABCD_ORDER
- 
- 
-@@ -282,6 +283,7 @@
- 
+
+
+@@ -282,6 +284,7 @@
+
          camera_widget = self.takeCentralWidget()
          self._add_p2vm_camera_controls(camera_widget)
 +        self._add_capture_metadata_controls()
          self.tabs = QtWidgets.QTabWidget()
          self.camera_tab_index = self.tabs.addTab(camera_widget, "Camera")
          self.visibility_tab_index = self.tabs.addTab(
-@@ -295,6 +297,94 @@
- 
+@@ -295,6 +298,94 @@
+
          self._add_calibration_overlays()
          self.p2vm_ready = True
 +
@@ -121,10 +120,28 @@
 +            if not self.captureTimer.isActive():
 +                for control in self._fixed_capture_controls():
 +                    control.setEnabled(True)
- 
+
      def _add_p2vm_camera_controls(self, camera_widget: QtWidgets.QWidget) -> None:
          """Add unified dark-source and overlay controls below the Camera tab.
-@@ -600,7 +690,7 @@
+@@ -403,14 +494,14 @@
+         self.visibility_curves = []
+         self.visibility_value_labels = []
+         colors = _plot_colors(self.reducer.n_baselines)
+-        wl_min = float(self.reducer.wavelength_um.min())
+-        wl_max = float(self.reducer.wavelength_um.max())
++        wl_min = float(self.reducer.wavelength_m.min())
++        wl_max = float(self.reducer.wavelength_m.max())
+         wl_span = wl_max - wl_min
+
+         for bsl in range(self.reducer.n_baselines):
+             row, col = divmod(bsl, 3)
+             plot = self.visibility_grid.addPlot(row=row, col=col)
+-            plot.setLabel("bottom", "Wavelength", units="um")
++            plot.setLabel("bottom", "Wavelength", units="m")
+             plot.setLabel("left", "VISAMP")
+             plot.setTitle(f"Baseline {BASELINE_NAMES[bsl]}")
+             plot.showGrid(x=True, y=True, alpha=0.25)
+@@ -600,7 +691,7 @@
      def _load_reducer_dir(self, path: Path) -> None:
          """Load a new reducer and refresh all calibration-dependent UI state."""
          try:
@@ -133,12 +150,53 @@
          except Exception as exc:
              self.p2vm_ready = False
              self._clear_current_visibility()
-@@ -1129,7 +1219,7 @@
+@@ -643,8 +734,8 @@
+
+     def _reset_visibility_axes(self) -> None:
+         """Update wavelength-axis limits after loading a new P2VM directory."""
+-        wl_min = float(self.reducer.wavelength_um.min())
+-        wl_max = float(self.reducer.wavelength_um.max())
++        wl_min = float(self.reducer.wavelength_m.min())
++        wl_max = float(self.reducer.wavelength_m.max())
+         wl_span = wl_max - wl_min
+         for plot in self.visibility_plots:
+             plot.getViewBox().setRange(
+@@ -814,7 +905,7 @@
+             return
+
+         for bsl, curve in enumerate(self.visibility_curves):
+-            curve.setData(self.reducer.wavelength_um, self.latest_visamp[bsl])
++            curve.setData(self.reducer.wavelength_m, self.latest_visamp[bsl])
+
+         for bsl, value_label in enumerate(self.visibility_value_labels):
+             plot = self.visibility_plots[bsl]
+@@ -992,9 +1083,9 @@
+             self.p2vm_overlay_items.append(text)
+
+         height = float(self.reducer.extractor.detector_shape[0])
+-        mean_wave = np.nanmean(self.reducer.extractor.wavelength_map_um, axis=0)
++        mean_wave = np.nanmean(self.reducer.extractor.wavelength_map_m, axis=0)
+         for wave in np.linspace(
+-            self.reducer.wavelength_um.min(), self.reducer.wavelength_um.max(), 5
++            self.reducer.wavelength_m.min(), self.reducer.wavelength_m.max(), 5
+         ):
+             x = int(np.nanargmin(np.abs(mean_wave - wave)))
+             pen = pg.mkPen(
+@@ -1005,7 +1096,7 @@
+             self.p2vm_overlay_items.append(line)
+
+             text = pg.TextItem(
+-                text=f"{wave:.3f} um",
++                text=f"{wave:.3e} m",
+                 color=(230, 230, 230),
+                 anchor=(0.5, 0),
+             )
+@@ -1129,7 +1220,7 @@
      app = QtWidgets.QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
      _set_dark_palette(app)
- 
+
 -    reducer = FrameReducer.from_directory(config.reduced_dir)
 +    reducer = load_reducer(config.reduced_dir)
      cam, source_label = _make_camera(config)
- 
+
      if config.source == "bench":

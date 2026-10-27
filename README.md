@@ -1,8 +1,8 @@
-# PLANETES pipeline 0.4.1
+# PLANETES pipeline 0.5.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
-Python, PyEsoRex and the Qt6 bench viewer share the same scientific tasks and
-single-frame kernels. File tasks return typed objects; saving is explicit in
+Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
+single-frame kernels. File entry points return typed objects; saving is explicit in
 Python. Raw data are read only, and product writers refuse existing destinations.
 
 ## Install
@@ -46,7 +46,7 @@ identified by physical shutter metadata, independently of order and filenames.
 | `planetes_p2vm` | `DARK`, `FLAT`, `WAVE`, `FLAT_RAW` × 4, `P2VM_RAW` × 6 | `PHASE_REFERENCE`, `PHASE_DARK_CALIB` | `planetes_p2vm.fits` |
 | `planetes_reduce` | `DARK`, `FLAT`, `WAVE`, `P2VM`, `SINGLE_SCI_RAW` | — | `planetes_reduced.fits` |
 
-All formal file tasks require a complete DARK with measured temporal RMS and at
+All file entry points require a complete DARK with measured temporal RMS and at
 least two frames. BAD is independent and records its actual parent DARK. Generate
 separate darks for main calibration, lamp and science where appropriate. Known
 exposure/ROI/detector conflicts fail before subtraction; explicitly legacy unknown
@@ -63,7 +63,7 @@ Parameters use the same defaults and validation in Python and ESO. For example:
 
 ```bash
 pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes/recipes planetes_p2vm \
-  --phase-correction=true --wavelength-min-um=1.15 --wavelength-max-um=1.30 \
+  --phase-correction=true --wavelength-min-m=1.15e-6 --wavelength-max-m=1.30e-6 \
   --wavelength-channels=151 /absolute/path/to/p2vm.sof
 ```
 
@@ -74,10 +74,11 @@ PyEsoRex can save its own `.rc` parameter file; a project YAML is unnecessary.
 
 ```python
 from pathlib import Path
-from planetes.tasks import (
-    calibrate_dark_file, calibrate_flat_file, calibrate_wavelength_file,
-    calibrate_p2vm_file, reduce_file,
-)
+from planetes.dark import calibrate_dark_file
+from planetes.flat import calibrate_flat_file
+from planetes.wavelength import calibrate_wavelength_file
+from planetes.p2vm import calibrate_p2vm_file
+from planetes.reduction import reduce_file
 from planetes.io.fits import write_product
 
 raw = Path('/absolute/raw')
@@ -113,28 +114,38 @@ coverage or inconsistent flat/wave parents fails before processing.
 The actual Qt6 viewer integration, recovery instructions and fake-data launch
 are documented in [GUI integration](docs/GUI_INTEGRATION.md).
 
-## Organization and validation
+## Organization
+
+Each scientific step owns its file entry point, parameters, array calculation and
+local helper functions. Reading a step starts with `calibrate_*_file()` or
+`reduce_file()` at the top of that file; `compute_*()` / `reduce_spectra()` below
+it can also be called directly with arrays. Saving stays explicit.
 
 | Location | Responsibility |
 | --- | --- |
-| `calibration/` | Array-only dark, flat, wavelength and P2VM calculations |
-| `extraction.py`, `reduction.py` | Array-only extraction/resampling, instrumental observables and FrameReducer |
-| `tasks.py` | File tasks used by Python and recipes; load_reducer/load_dark for GUI setup |
-| `products.py` | Named calibration/results, array units/axes and scientific validation |
-| `instrument.py` | Fixed telescope/baseline/output conventions and physical DetectorSetup |
-| `identity.py` | Scientific fingerprints and private immutable canonical encoding |
-| `qc.py`, `plotting.py` | Numerical quality measurements and scientific plots |
-| `io/raw.py` | Classified raw FITS and acquisition metadata |
-| `io/fits.py` | Product FITS encoder/decoder |
-| `io/keywords.py` | FITS categories/extensions and scientific QC -> keyword mapping |
-| `io/hdu.py`, `io/publication.py` | Shared FITS primitives and verified non-overwriting publication |
-| `recipes/planetes_*.py` | Five discoverable PyEsoRex entry points |
-| `recipes/parameters.py`, `recipes/dfs.py` | CPL parameter translation, frames and DFS; all CPL imports stay here |
+| `dark.py` | DARK/BAD inputs, statistics, bad-pixel parameters and live dark loading |
+| `flat.py` | Four telescope inputs, aperture parameter, response and trace fitting |
+| `wavelength.py` | Lamp/reference inputs, line matching and wavelength surface fitting |
+| `p2vm.py` | Calibration sequence, target grid, output mapping and P2VM response fitting |
+| `reduction.py` | Science inputs, instrumental observables, GD and live FrameReducer |
+| `extraction.py` | Shared pixel extraction, wavelength resampling and chunked file extraction |
+| `products.py`, `instrument.py` | Named arrays, units/axes, parent fingerprints and fixed instrument conventions |
+| `qc.py`, `plotting.py` | Descriptive quality measurements and scientific plots |
+| `io/` | Raw metadata, product FITS layout, keywords and non-overwriting file publication |
+| `recipes/planetes_*.py` | SOF roles → step call → CPL DFS output registration |
+| `recipes/parameters.py`, `recipes/dfs.py` | Shared CPL translation only; every CPL import stays in recipes/ |
 
-Start with `tasks.py` to follow a complete file operation. For a numerical method,
-open the corresponding calibration module or extraction/reduction. For a FITS
-field, open `io/keywords.py` and `io/fits.py`. A recipe should only select inputs,
-translate parameters, call the shared task and register the result.
+There is one implementation per step. Python, GUI and PyEsoRex use those same
+functions. No task dispatcher, separate calibration layer or identity module is
+needed. CPL parameter spelling is declared in each step's `PARAMETERS` dictionary;
+Python function signatures supply the defaults. Importing or running a step does
+not require CPL or Qt.
+
+Wavelength, OPD and GD use **metres throughout Python and FITS**. Flux stays ADU,
+coherence phases use radians and differential phase uses degrees. Valid Python
+pixel indices are zero-based; the FITS boundary writes the GRAVITY one-based
+coordinates. GRAVITY's existing `... UM SC` QC cards are emitted alongside their
+metre equivalents at the file boundary.
 
 [Change report and diagrams](docs/CHANGE_REPORT.md) explain the migration and
 full-data evidence. [Scientific methods](docs/SCIENTIFIC_METHODS.md) describe retained numerical
@@ -151,24 +162,15 @@ Exact comparisons use the same numerical environment and matching Numba cache
 states: the old algorithm itself has a small cold/warm difference. Cache and
 fastmath settings are retained.
 
-Format 3 breaks v0.3/schema-2 FITS and Python APIs. Regenerate products from
-standardized raw copies; historical raw are never rewritten by the reader.
-[The product contract](docs/PRODUCT_CONTRACT.md) describes the strict new-acquisition
-metadata and the explicit legacy policy. [QC definitions](docs/QC_PARAMETERS.md)
-map applicable measurements to GRAVITY **1.9.6 source definitions**, with units,
-statistical domains and unavailable reasons. Necessary PLANETES fields are named
-explicitly; this does not make PLANETES output a GRAVITY-compatible product.
+Version 0.5.0 uses product format 4 and raw format 3. Regenerate earlier
+calibration/science products; existing standardized raw cubes remain usable.
+Python imports from `planetes.tasks`, `planetes.calibration` and
+`planetes.identity` are removed. Length fields and parameters now end in `_m`
+(and CLI aliases in `-m`). The old unit-conversion cache is removed.
+[The product contract](docs/PRODUCT_CONTRACT.md) defines the layouts and parameters.
+[QC definitions](docs/QC_PARAMETERS.md) map measurements to the checked GRAVITY
+1.9.6 source, with units and statistical domains.
 
 Outputs remain instrumental ADU, visibility amplitude, GD and differential phase.
 ESO dictionary approval, EDPS association, uncertainties, transfer functions,
 final OIFITS and Phase 3 acceptance remain subsequent work.
-
-Version 0.4.1 reorganizes Python imports and names without changing format 3 or
-scientific results; existing 0.4 format-3 products remain readable. Use file tasks
-from `planetes.tasks`, raw I/O from `planetes.io.raw`, and product I/O from
-`planetes.io.fits`. Old `planetes.eso`, `planetes.fits`, `planetes.models` and
-root-level calibration imports are removed. The clearer numerical names are
-`compute_wavelength`, `resample_spectra`, and `reduce_spectra`; the Python dark-task
-argument is `bad_pixel_threshold`. CPL names/aliases and scientific defaults stay
-unchanged. The private format-3 BAD provenance key `bad_threshold` is retained to
-preserve existing scientific fingerprints.

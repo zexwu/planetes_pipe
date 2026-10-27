@@ -1,11 +1,11 @@
-# Scientific methods in PLANETES 0.4.1
+# Scientific methods in PLANETES 0.5.0
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
-File tasks live in tasks.py. Numerical modules accept arrays and scientific objects,
-without FITS or CPL dependencies. Python recipes and the GUI share those calculations.
+Each step file contains its file entry point, parameters and array calculations.
+Python, PyEsoRex and the GUI call the same functions; CPL imports stay in recipes/.
 
-## Dark statistics (`calibration/dark.py`)
+## Dark statistics (`dark.py`)
 
 Read the complete raw stack, accumulate sum and squared sum in float64, and
 return float32 temporal mean and population RMS. The variance is
@@ -18,7 +18,7 @@ The default threshold remains 5. This RMS includes whatever temporal variations
 are present in the stack; it is not independently calibrated readout noise.
 A subtraction-only DarkImage carries neither an RMS nor inferred BPM.
 
-## Flat and traces (`calibration/flat.py`)
+## Flat and traces (`flat.py`)
 
 Subtract the explicit complete dark from each telescope's mean flat and average
 those four maps. Collapse along dispersion, select the strongest 24 spatial
@@ -33,7 +33,7 @@ flat product contains response, geometry and retained Gaussian fit sigmas;
 DARK statistics and BAD flags are separate products. Fit sigmas are descriptive
 QC; the extraction aperture remains profile_width.
 
-## Wavelength solution (`calibration/wavelength.py`)
+## Wavelength solution (`wavelength.py`)
 
 Subtract the selected lamp dark from the complete mean lamp image and extract
 using flat's geometry. Use the mean of the last four outputs as the reference
@@ -44,7 +44,7 @@ with the constrained quadratic grid search.
 
 Fit the global cubic `wavelength = f(detector_x, trace_y)` with the retained
 iterative residual clipping. Evaluate at each traced output. The result is a
-24 × detector-x wavelength map in um. Smooth mapping and preserved line order
+24 × detector-x wavelength map in metres. Smooth mapping and preserved line order
 are assumptions; coverage alone is not a wavelength-accuracy measurement.
 
 ## Extraction and interpolation (`extraction.py`)
@@ -54,7 +54,7 @@ dark once, accumulate selected pixels, divide the extracted spectrum by the
 flat spectrum in detector coordinates, interpolate in wavenumber, and multiply
 by the interpolated flat response to preserve the original flux scale.
 
-P2VM calibration defines its explicit target grid (default 1.15–1.30 um, 151
+P2VM calibration defines its explicit target grid (default 1.15e-6–1.30e-6 m, 151
 channels). Science and live processing consume this saved grid. Every output
 must cover it fully; parent flat/wave relations and wavelength ordering are
 checked before extraction. No extension of boundary values is accepted.
@@ -65,7 +65,7 @@ The resulting CalibrationSpectra stays in memory, without a preprocessing file.
 The main dark applies to telescope and baseline cubes. A phase reference has
 its independently selected dark, or records reuse of the main dark.
 
-## P2VM (`calibration/p2vm.py`)
+## P2VM (`p2vm.py`)
 
 For each baseline, use its A,C,B,D detector outputs. Ellipse fitting operates on
 `X=C-A`, `Y=D-B` at each wavelength to estimate phase and radius. The middle
@@ -92,8 +92,8 @@ invalid-data rule: nonpositive/nonfinite photometric products or nonfinite
 coherent flux yield NaN and flags. Full reduction also computes coherent-sum
 GD with Newton refinement and the original differential phase.
 
-Default coarse GD ranges are ±30 um for calibration and ±100 um for science,
-with the retained 0.01 um step. Newton refinement is unconstrained by these
+Default coarse GD ranges are ±30e-6 m for calibration and ±100e-6 m for science,
+with the retained physical 1e-8 m step. Newton refinement is unconstrained by these
 initialization bounds. Real-time reduction can skip GD/phase diagnostics while
 sharing extraction, normalization and flags. It always receives raw unbinned
 frames. GUI binning affects only display.
@@ -103,10 +103,13 @@ closure-phase definition or OIFITS/Phase 3 product is introduced here.
 
 ## File representations and QC
 
-Internal wavelength/OPD/GD units remain um. Corresponding FITS quantities use m;
-profile centers and valid sparse pixel indices are one-based on disk, with paired
-(-1,-1) invalid sentinels retained. The codec remembers original storage quantities
-only while decoded scientific state is unchanged, preventing repeated conversion
-drift. These floating-point boundary conversions are evaluated separately from
-same-array core equivalence. QC in [QC_PARAMETERS](QC_PARAMETERS.md) is descriptive:
-it changes no fitting weights, masks, rejection or scientific defaults.
+Wavelength, OPD and GD use metres throughout calculations and files. There is no
+micrometre/metre conversion or retained-representation cache in the numerical path.
+Profile centers and valid sparse pixel indices are one-based on disk, with paired
+(-1,-1) invalid sentinels retained. QC in [QC_PARAMETERS](QC_PARAMETERS.md) is
+descriptive and changes no weights, masks or rejection. GRAVITY's existing UM QC
+cards are converted only when writing the header.
+
+Changing numerical length units changes floating-point rounding. The full-data
+comparison in [CHANGE_REPORT](CHANGE_REPORT.md) distinguishes those differences
+from step reorganization; formulae and physical defaults are retained.
