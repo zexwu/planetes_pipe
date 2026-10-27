@@ -10,8 +10,8 @@
       "sha256": "6486a5fedb69eb42f7573b803993179610490fae29bf83f4ee78a257b1243ec5"
     },
     "planetes-0.3.0.tar.gz": {
-      "bytes": 1479758,
-      "sha256": "03f475d02a33d3b5b026684576d4d731e0227c68f9edfa001ad38672ab30448a"
+      "bytes": 1479772,
+      "sha256": "6638db56807762117c514d34a0e9e5cbf5caddf4089c96e72815d6e027247af5"
     }
   },
   "sdist_rebuild_wheel_contents_exact": true
