@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.3
+# PLANETES pipeline 0.4
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python, PyEsoRex and the Qt6 bench viewer share the same scientific tasks and
@@ -35,22 +35,25 @@ pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes/eso planetes_dark
 ```
 
 Use a new directory per invocation. Fill the absolute paths in `examples/*.sof.in`
-before using them. Tags describe input roles; each accepts exactly one file.
+before using them. Tags describe categories; repeated FLAT_RAW/P2VM_RAW entries are
+identified by physical shutter metadata, independently of order and filenames.
 
 | Recipe | Required SOF roles | Optional roles | Output |
 | --- | --- | --- | --- |
-| `planetes_dark` | `DARK_RAW` | — | `planetes_dark.fits` |
-| `planetes_flat` | `DARK_CALIB`, four `TEL_FLAT_*` | — | `planetes_flat.fits` |
-| `planetes_wave` | `DARK_CALIB`, `PLANETES_FLAT`, `WAVE_RAW` | `PLANETES_LINE_LIST` | `planetes_wave.fits` |
-| `planetes_p2vm` | `DARK_CALIB`, `PLANETES_FLAT`, `PLANETES_WAVE`, four `TEL_FLAT_*`, six `P2VM_RAW_*` | `PHASE_REFERENCE`, `PHASE_DARK_CALIB` | `planetes_p2vm.fits` |
-| `planetes_reduce` | `DARK_CALIB`, `SCIENCE_RAW`, `PLANETES_FLAT`, `PLANETES_WAVE`, `PLANETES_P2VM` | — | `planetes_reduced.fits` |
+| `planetes_dark` | `DARK_RAW` | — | `planetes_dark.fits` + `planetes_bad.fits` |
+| `planetes_flat` | `DARK`, `BAD`, `FLAT_RAW` × 4 | — | `planetes_flat.fits` |
+| `planetes_wave` | `DARK`, `FLAT`, `WAVELAMP_RAW` | `LINE_LIST` | `planetes_wave.fits` |
+| `planetes_p2vm` | `DARK`, `FLAT`, `WAVE`, `FLAT_RAW` × 4, `P2VM_RAW` × 6 | `PHASE_REFERENCE`, `PHASE_DARK_CALIB` | `planetes_p2vm.fits` |
+| `planetes_reduce` | `DARK`, `FLAT`, `WAVE`, `P2VM`, `SINGLE_SCI_RAW` | — | `planetes_reduced.fits` |
 
-`DARK_CALIB` is a schema-2 dark product. Flat requires full temporal statistics;
-wave/P2VM/reduce also accept a subtraction-only `PLANETES_DARK_IMAGE`. Generate
-separate dark products for the main calibration, lamp and science where appropriate.
-A supplied phase reference uses `PHASE_DARK_CALIB`, or explicitly records reuse of
-the main dark if that role is absent. Without a reference, phase correction is skipped.
-When correction is disabled, the unused reference is excluded from DFS used inputs.
+All formal file tasks require a complete DARK with measured temporal RMS and at
+least two frames. BAD is independent and records its actual parent DARK. Generate
+separate darks for main calibration, lamp and science where appropriate. Known
+exposure/ROI/detector conflicts fail before subtraction; explicitly legacy unknown
+fields are recorded as unverified. DarkImage remains a GUI/single-frame object.
+A supplied phase reference keeps its SINGLE_SCI_RAW classification and uses the
+independently selected phase DARK, or records reuse of the main DARK. A disabled
+reference is excluded from both scientific provenance and DFS used inputs.
 
 Telescope order is 4,3,2,1; baseline order is 43,42,41,32,31,21; the four outputs
 within a baseline use A,C,B,D. The wave recipe defaults to the bundled static
@@ -79,12 +82,12 @@ from planetes.reduction import reduce_file
 from planetes.fits import write_product
 
 raw = Path('/absolute/raw')
-main_dark = calibrate_dark_file(raw / 'dark.fits')
-wave_dark = calibrate_dark_file(raw / 'wave_dark.fits')
-science_dark = calibrate_dark_file(raw / 'sci_dark.fits')
-telescopes = {n: raw / f'tel{n}.fits' for n in ('4', '3', '2', '1')}
-baselines = {n: raw / f'bsl{n}.fits' for n in ('43', '42', '41', '32', '31', '21')}
-flat = calibrate_flat_file(telescopes, main_dark)
+main_dark, bad = calibrate_dark_file(raw / 'dark.fits')
+wave_dark, _ = calibrate_dark_file(raw / 'wave_dark.fits')
+science_dark, _ = calibrate_dark_file(raw / 'sci_dark.fits')
+telescopes = [raw / f'tel{n}.fits' for n in ('4', '3', '2', '1')]
+baselines = [raw / f'bsl{n}.fits' for n in ('43', '42', '41', '32', '31', '21')]
+flat = calibrate_flat_file(telescopes, main_dark, bad)
 wave = calibrate_wavelength_file(raw / 'wave.fits', wave_dark, flat)
 p2vm = calibrate_p2vm_file(
     flat, wave, main_dark, telescope_flats=telescopes, baseline_cubes=baselines,
@@ -116,7 +119,7 @@ are documented in [GUI integration](docs/GUI_INTEGRATION.md).
 | Module | Responsibility |
 | --- | --- |
 | `models.py` | Scientific objects, units, axes, parent fingerprints |
-| `fits.py` | Raw reading, schema-2 encoding, verified non-overwriting publication |
+| `fits.py`, `keywords.py` | Raw metadata, reference-derived vocabulary, format-3 encoding, verified publication |
 | `dark.py`, `flat.py`, `wavelength.py`, `p2vm.py`, `reduction.py` | File tasks and their ordinary array calculations |
 | `extraction.py` | Shared subtraction, extraction and resampling kernels |
 | `instrument.py` | Fixed telescope, baseline and output conventions |
@@ -138,9 +141,14 @@ Exact comparisons use the same numerical environment and matching Numba cache
 states: the old algorithm itself has a small cold/warm difference. Cache and
 fastmath settings are retained.
 
-Schema 2 breaks v0.2 FITS/Python APIs. Regenerate calibrations from raw data;
-existing products are not automatically converted. Output is instrumental ADU,
-visibility amplitude, GD and differential phase. ESO observation metadata,
-EDPS association, uncertainty propagation, transfer functions, OIFITS and
-Phase 3 acceptance remain separate work. This release does not claim completion
-of every requirement in the supplied ESO documents.
+Format 3 breaks v0.3/schema-2 FITS and Python APIs. Regenerate products from
+standardized raw copies; historical raw are never rewritten by the reader.
+[The product contract](docs/PRODUCT_CONTRACT.md) describes the strict new-acquisition
+metadata and the explicit legacy policy. [QC definitions](docs/QC_PARAMETERS.md)
+map applicable measurements to GRAVITY **1.9.6 source definitions**, with units,
+statistical domains and unavailable reasons. Necessary PLANETES fields are named
+explicitly; this does not make PLANETES output a GRAVITY-compatible product.
+
+Outputs remain instrumental ADU, visibility amplitude, GD and differential phase.
+ESO dictionary approval, EDPS association, uncertainties, transfer functions,
+final OIFITS and Phase 3 acceptance remain subsequent work.

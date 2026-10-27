@@ -1,21 +1,18 @@
-# Qt6 viewer integration
+# Qt6 viewer and automated acquisition
 
-The migrated entry point is `/Users/zexwu/zexwu_lib/devel/camview_p2vm.py`.
-It imports the installed `planetes` package and calls FrameReducer. The local
-file is already updated. The parent camera module, acquisition/capture code,
-Qt5 historical viewer and historical independent reducer are retained.
-The precise portable change is `integration/qt6/camview_p2vm.patch`, with before
-and after SHA256 in the adjacent manifest.
+The local files are updated at `/Users/zexwu/zexwu_lib/devel/`:
+`camview_p2vm.py`, its parent `camview.py`, `scripts/take_p2vm.py` and
+`scripts/utils.py`. Their exact patches and before/after SHA256 are in
+`integration/qt6/manifest.json`. The patches start at the approved 0.3 files
+(frozen with pipeline commit 61f519f), not the earlier legacy GUI. Qt5 historical
+entries are untouched. The parent has optional writer/check hooks without a
+mandatory pipeline import; the current viewer supplies the new hooks.
 
-## Environment and launch
+## Viewer
 
-The existing GUI environment is `/Users/zexwu/zexwu_lib/devel/.venv` (Python 3.12).
-PLANETES was installed editable with `--no-deps`; its NumPy/SciPy/Numba/Astropy/Qt
-packages were not replaced. Qt and catkit2 are not dependencies of the science
-package. This environment supports fake frames; catkit2 is not installed there.
-
-Put the three schema-2 calibrations together as `planetes_flat.fits`,
-`planetes_wave.fits` and `planetes_p2vm.fits`, then use:
+Use the existing Python 3.12 GUI environment; numerical and Qt dependencies have
+not been upgraded. PLANETES is already editable there. Put format-3 FLAT, WAVE
+and P2VM products together with their ordinary `planetes_*.fits` filenames:
 
 ```bash
 /Users/zexwu/zexwu_lib/devel/.venv/bin/python /Users/zexwu/zexwu_lib/devel/camview_p2vm.py \
@@ -23,32 +20,66 @@ Put the three schema-2 calibrations together as `planetes_flat.fits`,
   --fake-cube /absolute/science.fits --fake-dark /absolute/planetes_dark.fits
 ```
 
-Select the actual dark and calibration directory in the viewer. Raw frames go
-to the science core; binning only changes the display. Dark off, a wrong-category
-dark or incompatible calibration pauses updates and clears the current spectrum.
-Taking the current frame as dark creates subtraction-only DarkImage and displays
-that status. Complete raw dark stacks use the common dark calibration function.
-The 24 labels use the shared A,C,B,D order; invalid channels are excluded from
-means and left as gaps in curves.
+Capture types now include OBJECT, DARK, WAVE (lamp), FLAT and P2VM. Before capture,
+confirm physical shutter 1..4 states, detector identity, orientation and **camera**
+binning. These describe the actual cube; the separate display binning selector
+is not physical binning. Missing configuration or a type/shutter conflict prevents
+capture. Settings are snapshotted at start; capture controls are locked, known
+camera readbacks are checked during capture, and changes prevent publication.
+The saved pixels retain their original dtype; filenames never overwrite old raw.
 
-The actual window was checked headlessly using recorded raw frames. Results and
-one-off GUI validation scripts are archived with the migration records; see
-CHANGE_REPORT.md. The maintained calibration tests check live/file numerical
-equivalence. Live camera timing and bench deployment require the bench environment.
+The driver currently exposes exposure_time [us], offset_x/y and width/height.
+Those readbacks populate exposure/ROI. Detector/orientation/physical binning are
+explicit operator configuration because no verified driver interface for them is
+available here. Shutters are operator-confirmed, not asserted to be hardware
+feedback. Host start/end UTC are recorded separately; no fictitious DATE-OBS is
+created. External unobservable shutter changes cannot be detected by this interface.
 
-## Transfer and recovery
+Unbinned raw frames feed the common FrameReducer. Dark off, a wrong-category dark
+or incompatible calibration pauses updates and clears the current spectrum.
+Taking the current frame as dark creates subtraction-only DarkImage. Explicitly
+selected 2-D/one-frame darks stay valid for live subtraction; formal file tasks
+require full measured DARK. Invalid channels remain flagged/gaps in curves.
 
-Before applying the patch on another machine, verify its original file hash,
-back up that file and run `git apply --check /absolute/camview_p2vm.patch` from
-the directory containing it. Then apply with `git apply`. Install PLANETES in
-the chosen GUI environment without replacing its acquisition dependencies.
-Do not apply the patch twice to the already updated local file.
+## Automated take_p2vm
 
-The exact local original is backed up at:
+The existing acquisition configuration still describes device commands and output
+locations; it is not a pipeline recipe scheduler. Add explicitly confirmed camera
+settings to that existing file, for example (replace values with the actual setup):
 
-`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_132125_restructure/gui/camview_p2vm.py`
+```yaml
+camera:
+  detector: actual-camera-identifier
+  orientation: actual-sensor-orientation
+  binning_x: 1
+  binning_y: 1
+```
 
-To recover, preserve any subsequent local edits, restore that saved viewer and
-use its matching old calibrations/reducer. The original parent `camview.py`
-and historical `planetes_pipe/rtp2vm.py` are also in the backup and unchanged
-at their original locations. Backups were rechecked against their original hashes.
+The script checks these before connecting to hardware. Existing DIT/scan arguments,
+scan-arm selection, OPD grid, motion order, settling, shutter closure and DL restore
+remain. Physical telescope 1/2/3/4 corresponds to actuator 0/1/2/3. Each dark, flat,
+baseline and lamp capture calls the same PLANETES raw writer as the viewer.
+Shutter states are the issued commands; camera settings prefer actual readback,
+with explicitly recorded command exposure allowed when readback is unavailable.
+Detector/orientation/binning from the configuration are labeled operator-supplied.
+Scan positions are separately recorded command metadata, not treated as forbidden
+fixed camera-configuration changes. A no-DL camera failure also closes shutters.
+
+## Validation, transfer and recovery
+
+The actual Qt6 window passed offscreen checks with recorded frames: capture,
+float pixel preservation, metadata, changing camera settings, display-binning
+science equivalence, dark-off and single-frame dark. A fake full automated run
+wrote 13 classified cubes and verified shutter/DL recovery and sources. No test
+connected to or operated hardware. The local GUI environment has no catkit2;
+actual bench deployment remains a separate hardware acceptance step.
+
+On another machine, verify the original hashes, back up all four files and run
+`git apply --check` for each patch from the devel directory before applying.
+Do not apply again to already updated files. Install the matching PLANETES version
+without replacing existing camera/Qt dependencies. To restore, preserve later local
+edits and recover the four original files from:
+
+`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/devel/`
+
+Restore the matching 0.3 pipeline/calibrations too if reverting to format 2.

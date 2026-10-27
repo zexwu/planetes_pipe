@@ -1,0 +1,163 @@
+--- a/scripts/take_p2vm.py
++++ b/scripts/take_p2vm.py
+@@ -54,7 +54,7 @@
+         time.sleep(0.05)
+ 
+ 
+-def take_baseline(bench, baseline, filename, args, log):
++def take_baseline(bench, baseline, filename, args, log, camera_config):
+     """Acquire one baseline P2VM cube.
+ 
+     The selected scan arm moves through ``0 -> -x -> +x -> 0`` in OPD um, waits
+@@ -65,8 +65,18 @@
+         log.info("P2VM %s -> %s", baseline, filename)
+         bench.shutters.set_states([0, 0, 0, 0])
+         bench.shutters.set_states([1] * len(shutters), actuator_indices=shutters)
+-        utils.save_to_fits(bench.cam.get_cube(args.frames_per_tel), filename)
+-        bench.shutters.set_states([0, 0, 0, 0])
++        try:
++            utils.capture_cube(
++                bench,
++                args.frames_per_tel,
++                filename,
++                "P2VM_RAW",
++                baseline,
++                camera_config,
++                exposure_us=CAMERA_US_PER_MS * args.dit,
++            )
++        finally:
++            bench.shutters.set_states([0, 0, 0, 0])
+         return
+ 
+     tel = baseline[0] if args.scan_arm == "first" else baseline[1]
+@@ -85,6 +95,13 @@
+     bench.shutters.set_states([0, 0, 0, 0])
+     bench.shutters.set_states([1] * len(shutters), actuator_indices=shutters)
+     try:
++        metadata = utils.camera_metadata(
++            bench.cam,
++            "P2VM_RAW",
++            baseline,
++            camera_config,
++            exposure_us=CAMERA_US_PER_MS * args.dit,
++        )
+         for opd_um in points:
+             target = origin + opd_um * 1e-3
+             log.info("  OPD %+8.3f um", opd_um)
+@@ -92,13 +109,30 @@
+             wait_delay_line(bench.dl, actuator, target)
+             time.sleep(args.settle)
+             cubes.append(bench.cam.get_cube(args.frames_per_point))
++            utils.check_camera(bench.cam, metadata)
+     finally:
+         bench.shutters.set_states([0, 0, 0, 0])
+         bench.dl.move_absolute([origin], actuator_indices=[actuator])
+         wait_delay_line(bench.dl, actuator, origin)
+ 
+     cube = np.concatenate(cubes, axis=0)
+-    utils.save_to_fits(cube, filename)
++    from dataclasses import replace
++
++    metadata = replace(
++        metadata,
++        host_end_utc=utils.utc_now(),
++        original={
++            **metadata.original,
++            "scan": {
++                "actuator": actuator,
++                "origin_mm": origin,
++                "commanded_opd_um": points.tolist(),
++                "frames_per_point": args.frames_per_point,
++                "settle_s": args.settle,
++            },
++        },
++    )
++    utils.save_to_fits(cube, filename, metadata=metadata)
+     log.info("Saved stacked baseline cube: %s frames -> %s", cube.shape[0], filename)
+ 
+ 
+@@ -112,11 +146,27 @@
+         log.info("Wave -> %s", conf["calib"]["wave"])
+         bench.shutters.set_states([0, 0, 0, 0])
+         bench.shutters.set_states([1, 1, 1, 1], actuator_indices=[0, 1, 2, 3])
+-        utils.save_to_fits(bench.cam.get_cube(args.frames_per_tel * 2), conf["calib"]["wave"])
++        utils.capture_cube(
++            bench,
++            args.frames_per_tel * 2,
++            conf["calib"]["wave"],
++            "WAVELAMP_RAW",
++            "1234",
++            conf["camera"],
++            exposure_us=WAVE_DIT_US,
++        )
+         bench.calsource.switch_emission(False)
+         log.info("Wave dark -> %s", conf["calib"]["wave_dark"])
+         bench.shutters.set_states([0, 0, 0, 0])
+-        utils.save_to_fits(bench.cam.get_cube(args.frames_per_tel), conf["calib"]["wave_dark"])
++        utils.capture_cube(
++            bench,
++            args.frames_per_tel,
++            conf["calib"]["wave_dark"],
++            "DARK_RAW",
++            "",
++            conf["camera"],
++            exposure_us=WAVE_DIT_US,
++        )
+     finally:
+         bench.calsource.switch_emission(False)
+         bench.selector.move_absolute(pos0)
+@@ -134,10 +184,16 @@
+     log.setLevel(logging.INFO)
+     if not log.handlers:
+         handler = colorlog.StreamHandler()
+-        handler.setFormatter(colorlog.ColoredFormatter("%(log_color)s[%(levelname)s] %(message)s"))
++        handler.setFormatter(
++            colorlog.ColoredFormatter("%(log_color)s[%(levelname)s] %(message)s")
++        )
+         log.addHandler(handler)
+ 
+     conf = yaml.safe_load(args.config.read_text())
++    # Validate operator configuration before contacting any hardware.
++    for key in ("detector", "orientation", "binning_x", "binning_y"):
++        if conf.get("camera", {}).get(key) in (None, "", 0):
++            raise ValueError(f"Config camera.{key} must be explicitly specified")
+     bench = utils.connect_bench()
+     bench.cam.set_property("exposure_time", CAMERA_US_PER_MS * args.dit)
+ 
+@@ -145,17 +201,33 @@
+         log.info("Config: %s", args.config)
+         log.info("Dark -> %s", conf["calib"]["dark"])
+         bench.shutters.set_states([0, 0, 0, 0])
+-        utils.save_to_fits(bench.cam.get_cube(args.frames_per_tel), conf["calib"]["dark"])
++        utils.capture_cube(
++            bench,
++            args.frames_per_tel,
++            conf["calib"]["dark"],
++            "DARK_RAW",
++            "",
++            conf["camera"],
++            exposure_us=CAMERA_US_PER_MS * args.dit,
++        )
+ 
+         for tel, filename in zip(conf["telescopes"], conf["calib"]["flat"]):
+             log.info("Flat %s -> %s", tel, filename)
+             bench.shutters.set_states([0, 0, 0, 0])
+             bench.shutters.set_states([1], actuator_indices=[TEL_TO_DL[str(tel)]])
+-            utils.save_to_fits(bench.cam.get_cube(args.frames_per_tel), filename)
++            utils.capture_cube(
++                bench,
++                args.frames_per_tel,
++                filename,
++                "FLAT_RAW",
++                str(tel),
++                conf["camera"],
++                exposure_us=CAMERA_US_PER_MS * args.dit,
++            )
+             bench.shutters.set_states([0, 0, 0, 0])
+ 
+         for baseline, filename in zip(conf["baselines"], conf["calib"]["p2vm"]):
+-            take_baseline(bench, str(baseline), filename, args, log)
++            take_baseline(bench, str(baseline), filename, args, log, conf["camera"])
+ 
+         if not args.no_wave:
+             take_wave(bench, conf, args, log)

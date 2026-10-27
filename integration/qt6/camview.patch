@@ -1,0 +1,65 @@
+--- a/camview.py
++++ b/camview.py
+@@ -58,6 +58,9 @@
+         # some useful attributes
+         self.main_capture_path = os.path.join("C:\\Users\\first\\Desktop\\", "camera_captures", datetime.now().strftime('%Y_%m_%d'))
+         default_capture_folder = "capture"
++        # Optional current-viewer hooks; historical viewers keep their existing writer.
++        self.capture_writer = None
++        self.capture_check = None
+         self.captureCube=None
+         self.capturePath = os.path.join(self.main_capture_path, default_capture_folder, "object")
+         self.nDitsToCapture = 0
+@@ -361,7 +364,7 @@
+         # empty the current cube. A new one will automatically be created with correct dimensions later
+         self.captureCube = None
+         frame_delay=20
+-        self.captureTimer.setInterval(np.ceil(exp_time/1000.0)+frame_delay)
++        self.captureTimer.setInterval(int(np.ceil(exp_time/1000.0)+frame_delay))
+         self.captureTimer.start()
+         return None
+ 
+@@ -391,9 +394,15 @@
+     def _capture_cube(self): #called n times
+ 
+         image = self.image_stream.get()
+-        image = image.astype(np.int16)
++        if self.capture_check is not None:
++            self.capture_check()
++        if self.capture_writer is None:
++            image = image.astype(np.int16)
+         if self.captureCube is None :
+-            self.captureCube = np.empty((self.nDitsToCapture, image.shape[0], image.shape[1]))
++            dtype = image.dtype if self.capture_writer is not None else float
++            self.captureCube = np.empty((self.nDitsToCapture, image.shape[0], image.shape[1]), dtype=dtype)
++        if self.capture_writer is not None and (image.shape != self.captureCube.shape[1:] or image.dtype != self.captureCube.dtype):
++            raise ValueError("Camera shape/dtype changed during capture")
+ 
+         instance = self.captureCube.shape[0]-self.nDitsToCapture
+ 
+@@ -403,7 +412,7 @@
+         self.nDitsToCapture = self.nDitsToCapture - 1
+         self.capture_button.setText("Capturing ({})".format(self.nDitsToCapture))
+         # if no more capture required, stop timer and release button
+-        savePath = self.capturePath
++        savePath = getattr(self, "_capture_save_path", self.capturePath)
+ 
+         if self.nDitsToCapture == 0:
+             # get the number of last file saved
+@@ -412,6 +421,16 @@
+                 n_max = np.max(np.array([int(f.split("_")[-1].split(".fits")[0]) for f in filenames]))
+             else:
+                 n_max = -1
++
++            if self.capture_writer is not None:
++                try:
++                    self.capture_writer(savePath+"/capture_{}.fits".format(n_max+1), self.captureCube)
++                finally:
++                    self.captureTimer.stop()
++                    self.capture_button.setText("Capture")
++                    self.capture_button.setEnabled(True)
++                    self.ndits_spin.setEnabled(True)
++                return None
+ 
+             if False:
+                 fits.writeto(savePath+"/capture_{}.fits".format(n_max+1), self.captureCube.astype(np.int16))
