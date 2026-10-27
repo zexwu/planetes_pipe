@@ -11,33 +11,19 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .. import log
-from ..config import PipelineConfig
 from ..instrument import IMAG_SLICE, N_BASELINES, N_TELESCOPES, REAL_SLICE
 from ..numerics import compute_gdelay
 from ..product import (
-    FlatProduct,
     P2VMProduct,
     ReducedProduct,
-    WaveProduct,
-    read_product,
-    write_product,
 )
-from .preproc import preprocess_target
 
 GROUP_DELAY_RANGE_UM = (-100.0, 100.0)
 
 
-def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
-    """Preprocess and reduce one configured science target."""
-    config.output_dir.mkdir(parents=True, exist_ok=True)
-    config.copy_used_config(config.output_dir / "config_used.yaml")
-    log.info(f"--- Step: REDUCE {target_name} ---")
-    flat = read_product(config.output_dir / "flat.npz", FlatProduct)
-    wave = read_product(config.output_dir / "wave.npz", WaveProduct)
-    p2vm = read_product(config.output_dir / "p2vm.npz", P2VMProduct)
-    spectra = preprocess_target(config, target_name, flat, wave)
-
-    log.info(f"Applying P2VM to extract visibility for {target_name}...")
+def compute_reduce(spectra: NDArray, p2vm: P2VMProduct) -> ReducedProduct:
+    """Apply P2VM and calculate the retained instrumental visibility observables."""
+    log.info("Applying P2VM to extract visibility for science spectra...")
     p2vmred = np.einsum("box,ofx->fbx", p2vm.p2vm, spectra)
     photometric_flux_adu = p2vmred[:, :N_TELESCOPES, :]
     coherent_flux_adu = p2vmred[:, REAL_SLICE, :] + 1j * p2vmred[:, IMAG_SLICE, :]
@@ -48,7 +34,7 @@ def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
     )
 
     group_delay_um = np.zeros((len(coherent_flux_adu), N_BASELINES))
-    log.info(f"Computing group delay for {target_name}...")
+    log.info("Computing group delay for science spectra...")
     for baseline in range(N_BASELINES):
         group_delay_um[:, baseline] = compute_gdelay(
             coherent_flux_adu[:, baseline],
@@ -75,10 +61,9 @@ def run_reduce(config: PipelineConfig, target_name: str) -> ReducedProduct:
         baseline_regions=p2vm.baseline_regions,
         baseline_telescopes=p2vm.baseline_telescopes,
     )
-    write_product(config.output_dir / f"{target_name}_reduced.npz", product)
-    log.info(f"Reduction for {target_name} completed.")
+    log.info("Reduction for science spectra completed.")
 
-    log.info(f"--- Step: REDUCE {target_name} [DONE] ---")
+    log.info("--- Step: REDUCE science spectra [DONE] ---")
     return product
 
 

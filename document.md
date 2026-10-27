@@ -1,6 +1,9 @@
 # Calibration Procedures
 
-This note summarizes the algorithms called by `planetes calib`:
+Version 0.2 uses PyCPL recipes and FITS products. Scientific operations below retain the numerical definitions from the original implementation. The recipes communicate through FITS; extracted calibration spectra remain in memory inside the P2VM recipe.
+
+
+This note summarizes the algorithms used by the calibration recipes and their in-memory extraction step:
 
 - `flat`
 - `wave`
@@ -11,12 +14,12 @@ The description follows the implementation in the codebase and is meant to expla
 
 ## 1. `flat`: detector calibration and spectral tracing
 
-Implemented in [planetes/recipes/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/recipes/flat.py).
+Implemented in [planetes/algorithms/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/algorithms/flat.py).
 
 ### Inputs
 
-- dark cube: `calibration.dark`
-- one named flat cube per telescope: `calibration.flats`
+- dark cube: the `DARK_RAW` input
+- one named flat cube per telescope: the `TEL_FLAT_*` inputs
 
 ### Procedure
 
@@ -62,15 +65,15 @@ Each interferometric output is well approximated by a narrow, smooth trace in th
 
 ## 2. `wave`: wavelength calibration
 
-Implemented in [planetes/recipes/wavelength.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/recipes/wavelength.py).
+Implemented in [planetes/algorithms/wavelength.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/algorithms/wavelength.py).
 
 ### Inputs
 
 - `flat` product:
   - sparse extraction coordinates
   - traced output geometry
-- wave lamp cube: `calibration.wavelength.data`
-- wave dark cube: `calibration.wavelength.dark`
+- wave lamp cube: the `WAVE_RAW` input
+- wave dark cube: the `WAVE_DARK` input
 
 ### Procedure
 
@@ -85,7 +88,7 @@ Implemented in [planetes/recipes/wavelength.py](/Users/zexwu/zexwu_lib/planetes_
    - detect peaks above `median + sigma * MAD`
 
 4. Match detected peaks to a laboratory line list:
-   - known line wavelengths are loaded from `planetes/data/wavelength_lines.ecsv`
+   - known line wavelengths are loaded from the static `PLANETES_LINE_LIST` FITS, generated without changing the values in `planetes/data/wavelength_lines.ecsv`
    - a quadratic wavelength-to-pixel mapping is estimated with a RANSAC-like search
    - this provides a reference mapping between known wavelengths and mean-spectrum peaks
 
@@ -102,7 +105,7 @@ Implemented in [planetes/recipes/wavelength.py](/Users/zexwu/zexwu_lib/planetes_
 
 ### Products
 
-- `wave.npz`: `wavelength_map_um`
+- `planetes_wave.fits`: `wavelength_map_um`
 
 ### Main assumptions
 
@@ -111,7 +114,7 @@ Implemented in [planetes/recipes/wavelength.py](/Users/zexwu/zexwu_lib/planetes_
 
 ## 3. Calibration-spectrum extraction and common-grid interpolation
 
-Implemented in [planetes/recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/recipes/preproc.py).
+Implemented in [planetes/processing.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/processing.py).
 
 ### Inputs
 
@@ -124,7 +127,7 @@ Implemented in [planetes/recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pip
 - calibration cubes:
   - one P2VM cube per baseline
   - one photometric flat cube per telescope
-  - optional `phase_reference` cube
+  - optional `PHASE_REFERENCE` cube
 
 ### Procedure
 
@@ -166,7 +169,7 @@ Implemented in [planetes/recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pip
 - `baseline_regions`, `baseline_telescopes`
 - `wavelength_um`
 
-These arrays form `CalibrationSpectra` and are passed directly to `run_p2vm`;
+These arrays form `CalibrationSpectra` and are passed directly to `compute_p2vm`;
 there is no preprocessing product on disk.
 
 ### Main assumptions
@@ -176,7 +179,7 @@ there is no preprocessing product on disk.
 
 ## 4. `p2vm`: pixel-to-visibility matrix calibration
 
-Implemented in [planetes/recipes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/recipes/p2vm.py).
+Implemented in [planetes/algorithms/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/algorithms/p2vm.py).
 
 ### Inputs
 
@@ -277,13 +280,12 @@ After these steps, science reduction can consume:
 - wavelength calibration from `wave`
 - inversion matrices from `p2vm`
 
-Only `flat.npz`, `wave.npz`, and `p2vm.npz` are persisted by calibration;
+Only `planetes_flat.fits`, `planetes_wave.fits`, and `planetes_p2vm.fits` are persisted by calibration;
 extracted calibration spectra remain in memory.
 
 ## Persisted array contract
 
-Axis names below describe the current scientific meaning and will become the
-input to the FITS product schema.
+Axis names below describe the current scientific meaning and are encoded by the versioned FITS product schema.
 
 | Product | Field | Axes | Unit / meaning |
 | --- | --- | --- | --- |

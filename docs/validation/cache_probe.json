@@ -1,0 +1,38 @@
+{
+  "same_original_source": true,
+  "same_environment": true,
+  "cache_directory": "/Users/zexwu/zexwu_lib/planetes_pipe/reduced/eso_v02_validation/20261027_095248/cache_probe/shared_cache",
+  "only_cache_population_differs": true,
+  "fields": {
+    "profile_x_pixels": {
+      "max_abs_difference": 0.0,
+      "cold_matches_initial": true,
+      "warm_matches_repeat": true
+    },
+    "profile_y_pixels": {
+      "max_abs_difference": 0.0,
+      "cold_matches_initial": true,
+      "warm_matches_repeat": true
+    },
+    "flat_map_adu": {
+      "max_abs_difference": 0.0,
+      "cold_matches_initial": true,
+      "warm_matches_repeat": true
+    },
+    "dark_map_adu": {
+      "max_abs_difference": 0.0,
+      "cold_matches_initial": true,
+      "warm_matches_repeat": true
+    },
+    "bad_pixel_flags": {
+      "max_abs_difference": 0.0,
+      "cold_matches_initial": true,
+      "warm_matches_repeat": true
+    },
+    "trace_y_pixels": {
+      "max_abs_difference": 3.8544271774298977e-07,
+      "cold_matches_initial": true,
+      "warm_matches_repeat": true
+    }
+  }
+}

@@ -1,40 +1,29 @@
 """Wavelength-calibration recipe and line-matching numerics."""
 
 from collections.abc import Sequence
-from importlib.resources import as_file, files
 from typing import Any
 
 import numpy as np
-from astropy.table import Table
 from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
 from .. import log
-from ..config import PipelineConfig
-from ..cube import iter_cube
 from ..instrument import N_OUTPUTS
-from ..numerics import frame_mean
-from ..product import FlatProduct, WaveProduct, write_product
-from .preproc import extract_spec_sparse
+from ..product import FlatProduct, WaveProduct
+from .extraction import extract_spec_sparse
 
 DETECTION_SIGMA = 3.0
 SURFACE_DEGREE = 3
 RANSAC_ITERATIONS = 1_000_000
 
 
-def load_wavelength_lines() -> NDArray:
-    """Load the versioned wavelength reference in micrometres."""
-    resource = files("planetes").joinpath("data/wavelength_lines.ecsv")
-    with as_file(resource) as path:
-        table = Table.read(path, format="ascii.ecsv")
-    return np.asarray(table["wavelength_nm"], dtype=float) / 1e3
-
-
-def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
-    """Build the detector wavelength map."""
-
-    log.info("--- Step: WAVE ---")
+def compute_wave(
+    wave_image_adu: NDArray,
+    flat: FlatProduct,
+    reference_wavelength_um: NDArray,
+) -> WaveProduct:
+    """Fit the retained wavelength solution from a dark-subtracted lamp image."""
 
     profile_xs = flat.profile_x_pixels
     profile_ys = flat.profile_y_pixels
@@ -42,16 +31,12 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
     detector_x = np.arange(nx)
     y_trace = flat.trace_y_pixels
 
-    wave_input = config.calibration.wavelength
-    wave_img = frame_mean(iter_cube(wave_input.data)) - frame_mean(
-        iter_cube(wave_input.dark)
-    )
-    wave_spec = extract_spec_sparse(wave_img[None, :, :], profile_ys, profile_xs)[
+    wave_spec = extract_spec_sparse(wave_image_adu[None, :, :], profile_ys, profile_xs)[
         :, 0, :
     ]
 
     # --- 2. Identify and match lines in the mean spectrum ---
-    line_pos = load_wavelength_lines()
+    line_pos = reference_wavelength_um
 
     x_centroids = []  # To store x-centroids for all lines
     y_centroids = []  # To store y-centroids for all lines
@@ -172,7 +157,6 @@ def run_wave(config: PipelineConfig, flat: FlatProduct) -> WaveProduct:
     wavemap = np.einsum("i,iyx->yx", wavemap_coeffs, full_design_matrix)
 
     wave_product = WaveProduct(wavelength_map_um=wavemap)
-    write_product(config.output_dir / "wave.npz", wave_product)
     log.info("Saved full wavemap")
     log.info("--- Step: WAVE [DONE] ---")
     return wave_product

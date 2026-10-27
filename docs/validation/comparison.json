@@ -1,0 +1,195 @@
+{
+  "cache_state": "warm for both versions",
+  "all_bitwise_equal": true,
+  "fields": [
+    {
+      "product": "flat",
+      "field": "profile_x_pixels",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "flat",
+      "field": "profile_y_pixels",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "flat",
+      "field": "flat_map_adu",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "flat",
+      "field": "dark_map_adu",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "flat",
+      "field": "bad_pixel_flags",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "flat",
+      "field": "trace_y_pixels",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "wave",
+      "field": "wavelength_map_um",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "p2vm",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "wavelength_um",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "baseline_regions",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "baseline_telescopes",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "transmission",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "coherence_amplitude",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "coherence_phase_rad",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "opd_um",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "group_delay_um",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "ellipse_phase_rad",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "p2vm",
+      "field": "ellipse_amplitude",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "sci_reduced",
+      "field": "photometric_flux_adu",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "sci_reduced",
+      "field": "coherent_flux_adu",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "sci_reduced",
+      "field": "visibility_amplitude",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "sci_reduced",
+      "field": "flags",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "sci_reduced",
+      "field": "wavelength_um",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "sci_reduced",
+      "field": "group_delay_um",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "sci_reduced",
+      "field": "differential_phase_deg",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "sci_reduced",
+      "field": "baseline_regions",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    },
+    {
+      "product": "sci_reduced",
+      "field": "baseline_telescopes",
+      "values_equal": true,
+      "bitwise_equal": true,
+      "max_abs_difference": 0.0
+    }
+  ]
+}

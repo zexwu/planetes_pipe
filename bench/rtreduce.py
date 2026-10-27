@@ -7,7 +7,6 @@ import numpy as np
 
 from rtp2vm import P2VMReducer
 
-from planetes.config import PipelineConfig
 from planetes.cube import iter_cube
 from planetes.numerics import frame_mean
 
@@ -17,12 +16,12 @@ def main() -> None:
     project_dir = Path(__file__).resolve().parents[1]
     reducer = P2VMReducer(project_dir / "reduced")
 
-    config = PipelineConfig.from_yaml(project_dir / "conf.yaml")
-    target = config.target("sci")
-    cube = np.concatenate(list(iter_cube(target.data)), axis=0)
-    if target.dark is not None:
-        dark = frame_mean(iter_cube(target.dark))
-        cube -= dark[None, ...]
+    # Set explicit bench files and calibration directory here before benchmarking.
+    science = project_dir / "2026_02_05/sci2/sci.fits"
+    science_dark = project_dir / "2026_02_05/sci2/sci_dark.fits"
+    cube = np.concatenate(list(iter_cube(science)), axis=0)
+    dark = frame_mean(iter_cube(science_dark))
+    cube -= dark[None, ...]
 
     import timeit
 

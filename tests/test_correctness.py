@@ -12,18 +12,19 @@ from planetes.instrument import (
     N_TELESCOPES,
     REAL_SLICE,
 )
-from planetes.recipes.flat import build_flat_product
-from planetes.recipes.p2vm import _build_v2pm_matrix
-from planetes.recipes.preproc import extract_spec_sparse
-from planetes.recipes.reduction import normalize_visibility
-from planetes.recipes.wavelength import load_wavelength_lines, match_lines_grid
+from planetes.algorithms.flat import build_flat_product
+from planetes.algorithms.p2vm import _build_v2pm_matrix
+from planetes.algorithms.extraction import extract_spec_sparse
+from planetes.algorithms.reduction import normalize_visibility
+from planetes.algorithms.wavelength import match_lines_grid
+from planetes.io.reference import load_wavelength_lines
 
 
 class CorrectnessTests(unittest.TestCase):
     def test_v2pm_terms_expand_to_cartesian_matrix(self) -> None:
-        transmission = np.arange(
-            N_OUTPUTS * N_TELESCOPES * 2, dtype=float
-        ).reshape(N_OUTPUTS, N_TELESCOPES, 2)
+        transmission = np.arange(N_OUTPUTS * N_TELESCOPES * 2, dtype=float).reshape(
+            N_OUTPUTS, N_TELESCOPES, 2
+        )
         amplitude = np.full((N_OUTPUTS, N_BASELINES, 2), 2.0)
         phase = np.full((N_OUTPUTS, N_BASELINES, 2), np.pi / 3)
 
@@ -51,11 +52,11 @@ class CorrectnessTests(unittest.TestCase):
 
         with (
             patch(
-                "planetes.recipes.flat.compute_bad_map_from_stats",
+                "planetes.algorithms.flat.compute_bad_map_from_stats",
                 return_value=bad_map,
             ),
             patch(
-                "planetes.recipes.flat.trace_spectrum",
+                "planetes.algorithms.flat.trace_spectrum",
                 return_value=(trace, trace_error),
             ),
         ):

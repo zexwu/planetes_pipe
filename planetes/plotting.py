@@ -1,13 +1,14 @@
 """Diagnostic plots for reduced targets."""
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 
-from .. import log
-from ..config import PipelineConfig
-from ..instrument import BASELINES, N_BASELINES, N_TELESCOPES, TELESCOPES
-from ..product import ReducedProduct, read_product
+from . import log
+from .instrument import BASELINES, N_BASELINES, N_TELESCOPES, TELESCOPES
+from .product import ReducedProduct
 
 plt.rcParams.update(
     {
@@ -36,18 +37,17 @@ def genfig(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
     return fig, axes
 
 
-def summary_plot(
-    config: PipelineConfig,
-    target_name: str,
+def plot_reduced(
+    reduced: ReducedProduct,
+    output: Path,
     *,
+    object_label: str = "PLANETES",
     full: bool = False,
 ) -> None:
-    """Write summary diagnostics for one reduced target."""
-    target = config.target(target_name)
-    reduced = read_product(
-        config.output_dir / f"{target_name}_reduced.npz", ReducedProduct
-    )
-    object_label = str(target.data)
+    """Write the existing diagnostic plots from an in-memory reduced product."""
+    if output.exists():
+        raise FileExistsError(f"Refusing to overwrite existing diagnostic: {output}")
+    output.parent.mkdir(parents=True, exist_ok=True)
     photometric_flux_adu = reduced.photometric_flux_adu
     coherent_flux_adu = reduced.coherent_flux_adu
     visibility_amplitude = reduced.visibility_amplitude
@@ -55,10 +55,10 @@ def summary_plot(
     differential_phase_deg = reduced.differential_phase_deg
     group_delay_um = reduced.group_delay_um
 
-    log.info(f"--- Step: PLOTTING {target_name} ---")
+    log.info(f"--- Step: PLOTTING {object_label} ---")
     plt.rcParams["font.size"] = 14
 
-    with PdfPages(config.output_dir / f"{target_name}.pdf") as pdf:
+    with PdfPages(output) as pdf:
         mean_flux = photometric_flux_adu.mean(axis=-1)
         frame_samples = np.arange(0, differential_phase_deg.shape[0], 10)
         wave_samples = np.arange(0, differential_phase_deg.shape[-1], 10)
@@ -204,4 +204,4 @@ def summary_plot(
         for plot in plots:
             plot()
 
-    log.info(f"--- Step: PLOTTING {target_name} [DONE] ---")
+    log.info(f"--- Step: PLOTTING {object_label} [DONE] ---")

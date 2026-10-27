@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "planetes"
-version = "0.1.0"
+dynamic = ["version"]
 description = "PLANETES detector and interferometric reduction pipeline"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,16 +14,24 @@ dependencies = [
     "matplotlib==3.8.4",
     "numba>=0.62.0",
     "numpy==2.4.2",
-    "pyyaml==6.0.3",
     "scipy==1.17.1",
 ]
 
-[project.scripts]
-planetes = "main:main"
+[project.optional-dependencies]
+eso = [
+    "pycpl @ https://ftp.eso.org/pub/dfs/pipelines/libraries/pycpl/pycpl-1.0.4.post1.tar.gz",
+    "pyesorex @ https://ftp.eso.org/pub/dfs/pipelines/libraries/pyesorex/pyesorex-1.0.4.tar.gz",
+]
 
 [tool.setuptools]
-packages = ["planetes", "planetes.recipes"]
-py-modules = ["main"]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["planetes*"]
+namespaces = false
+
+[tool.setuptools.dynamic]
+version = {attr = "planetes.__version__"}
 
 [tool.setuptools.package-data]
-planetes = ["data/*.ecsv"]
+planetes = ["data/*.ecsv", "data/*.fits"]

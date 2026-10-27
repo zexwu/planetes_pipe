@@ -6,7 +6,8 @@ from pathlib import Path
 import numpy as np
 from numba import njit, prange
 
-from planetes.product import FlatProduct, P2VMProduct, WaveProduct, read_product
+from planetes.io.products import read_product
+from planetes.product import FlatProduct, P2VMProduct, WaveProduct
 
 NDArray = np.ndarray
 
@@ -76,12 +77,12 @@ class P2VMReducer:
     def __post_init__(self) -> None:
         self.reduced_dir = Path(self.reduced_dir).expanduser().resolve()
 
-        flat = read_product(self.reduced_dir / "flat.npz", FlatProduct)
+        flat = read_product(self.reduced_dir / "planetes_flat.fits", FlatProduct)
         self.profile_ys = np.array(flat.profile_y_pixels)
         self.profile_xs = np.array(flat.profile_x_pixels)
         self.flat_map = flat.flat_map_adu.astype(np.float32)
         self.dark_map = flat.dark_map_adu.astype(np.float32)
-        p2vm = read_product(self.reduced_dir / "p2vm.npz", P2VMProduct)
+        p2vm = read_product(self.reduced_dir / "planetes_p2vm.fits", P2VMProduct)
         self.p2vm = p2vm.p2vm
         self.wl_grid = p2vm.wavelength_um
         bsl_to_reg = p2vm.baseline_regions
@@ -92,7 +93,7 @@ class P2VMReducer:
         self.bsl_to_tel = np.array([list(bsl_to_tel[i]) for i in baseline_ids])
 
         self.wave_map = read_product(
-            self.reduced_dir / "wave.npz", WaveProduct
+            self.reduced_dir / "planetes_wave.fits", WaveProduct
         ).wavelength_map_um
 
         self.wn_map = 1.0 / self.wave_map

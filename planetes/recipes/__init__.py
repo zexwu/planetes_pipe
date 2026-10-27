@@ -1,1 +1,0 @@
-"""Explicit scientific reduction recipes."""

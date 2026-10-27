@@ -1,4 +1,4 @@
-"""Detector flat-field and spectral-trace recipe."""
+"""Detector-map and trace calculations on in-memory arrays."""
 
 import numpy as np
 from numba import njit
@@ -6,35 +6,11 @@ from numpy.typing import NDArray
 from scipy.signal import find_peaks, medfilt
 
 from .. import log
-from ..config import PipelineConfig
-from ..cube import iter_cube
-from ..instrument import N_OUTPUTS, TELESCOPES
-from ..numerics import frame_mean, frame_mean_std
-from ..product import FlatProduct, write_product
+from ..instrument import N_OUTPUTS
+from ..product import FlatProduct
 
 PROFILE_WIDTH = 10
 BAD_THRESHOLD = 5.0
-
-
-def run_flat(config: PipelineConfig) -> FlatProduct:
-    """Build detector maps and sparse spectral traces."""
-    log.info("--- Step: FLAT ---")
-    log.info("Building DARK, BAD and FLAT maps...")
-    dark_map, dark_std = frame_mean_std(iter_cube(config.calibration.dark))
-    flat_maps = [
-        frame_mean(iter_cube(config.calibration.flats[name])) - dark_map
-        for name in TELESCOPES
-    ]
-    product = build_flat_product(
-        dark_map,
-        dark_std,
-        flat_maps,
-    )
-    write_product(config.output_dir / "flat.npz", product)
-    log.info("Saved flat, dark, bad-pixel, and trace data.")
-
-    log.info("--- Step: FLAT [DONE] ---")
-    return product
 
 
 def build_flat_product(

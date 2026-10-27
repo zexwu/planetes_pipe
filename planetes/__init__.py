@@ -4,6 +4,8 @@ import logging
 
 import colorlog
 
+__version__ = "0.2.0"
+
 
 log = logging.getLogger("planetes")
 if not log.handlers:

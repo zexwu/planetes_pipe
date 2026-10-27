@@ -1,35 +1,24 @@
 """Detector-spectrum extraction shared by calibration and target recipes."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from numba import njit, prange
 from numpy.typing import NDArray
 
-from .. import log
-from ..config import PipelineConfig
-from ..cube import iter_cube
-from ..instrument import BASELINES, N_OUTPUTS, N_TELESCOPES, TELESCOPES
-from ..numerics import frame_mean
-from ..product import FlatProduct, WaveProduct
+from . import log
+from .algorithms.extraction import extract_spec_sparse, twopx_interp
+from .cube import iter_cube
+from .instrument import BASELINES, N_OUTPUTS, N_TELESCOPES, TELESCOPES
+from .numerics import frame_mean
+from .product import CalibrationSpectra, FlatProduct, WaveProduct
 
 WAVELENGTH_MIN_UM = 1.15
 WAVELENGTH_MAX_UM = 1.30
 WAVELENGTH_CHANNELS = 151
-
-
-@dataclass(frozen=True, slots=True)
-class CalibrationSpectra:
-    """Extracted calibration cubes passed directly to the P2VM recipe."""
-
-    telescope_spectra: NDArray
-    baseline_spectra: NDArray
-    phase_reference: NDArray
-    baseline_regions: Mapping[int, list[int]]
-    baseline_telescopes: Mapping[int, tuple[int, int]]
-    wavelength_um: NDArray
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,20 +30,23 @@ class _ExtractionModel:
     wavelength_um: NDArray
 
 
-def preprocess_calibration(
-    config: PipelineConfig,
+def extract_calibration_spectra(
     flat: FlatProduct,
     wave: WaveProduct,
+    *,
+    telescope_flats: Mapping[str, Path],
+    baseline_cubes: Mapping[str, Path],
+    phase_reference: Path | None = None,
+    phase_dark: Path | None = None,
 ) -> CalibrationSpectra:
-    """Extract and resample the P2VM calibration cubes."""
+    """Read and extract explicitly selected cubes without loading a run configuration."""
     log.info("Extracting calibration spectra...")
     model = _extraction_model(flat, wave)
-    calibration = config.calibration
 
     spec_bsl = np.asarray(
         [
             _extract_resampled_spectra(
-                calibration.p2vm[name],
+                baseline_cubes[name],
                 model.flat.dark_map_adu,
                 model,
             )
@@ -64,7 +56,7 @@ def preprocess_calibration(
     spec_tel = np.asarray(
         [
             _extract_resampled_spectra(
-                calibration.flats[name],
+                telescope_flats[name],
                 model.flat.dark_map_adu,
                 model,
             )
@@ -75,16 +67,14 @@ def preprocess_calibration(
     phase_reference_spectra = np.empty(
         (N_OUTPUTS, 0, len(model.wavelength_um)), dtype=np.float64
     )
-    if phase_reference := calibration.phase_reference:
-        phase_dark = model.flat.dark_map_adu
-        if phase_reference.dark is not None:
-            log.info(
-                f"    Building phase-reference dark map from {phase_reference.dark}..."
-            )
-            phase_dark = frame_mean(iter_cube(phase_reference.dark))
+    if phase_reference is not None:
+        dark = model.flat.dark_map_adu
+        if phase_dark is not None:
+            log.info(f"    Building phase-reference dark map from {phase_dark}...")
+            dark = frame_mean(iter_cube(phase_dark))
         phase_reference_spectra = _extract_resampled_spectra(
-            phase_reference.data,
-            phase_dark,
+            phase_reference,
+            dark,
             model,
         )
 
@@ -131,26 +121,22 @@ def preprocess_calibration(
     return spectra
 
 
-def preprocess_target(
-    config: PipelineConfig,
-    target_name: str,
+def extract_target_spectra(
+    data: Path,
     flat: FlatProduct,
     wave: WaveProduct,
+    *,
+    dark: Path | None = None,
 ) -> NDArray:
-    """Extract and resample one science target cube."""
-    log.info(f"Extracting spectra for target {target_name}...")
+    """Read and extract one science cube using explicit calibration objects."""
+    log.info(f"Extracting spectra from {data}...")
     model = _extraction_model(flat, wave)
-    target = config.target(target_name)
-    dark = model.flat.dark_map_adu
-    if target.dark is not None:
-        log.info(f"    Building target dark map from {target.dark}...")
-        dark = frame_mean(iter_cube(target.dark))
-    spectra = _extract_resampled_spectra(
-        target.data,
-        dark,
-        model,
-    )
-    log.info(f"Target spectra extracted: {target_name}")
+    dark_map = model.flat.dark_map_adu
+    if dark is not None:
+        log.info(f"    Building target dark map from {dark}...")
+        dark_map = frame_mean(iter_cube(dark))
+    spectra = _extract_resampled_spectra(data, dark_map, model)
+    log.info(f"Target spectra extracted: {data}")
     return spectra
 
 
@@ -202,66 +188,3 @@ def _extract_resampled_spectra(
         spec_aligned *= model.resampled_flat_spectra
         aligned_chunks.append(spec_aligned)
     return np.concatenate(aligned_chunks, axis=1)
-
-
-@njit(parallel=True, fastmath=True, cache=True)
-def extract_spec_sparse(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
-    """
-    Extract spectra from a cube using sparse pixel indices per output channel.
-
-    Args:
-        cube (NDArray): Input cube with shape `(n_frame, ny, nx)`.
-        ys (NDArray): Per-output Y indices; negative values are invalid sentinels.
-        xs (NDArray): Per-output X indices; negative values are invalid sentinels.
-
-    Returns:
-        NDArray: Extracted spectra with shape `(n_reg, n_frame, nx)`.
-    """
-    n_frame, _, nx = cube.shape
-    n_reg = len(ys)
-    output = np.zeros((n_reg, n_frame, nx), dtype=np.float32)
-
-    for o in prange(n_reg):
-        y_idx = ys[o]
-        x_idx = xs[o]
-        for f in range(n_frame):
-            for i in range(len(y_idx)):
-                x = x_idx[i]
-                y = y_idx[i]
-                if x < 0 or y < 0:
-                    continue
-                output[o, f, x] += cube[f, y, x]
-    return output
-
-
-@njit(parallel=True, cache=True)
-def twopx_interp(spec: NDArray, wave_map: NDArray, wl_grid: NDArray) -> NDArray:
-    """
-    Resample spectra from detector pixels onto a uniform wavelength grid.
-
-    Args:
-        spec (NDArray): Input spectra with shape `(n_reg, n_frame, n_pixels)`.
-        wave_map (NDArray): Wavelength at each detector pixel with shape `(n_reg, n_pixels)`.
-        wl_grid (NDArray): Target wavelength grid with shape `(n_wave,)`.
-
-    Returns:
-        NDArray: Resampled spectra with shape `(n_reg, n_frame, n_wave)`.
-    """
-    n_reg, n_frame, _ = spec.shape
-    n_wave = len(wl_grid)
-
-    wn_map = 1.0 / wave_map
-    wn_grid = 1.0 / wl_grid
-
-    out = np.zeros((n_reg, n_frame, n_wave))
-
-    for r in prange(n_reg):
-        # We reverse (::-1) because np.interp expects increasing X values
-        # and wavenumber usually decreases as pixel index increases.
-        x_in = wn_map[r, ::-1]
-
-        for f in range(n_frame):
-            y_in = spec[r, f, ::-1]
-            out[r, f, :] = np.interp(wn_grid, x_in, y_in)
-
-    return out

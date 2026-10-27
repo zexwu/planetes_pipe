@@ -1,4 +1,4 @@
-"""P2VM calibration recipe."""
+"""Array-to-array P2VM calibration, independent of files and recipe runners."""
 
 from collections.abc import Mapping
 
@@ -6,7 +6,6 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .. import log
-from ..config import PipelineConfig
 from ..instrument import (
     IMAG_SLICE,
     N_BASELINES,
@@ -16,13 +15,13 @@ from ..instrument import (
     REAL_SLICE,
 )
 from ..numerics import compute_gdelay
-from ..product import P2VMProduct, write_product
-from .preproc import CalibrationSpectra
+from ..product import CalibrationSpectra, P2VMProduct
 
 
-def run_p2vm(
-    config: PipelineConfig,
+def compute_p2vm(
     spectra: CalibrationSpectra,
+    *,
+    phase_correction: bool = True,
 ) -> P2VMProduct:
     """Compute the pixel-to-visibility matrix."""
     log.info("--- Step: P2VM ---")
@@ -148,7 +147,7 @@ def run_p2vm(
         p2vm[:, :, iw] = np.linalg.pinv(v2pm_matrix[:, :, iw])
 
     has_phase_reference = phase_reference.shape[1] > 0
-    if has_phase_reference and config.phase_correction:
+    if has_phase_reference and phase_correction:
         log.info("Applying phase-reference correction...")
         p2vmred_wave = np.einsum("dow,ofw->fdw", p2vm, phase_reference)
         vis_ft = p2vmred_wave[:, REAL_SLICE, :] + 1j * p2vmred_wave[:, IMAG_SLICE, :]
@@ -169,7 +168,7 @@ def run_p2vm(
         p2vm = np.zeros((N_DATA, N_OUTPUTS, n_wave))
         for iw in range(n_wave):
             p2vm[:, :, iw] = np.linalg.pinv(v2pm_matrix[:, :, iw])
-    elif config.phase_correction:
+    elif phase_correction:
         log.info("Skipping phase correction: no phase-reference cube was provided.")
 
     product = P2VMProduct(
@@ -185,7 +184,6 @@ def run_p2vm(
         ellipse_phase_rad=np.asarray(ellipse_phase),
         ellipse_amplitude=np.asarray(ellipse_amplitude),
     )
-    write_product(config.output_dir / "p2vm.npz", product)
     log.info("--- Step: P2VM [DONE] ---")
 
     return product

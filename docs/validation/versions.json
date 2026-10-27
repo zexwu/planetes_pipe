@@ -1,0 +1,10 @@
+{
+  "planetes": "0.2.0",
+  "pycpl": "1.0.4.post1",
+  "pyesorex": "1.0.4",
+  "numpy": "2.4.2",
+  "scipy": "1.17.1",
+  "numba": "0.64.0",
+  "astropy": "7.2.0",
+  "CPL": "7.4 (local build; optional FFT disabled)"
+}
