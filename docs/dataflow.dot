@@ -1,5 +1,5 @@
 digraph Dataflow {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.5 — 原始数据、标定与科学结果", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.5.1 — 原始数据、标定与科学结果", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.15,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   rawdark [label="DARK_RAW\nmain / lamp / science 分别选择"];
@@ -11,7 +11,7 @@ digraph Dataflow {
   rawwave [label="WAVELAMP_RAW + LINE_LIST\n选用匹配曝光的 lamp DARK"];
   wave [label="wavelength.py / planetes_wave\n保留谱线匹配与波长拟合", style="rounded,filled", fillcolor="#eff6ff"];
   wavefits [label="WAVE\n全输出波长图 + accepted residuals", shape=folder];
-  rawp2vm [label="FLAT_RAW × 4 + P2VM_RAW × 6\n可选 phase reference / 独立 DARK"];
+  rawp2vm [label="FLAT_RAW × 4 + P2VM_RAW × 6\n可选仪器 phase reference / 独立 DARK"];
   p2vm [label="p2vm.py / planetes_p2vm\n提取 · 物理响应 · 求逆", style="rounded,filled", fillcolor="#eff6ff"];
   p2vmfits [label="P2VM\n全 24 输出响应 + inverse\n保存目标波长网格 [m]", shape=folder];
   rawscience [label="SINGLE_SCI_RAW\n选用匹配曝光的 science DARK"];
@@ -37,6 +37,15 @@ digraph Dataflow {
   wavefits -> p2vm;
   wavefits -> science;
   p2vmfits -> science [label="使用保存的网格"];
+  subgraph cluster_future {
+    label="后续科学阶段（当前未实现）"; style=dashed; color="#94a3b8";
+    average [label="统计平均\nVIS / VIS2 / T3 与误差", style="rounded,dashed"];
+    calibrator [label="天文 calibrator 观测\n及物理源模型", style="rounded,dashed"];
+    calibrated [label="传递函数标定\n天文标定后的观测量", style="rounded,dashed"];
+    average -> calibrated [style=dashed];
+    calibrator -> calibrated [style=dashed];
+  }
+  results -> average [style=dashed];
   rawdark -> rawflat -> rawwave -> rawp2vm -> rawscience [style=invis];
   dark -> flat -> wave -> p2vm -> science [style=invis];
 }

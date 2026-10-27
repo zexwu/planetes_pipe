@@ -1,6 +1,8 @@
 """FLAT step: telescope inputs, extraction aperture, detector response and traces."""
 
+from collections.abc import Iterable
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 from numba import njit
@@ -27,25 +29,20 @@ from .products import (
     validate,
 )
 
-PARAMETERS = {
-    "profile_width": (
-        "planetes.calib.profile-width",
-        "profile-width",
-        "Full extraction aperture in detector pixels",
-    )
-}
-
 PROFILE_WIDTH = 10.0
 
 
 def calibrate_flat_file(
-    telescope_flats,
+    telescope_flats: Iterable[Path],
     dark: DarkCalibration,
     bad: BadPixelMap,
     *,
     profile_width: float = PROFILE_WIDTH,
 ) -> FlatCalibration:
-    """Resolve four FLAT_RAW shutters and return geometry, without saving products."""
+    """Read four telescope flats with their DARK/BAD; return response and geometry.
+
+    ``profile_width`` is the full extraction aperture in detector pixels.
+    """
 
     telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
     unknown = []

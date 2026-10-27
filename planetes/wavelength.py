@@ -17,6 +17,7 @@ from .instrument import N_OUTPUTS
 from .io.fits import read_product
 from .io.raw import check_raw_calibrations, iter_raw_cube
 from .products import (
+    DarkCalibration,
     FlatCalibration,
     Provenance,
     WavelengthCalibration,
@@ -25,17 +26,19 @@ from .products import (
     validate,
 )
 
-PARAMETERS = {}
-
 DETECTION_SIGMA = 3.0
 SURFACE_DEGREE = 3
 RANSAC_ITERATIONS = 1_000_000
 
 
 def calibrate_wavelength_file(
-    path, dark, flat, *, reference=None
+    path: Path,
+    dark: DarkCalibration,
+    flat: FlatCalibration,
+    *,
+    reference: WavelengthReference | None = None,
 ) -> WavelengthCalibration:
-    """Read a lamp cube and return a wavelength solution, without writing files."""
+    """Read the lamp with its DARK and FLAT geometry; return wavelengths in metres."""
 
     unknown = check_raw_calibrations(path, dark, flat, category="WAVELAMP_RAW")
     reference = load_wavelength_reference() if reference is None else reference
@@ -483,14 +486,14 @@ def _grid_search_kernel(
     return best_params
 
 
-def wavelength_reference_path():
+def wavelength_reference_path() -> Path:
     """Return the installed static line-list file."""
     from importlib.resources import files
 
     return Path(str(files("planetes").joinpath("data/wavelength_lines.fits")))
 
 
-def load_wavelength_reference(path=None):
+def load_wavelength_reference(path: Path | None = None) -> WavelengthReference:
     """Load the packaged or explicitly supplied static reference, including origin labels."""
 
     return read_product(

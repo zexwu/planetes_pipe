@@ -2,7 +2,7 @@ include README.md pyproject.toml uv.lock
 recursive-include planetes *.py *.ecsv *.fits
 recursive-include tests *.py
 recursive-include docs *.md *.dot *.svg *.png
-recursive-include examples *.in
+recursive-include examples *.in *.py
 recursive-include integration *.patch *.json
 prune build
 prune reduced

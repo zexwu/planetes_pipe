@@ -129,7 +129,7 @@ class WavelengthReference:
 
 @dataclass(frozen=True, slots=True)
 class P2VMCalibration:
-    """Full 24-output physical response, inverse matrix and retained fit diagnostics."""
+    """Full 24-output instrumental response, inverse and fit diagnostics on one grid."""
 
     p2vm: Array = array("", "data_channel,output,wavelength")
     wavelength_m: Array = array("m", "wavelength")
@@ -157,7 +157,7 @@ class P2VMCalibration:
 
 @dataclass(frozen=True, slots=True)
 class VisibilityObservables:
-    """Instrumental observables; even one frame retains a length-one frame axis."""
+    """Per-frame instrumental photometry, complex coherent flux, VISAMP and flags."""
 
     photometric_flux_adu: Array = array("adu", "frame,telescope,wavelength")
     coherent_flux_adu: Array = array("adu", "frame,baseline,wavelength")
@@ -171,7 +171,7 @@ class VisibilityObservables:
 
 @dataclass(frozen=True, slots=True)
 class ReducedObservables(VisibilityObservables):
-    """Complete instrumental science product, with measured GD and differential phase."""
+    """Per-frame instrumental P2VMRED including GD [m] and differential phase [deg]."""
 
     group_delay_m: Array = array("m", "frame,baseline")
     differential_phase_deg: Array = array("deg", "frame,baseline,wavelength")

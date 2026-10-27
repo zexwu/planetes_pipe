@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.5.0
+# PLANETES pipeline 0.5.1
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
@@ -72,6 +72,12 @@ PyEsoRex can save its own `.rc` parameter file; a project YAML is unnecessary.
 
 ## Run from Python
 
+[examples/reduce.py](examples/reduce.py) is a complete linear script: edit its raw
+and output directories, then run it. It explicitly selects separate main, lamp
+and science DARKs and saves eight calibration/instrumental products. Its P2VM call
+has no phase reference; supply an explicitly selected instrumental reference and
+matching DARK in that call when available.
+
 ```python
 from pathlib import Path
 from planetes.dark import calibrate_dark_file
@@ -91,11 +97,13 @@ flat = calibrate_flat_file(telescopes, main_dark, bad)
 wave = calibrate_wavelength_file(raw / 'wave.fits', wave_dark, flat)
 p2vm = calibrate_p2vm_file(
     flat, wave, main_dark, telescope_flats=telescopes, baseline_cubes=baselines,
-    phase_reference=raw / 'sci.fits', phase_dark=science_dark,
 )
 result = reduce_file(raw / 'sci.fits', science_dark, flat, wave, p2vm)
 write_product(Path('/absolute/new-output/planetes_reduced.fits'), result)
 ```
+
+For an instrumental phase reference, explicitly pass its raw path as
+`phase_reference` and its selected DARK as `phase_dark` to `calibrate_p2vm_file`.
 
 Save each calibration with the same `write_product` function when needed. Read it
 with `read_product(path, ExpectedClass)` from `planetes.io.fits`. For single frames:
@@ -137,9 +145,10 @@ it can also be called directly with arrays. Saving stays explicit.
 
 There is one implementation per step. Python, GUI and PyEsoRex use those same
 functions. No task dispatcher, separate calibration layer or identity module is
-needed. CPL parameter spelling is declared in each step's `PARAMETERS` dictionary;
-Python function signatures supply the defaults. Importing or running a step does
-not require CPL or Qt.
+needed. Scientific parameters and defaults belong to the step functions. Each
+corresponding recipe declares the CPL names/aliases and SOF multiplicities; shared
+adapters only translate those declarations. Importing or running a step does not
+require CPL or Qt.
 
 Wavelength, OPD and GD use **metres throughout Python and FITS**. Flux stays ADU,
 coherence phases use radians and differential phase uses degrees. Valid Python
@@ -162,7 +171,11 @@ Exact comparisons use the same numerical environment and matching Numba cache
 states: the old algorithm itself has a small cold/warm difference. Cache and
 fastmath settings are retained.
 
-Version 0.5.0 uses product format 4 and raw format 3. Regenerate earlier
+Version 0.5.1 keeps product format 4, raw format 3, the Python calling interfaces
+and recipe parameter names/defaults from 0.5.0. Existing 0.5.0 products remain
+readable. CPL parameter declarations now live in their corresponding recipes.
+
+Version 0.5.0 introduced product format 4 and raw format 3. Regenerate earlier
 calibration/science products; existing standardized raw cubes remain usable.
 Python imports from `planetes.tasks`, `planetes.calibration` and
 `planetes.identity` are removed. Length fields and parameters now end in `_m`
@@ -170,6 +183,11 @@ Python imports from `planetes.tasks`, `planetes.calibration` and
 [The product contract](docs/PRODUCT_CONTRACT.md) defines the layouts and parameters.
 [QC definitions](docs/QC_PARAMETERS.md) map measurements to the checked GRAVITY
 1.9.6 source, with units and statistical domains.
+
+The current product is per-frame instrumental **P2VMRED**. Averaged VIS/VIS2/T3
+and astronomical transfer-function calibration are later scientific stages; no
+placeholder modules or output classes are added for them. Instrumental phase
+references and astronomical calibrators have separate physical roles.
 
 Outputs remain instrumental ADU, visibility amplitude, GD and differential phase.
 ESO dictionary approval, EDPS association, uncertainties, transfer functions,

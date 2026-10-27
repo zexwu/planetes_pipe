@@ -101,11 +101,11 @@ class StandaloneScienceTests(unittest.TestCase):
         code = """
 import importlib.abc
 import sys
-class NoFileOrExecutorImports(importlib.abc.MetaPathFinder):
+class NoExecutorImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split('.')[0] in {'cpl', 'pyesorex'}:
             raise ImportError(f'Forbidden scientific dependency: {fullname}')
-sys.meta_path.insert(0, NoFileOrExecutorImports())
+sys.meta_path.insert(0, NoExecutorImports())
 import numpy as np
 from planetes import dark, flat, wavelength, p2vm
 from planetes import extraction, reduction, qc

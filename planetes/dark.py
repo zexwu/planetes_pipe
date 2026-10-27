@@ -14,6 +14,7 @@ from .io.fits import read_product
 from .io.raw import iter_raw_cube, read_raw_metadata
 from .products import (
     BadPixelMap,
+    Dark,
     DarkCalibration,
     DarkImage,
     Provenance,
@@ -22,21 +23,13 @@ from .products import (
     validate,
 )
 
-PARAMETERS = {
-    "bad_pixel_threshold": (
-        "planetes.calib.bad-dark-threshold",
-        "bad-dark-threshold",
-        "Positive multiplier in the retained dark bad-pixel tests",
-    )
-}
-
 BAD_PIXEL_THRESHOLD = 5.0
 
 
 def calibrate_dark_file(
     path: Path, *, bad_pixel_threshold: float = BAD_PIXEL_THRESHOLD
 ) -> tuple[DarkCalibration, BadPixelMap]:
-    """Return complete DARK and independent BAD from a declared raw dark stack."""
+    """Measure DARK mean/RMS and BAD flags from a full raw stack; saving is explicit."""
 
     metadata = read_raw_metadata(path, category="DARK_RAW")
     dark = compute_dark(iter_raw_cube(path))
@@ -120,7 +113,7 @@ def compute_badpix(dark: DarkCalibration, *, threshold: float = 5.0) -> BadPixel
     )
 
 
-def compute_dark(chunks) -> DarkCalibration:
+def compute_dark(chunks: Iterable[NDArray[np.float32]]) -> DarkCalibration:
     """Measure temporal mean and population RMS from a complete stack."""
     mean, rms, count = frame_statistics(chunks)
     if count < 2:
@@ -136,7 +129,7 @@ def compute_dark(chunks) -> DarkCalibration:
     return result
 
 
-def load_dark(path: Path):
+def load_dark(path: Path) -> Dark:
     """GUI loader: complete new DARK, or explicitly selected raw/image subtraction data."""
 
     path = Path(path)

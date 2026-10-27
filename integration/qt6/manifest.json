@@ -1,6 +1,6 @@
 {
   "baseline_commit": "61f519f",
-  "pipeline_version": "0.5.0",
+  "pipeline_version": "0.5.1",
   "files": [
     {
       "path": "camview.py",

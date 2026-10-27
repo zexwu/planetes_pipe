@@ -1,4 +1,4 @@
-"""PyCPL binding for the ordinary wave scientific task."""
+"""SOF, CPL parameters and DFS adapter for the wave step."""
 
 from cpl import ui
 
@@ -14,10 +14,11 @@ from planetes.recipes.dfs import (
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
 from planetes.wavelength import (
-    PARAMETERS,
     calibrate_wavelength_file,
     wavelength_reference_path,
 )
+
+PARAMETERS = {}
 
 
 class PlanetesWave(ui.PyRecipe):
@@ -28,8 +29,8 @@ class PlanetesWave(ui.PyRecipe):
     _author = "PLANETES contributors"
     _email = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "PLANETES wave calibration/reduction"
-    _description = "Explicit SOF roles and shared scientific defaults; GRAVITY-derived categories and explicit PLANETES instrumental extensions."
+    _synopsis = "Fit the detector wavelength calibration"
+    _description = "Use WAVELAMP_RAW, its DARK, FLAT geometry and LINE_LIST to fit wavelengths in metres."
 
     def __init__(self):
         super().__init__()

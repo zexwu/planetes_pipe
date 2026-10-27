@@ -76,7 +76,7 @@ actual bench deployment remains a separate hardware acceptance step.
 
 On another machine, verify the original hashes, back up all four files and run
 `git apply --check` for each patch from the devel directory before applying.
-Do not apply again to already updated files. Install the matching PLANETES 0.5.0 version
+Do not apply again to already updated files. Install the matching PLANETES 0.5.1 version
 without replacing existing camera/Qt dependencies. To restore, preserve later local
 edits and recover the four original files from:
 
@@ -92,3 +92,7 @@ and their portable patches are updated together; no compatibility shim is requir
 Version 0.5 uses `FrameReducer.wavelength_m` and `extractor.wavelength_map_m`.
 The viewer consumes those metre arrays directly and labels its axes accordingly.
 Regenerate calibration products for format 4 before launching this version.
+
+The 0.5.1 interface cleanup preserves the viewer API and format-4 calibrations.
+Python science functions own their defaults; the GUI needs no CPL parameter names
+or SOF declarations.

@@ -1,9 +1,4 @@
-"""
-Science data reduction module for the PLANETES pipeline.
-
-This module handles the reduction of science target data, including
-visibility extraction, group delay computation, and phase calculation.
-"""
+"""P2VMRED step: per-frame instrumental fluxes, visibility, group delay and phase."""
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -13,46 +8,41 @@ import numpy as np
 from numpy.typing import NDArray
 
 from . import log
-from .extraction import extract_file, prepare_extraction
+from .extraction import SpectralExtractor, extract_file, prepare_extraction
 from .instrument import IMAG_SLICE, N_BASELINES, N_TELESCOPES, REAL_SLICE
 from .io.fits import read_product
 from .io.raw import check_raw_calibrations
 from .products import (
+    Dark,
+    DarkCalibration,
+    FlatCalibration,
     P2VMCalibration,
     Provenance,
     ReducedObservables,
     VisibilityObservables,
+    WavelengthCalibration,
     fingerprint,
     require_parent,
     validate,
     validate_gd_range,
 )
 
-PARAMETERS = {
-    "gd_search_min_m": (
-        "planetes.reduce.gd-search-min-m",
-        "gd-search-min-m",
-        "Coarse science GD lower initialization [m]",
-    ),
-    "gd_search_max_m": (
-        "planetes.reduce.gd-search-max-m",
-        "gd-search-max-m",
-        "Coarse science GD upper initialization [m]",
-    ),
-}
-
 
 def reduce_file(
     path: Path,
-    dark,
-    flat,
-    wave,
+    dark: DarkCalibration,
+    flat: FlatCalibration,
+    wave: WavelengthCalibration,
     p2vm: P2VMCalibration,
     *,
-    gd_search_min_m=-100e-6,
-    gd_search_max_m=100e-6,
+    gd_search_min_m: float = -100e-6,
+    gd_search_max_m: float = 100e-6,
 ) -> ReducedObservables:
-    """Read the complete raw science cube, apply explicit calibrations and return results."""
+    """Apply selected calibrations to every raw frame and return instrumental P2VMRED.
+
+    Extraction uses the P2VM's saved wavelength grid. No averaging is performed;
+    fluxes are ADU, GD and its search bounds are metres, differential phase is deg.
+    """
 
     unknown = check_raw_calibrations(path, dark, flat, category="SINGLE_SCI_RAW")
     validate(dark)
@@ -86,10 +76,10 @@ def reduce_spectra(
     spectra: NDArray,
     p2vm: P2VMCalibration,
     *,
-    gd_search_min_m=-100e-6,
-    gd_search_max_m=100e-6,
-    diagnostics=True,
-):
+    gd_search_min_m: float = -100e-6,
+    gd_search_max_m: float = 100e-6,
+    diagnostics: bool = True,
+) -> ReducedObservables | VisibilityObservables:
     """Apply P2VM and calculate the retained instrumental visibility observables."""
     log.info("Applying P2VM to extract visibility for science spectra...")
     p2vmred = np.einsum("box,ofx->fbx", p2vm.p2vm, spectra)
@@ -210,13 +200,13 @@ def compute_gdelay(
 class FrameReducer:
     """Load/prepare calibration once; raw unbinned frames always use the formal core."""
 
-    flat: object
-    wave: object
+    flat: FlatCalibration
+    wave: WavelengthCalibration
     p2vm: P2VMCalibration
     calibration_dir: Path | None = None
-    extractor: object = field(init=False, repr=False)
+    extractor: SpectralExtractor = field(init=False, repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         validate(self.p2vm)
         require_parent(self.p2vm, "flat", self.flat)
         require_parent(self.p2vm, "wave", self.wave)
@@ -238,22 +228,22 @@ class FrameReducer:
         self.p2vm = P2VMCalibration(**snapshots)
 
     @property
-    def n_baselines(self):
+    def n_baselines(self) -> int:
         return len(self.p2vm.baseline_telescopes)
 
     @property
-    def wavelength_m(self):
+    def wavelength_m(self) -> NDArray:
         return self.extractor.wavelength_m
 
     def reduce_frame(
         self,
         raw: NDArray,
         *,
-        dark,
-        diagnostics=False,
-        gd_search_min_m=-100e-6,
-        gd_search_max_m=100e-6,
-    ):
+        dark: Dark,
+        diagnostics: bool = False,
+        gd_search_min_m: float = -100e-6,
+        gd_search_max_m: float = 100e-6,
+    ) -> ReducedObservables | VisibilityObservables:
         """Reduce one RAW frame; caller must not subtract its selected dark beforehand."""
         cube = np.asarray(raw, dtype=np.float32)[None, :, :]
         spectra = self.extractor.extract(cube, dark)

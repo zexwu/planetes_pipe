@@ -7,8 +7,13 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
+from .instrument import DetectorSetup
 from .io.raw import iter_raw_cube
 from .products import (
+    Dark,
+    DarkCalibration,
+    FlatCalibration,
+    WavelengthCalibration,
     require_parent,
     validate,
     validate_wavelength,
@@ -91,13 +96,13 @@ class SpectralExtractor:
     profile_x_pixels: NDArray
     profile_y_pixels: NDArray
     detector_shape: tuple[int, int]
-    setup: object
+    setup: DetectorSetup | None
     wavelength_map_m: NDArray
     wavelength_m: NDArray
     detector_flat_spectra: NDArray
     resampled_flat_spectra: NDArray
 
-    def extract(self, cube: NDArray, dark) -> NDArray:
+    def extract(self, cube: NDArray, dark: Dark) -> NDArray:
         """Subtract one explicitly supplied dark and extract every frame of this chunk."""
         if (
             cube.ndim != 3
@@ -117,7 +122,9 @@ class SpectralExtractor:
         return aligned
 
 
-def prepare_extraction(flat, wave, wavelength_m: NDArray) -> SpectralExtractor:
+def prepare_extraction(
+    flat: FlatCalibration, wave: WavelengthCalibration, wavelength_m: NDArray
+) -> SpectralExtractor:
     """Validate scientific parents and coverage once, then snapshot the required arrays."""
     validate(flat)
     validate(wave)
@@ -147,7 +154,9 @@ def prepare_extraction(flat, wave, wavelength_m: NDArray) -> SpectralExtractor:
     )
 
 
-def extract_file(path: Path, extractor, dark) -> NDArray:
+def extract_file(
+    path: Path, extractor: SpectralExtractor, dark: DarkCalibration
+) -> NDArray:
     """Read and extract a whole file, retaining all frames and the 16-frame chunking."""
 
     return np.concatenate(

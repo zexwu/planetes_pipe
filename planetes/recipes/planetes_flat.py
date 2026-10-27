@@ -1,15 +1,23 @@
-"""PyCPL binding for the ordinary flat scientific task."""
+"""SOF, CPL parameters and DFS adapter for the flat step."""
 
 from cpl import ui
 
 from planetes import __version__
-from planetes.flat import PARAMETERS, calibrate_flat_file
+from planetes.flat import calibrate_flat_file
 from planetes.products import BadPixelMap, DarkCalibration
 from planetes.recipes.dfs import (
     save_product,
     select_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
+
+PARAMETERS = {
+    "profile_width": (
+        "planetes.calib.profile-width",
+        "profile-width",
+        "Full extraction aperture in detector pixels",
+    )
+}
 
 
 class PlanetesFlat(ui.PyRecipe):
@@ -20,8 +28,8 @@ class PlanetesFlat(ui.PyRecipe):
     _author = "PLANETES contributors"
     _email = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "PLANETES flat calibration/reduction"
-    _description = "Explicit SOF roles and shared scientific defaults; GRAVITY-derived categories and explicit PLANETES instrumental extensions."
+    _synopsis = "Calibrate spectral traces and extraction geometry"
+    _description = "Use four FLAT_RAW shutter configurations with DARK and BAD to measure response and extraction geometry."
 
     def __init__(self):
         super().__init__()
@@ -30,7 +38,9 @@ class PlanetesFlat(ui.PyRecipe):
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
         paths, cal, used = select_inputs(
-            frameset, {"DARK": DarkCalibration, "BAD": BadPixelMap, "FLAT_RAW": None}
+            frameset,
+            {"DARK": DarkCalibration, "BAD": BadPixelMap, "FLAT_RAW": None},
+            multiple={"FLAT_RAW": 4},
         )
         product = calibrate_flat_file(
             paths["FLAT_RAW"], cal["DARK"], cal["BAD"], **options

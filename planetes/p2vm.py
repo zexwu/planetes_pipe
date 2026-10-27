@@ -1,7 +1,8 @@
 """P2VM step: input sequence, spectral calibration, parameters and physical response."""
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,8 +23,10 @@ from .io.raw import check_raw_calibrations, identify_raw
 from .products import (
     CalibrationSpectra,
     DarkCalibration,
+    FlatCalibration,
     P2VMCalibration,
     Provenance,
+    WavelengthCalibration,
     fingerprint,
     positive,
     validate_gd_range,
@@ -31,57 +34,28 @@ from .products import (
 )
 from .reduction import compute_gdelay
 
-PARAMETERS = {
-    "phase_correction": (
-        "planetes.calib.phase-correction",
-        "phase-correction",
-        "Apply supplied phase reference",
-    ),
-    "wavelength_min_m": (
-        "planetes.calib.wavelength-min-m",
-        "wavelength-min-m",
-        "P2VM target minimum [m]",
-    ),
-    "wavelength_max_m": (
-        "planetes.calib.wavelength-max-m",
-        "wavelength-max-m",
-        "P2VM target maximum [m]",
-    ),
-    "wavelength_channels": (
-        "planetes.calib.wavelength-channels",
-        "wavelength-channels",
-        "Integer target grid channels",
-    ),
-    "gd_search_min_m": (
-        "planetes.calib.gd-search-min-m",
-        "gd-search-min-m",
-        "Coarse GD lower initialization [m]; Newton remains unconstrained",
-    ),
-    "gd_search_max_m": (
-        "planetes.calib.gd-search-max-m",
-        "gd-search-max-m",
-        "Coarse GD upper initialization [m]; Newton remains unconstrained",
-    ),
-}
-
 
 def calibrate_p2vm_file(
-    flat,
-    wave,
-    main_dark,
+    flat: FlatCalibration,
+    wave: WavelengthCalibration,
+    main_dark: DarkCalibration,
     *,
-    telescope_flats,
-    baseline_cubes,
-    phase_reference=None,
-    phase_dark=None,
-    phase_correction=True,
-    wavelength_min_m=1.15e-6,
-    wavelength_max_m=1.30e-6,
-    wavelength_channels=151,
-    gd_search_min_m=-30e-6,
-    gd_search_max_m=30e-6,
+    telescope_flats: Iterable[Path],
+    baseline_cubes: Iterable[Path],
+    phase_reference: Path | None = None,
+    phase_dark: DarkCalibration | None = None,
+    phase_correction: bool = True,
+    wavelength_min_m: float = 1.15e-6,
+    wavelength_max_m: float = 1.30e-6,
+    wavelength_channels: int = 151,
+    gd_search_min_m: float = -30e-6,
+    gd_search_max_m: float = 30e-6,
 ) -> P2VMCalibration:
-    """Read the P2VM sequence, extract spectra and return the calibrated response."""
+    """Read the calibration sequence and return the full 24-output response/inverse.
+
+    Wavelength and coarse GD bounds use metres. The optional phase reference
+    defines the instrumental phase and uses its selected DARK, or ``main_dark``.
+    """
 
     if phase_dark is not None and phase_reference is None:
         raise ValueError("phase_dark requires phase_reference")
@@ -453,15 +427,15 @@ def fit_ellipse_linear(spec: NDArray, envs: NDArray) -> tuple[NDArray, NDArray]:
 
 
 def extract_calibration_files(
-    flat,
-    wave,
-    main_dark,
+    flat: FlatCalibration,
+    wave: WavelengthCalibration,
+    main_dark: DarkCalibration,
     *,
-    telescope_flats,
-    baseline_cubes,
-    wavelength_m,
-    phase_reference=None,
-    phase_dark=None,
+    telescope_flats: Iterable[Path],
+    baseline_cubes: Iterable[Path],
+    wavelength_m: NDArray,
+    phase_reference: Path | None = None,
+    phase_dark: DarkCalibration | None = None,
 ) -> CalibrationSpectra:
     """Extract calibration files and infer the retained physical output mapping."""
 
@@ -552,7 +526,9 @@ def extract_calibration_files(
     )
 
 
-def wavelength_grid(low=1.15e-6, high=1.30e-6, channels=151) -> NDArray:
+def wavelength_grid(
+    low: float = 1.15e-6, high: float = 1.30e-6, channels: int = 151
+) -> NDArray:
     """Construct the explicit P2VM grid, with enough central-band GD samples."""
     positive(low, "wavelength minimum")
     positive(high, "wavelength maximum")

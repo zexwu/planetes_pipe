@@ -115,6 +115,8 @@ class ESOChainTests(unittest.TestCase):
                     "pyesorex",
                     f"--recipe-dir={recipes}",
                     "planetes_reduce",
+                    "--gd-search-min-m=-12e-6",
+                    "--gd-search-max-m=12e-6",
                     str(sof),
                 ],
                 cwd=output,
@@ -128,7 +130,13 @@ class ESOChainTests(unittest.TestCase):
             wave = read_product(inputs["WAVE"], WavelengthCalibration)
             p2vm = read_product(science_inputs["P2VM"], P2VMCalibration)
             expected = reduce_file(
-                science_file, read_product(dark_calib), flat, wave, p2vm
+                science_file,
+                read_product(dark_calib),
+                flat,
+                wave,
+                p2vm,
+                gd_search_min_m=-12e-6,
+                gd_search_max_m=12e-6,
             )
             for field in fields(expected):
                 if field.name == "provenance":
@@ -143,6 +151,8 @@ class ESOChainTests(unittest.TestCase):
                 else:
                     self.assertEqual(before, after)
             self.assertTrue(actual.flags[0].all())
+            self.assertEqual(actual.provenance.parameters["gd_search_min_m"], -12e-6)
+            self.assertEqual(actual.provenance.parameters["gd_search_max_m"], 12e-6)
             with fits.open(output / "planetes_reduced.fits") as hdus:
                 self.assertEqual(hdus[0].header["ESO PRO CATG"], "SINGLE_SCI_P2VMRED")
                 self.assertNotIn("ESO QC REJECTED RATIO", hdus[0].header)
@@ -216,6 +226,55 @@ class P2VMRecipeTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "Duplicate or incomplete input tag"):
             self.recipe.run(duplicate, {})
+        for role in ("FLAT_RAW", "P2VM_RAW"):
+            missing = next(frame for frame in self.frames if frame.tag == role)
+            incomplete = ui.FrameSet(
+                [frame for frame in self.frames if frame.file != missing.file]
+            )
+            with (
+                self.subTest(role=role),
+                self.assertRaisesRegex(ValueError, f"incomplete input tag {role}"),
+            ):
+                self.recipe.run(incomplete, {})
+
+    @unittest.skipUnless(
+        find_spec("pyesorex") is not None, "PyEsoRex runtime not installed"
+    )
+    def test_executor_applies_wavelength_grid_and_group_delay_parameters(self):
+        recipes = Path(planetes.__file__).parent / "recipes"
+        sof = self.root / "p2vm.sof"
+        sof.write_text(
+            "".join(f"{path} {tag}\n" for tag, path in input_rows(self.paths))
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pyesorex",
+                f"--recipe-dir={recipes}",
+                "planetes_p2vm",
+                "--phase-correction=false",
+                "--wavelength-min-m=1.17e-6",
+                "--wavelength-max-m=1.28e-6",
+                "--wavelength-channels=17",
+                "--gd-search-min-m=-12e-6",
+                "--gd-search-max-m=12e-6",
+                str(sof),
+            ],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        product = read_product(self.root / "planetes_p2vm.fits", P2VMCalibration)
+        self.assertEqual(product.p2vm.shape, (16, 24, 17))
+        np.testing.assert_array_equal(
+            product.wavelength_m, np.linspace(1.17e-6, 1.28e-6, 17)
+        )
+        self.assertEqual(product.provenance.parameters["gd_search_min_m"], -12e-6)
+        self.assertEqual(product.provenance.parameters["gd_search_max_m"], 12e-6)
+        self.assertFalse(product.provenance.parameters["phase_reference_applied"])
 
     @unittest.skipUnless(
         find_spec("pyesorex") is not None, "PyEsoRex runtime not installed"

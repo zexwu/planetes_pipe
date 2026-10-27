@@ -1,9 +1,9 @@
-"""PyCPL binding for the ordinary p2vm scientific task."""
+"""SOF, CPL parameters and DFS adapter for the p2vm step."""
 
 from cpl import ui
 
 from planetes import __version__
-from planetes.p2vm import PARAMETERS, calibrate_p2vm_file
+from planetes.p2vm import calibrate_p2vm_file
 from planetes.products import (
     DarkCalibration,
     FlatCalibration,
@@ -15,6 +15,39 @@ from planetes.recipes.dfs import (
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
 
+PARAMETERS = {
+    "phase_correction": (
+        "planetes.calib.phase-correction",
+        "phase-correction",
+        "Apply supplied phase reference",
+    ),
+    "wavelength_min_m": (
+        "planetes.calib.wavelength-min-m",
+        "wavelength-min-m",
+        "P2VM target minimum [m]",
+    ),
+    "wavelength_max_m": (
+        "planetes.calib.wavelength-max-m",
+        "wavelength-max-m",
+        "P2VM target maximum [m]",
+    ),
+    "wavelength_channels": (
+        "planetes.calib.wavelength-channels",
+        "wavelength-channels",
+        "Integer target grid channels",
+    ),
+    "gd_search_min_m": (
+        "planetes.calib.gd-search-min-m",
+        "gd-search-min-m",
+        "Coarse GD lower initialization [m]; Newton remains unconstrained",
+    ),
+    "gd_search_max_m": (
+        "planetes.calib.gd-search-max-m",
+        "gd-search-max-m",
+        "Coarse GD upper initialization [m]; Newton remains unconstrained",
+    ),
+}
+
 
 class PlanetesP2VM(ui.PyRecipe):
     """Execute the same p2vm function available to Python callers."""
@@ -24,8 +57,8 @@ class PlanetesP2VM(ui.PyRecipe):
     _author = "PLANETES contributors"
     _email = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "PLANETES p2vm calibration/reduction"
-    _description = "Explicit SOF roles and shared scientific defaults; GRAVITY-derived categories and explicit PLANETES instrumental extensions."
+    _synopsis = "Calibrate the instrumental pixel-to-visibility response"
+    _description = "Use telescope and baseline sequences with explicit calibrations to fit the full 24-output response and inverse. An optional instrumental phase reference has its own selected DARK."
 
     def __init__(self):
         super().__init__()
@@ -44,6 +77,7 @@ class PlanetesP2VM(ui.PyRecipe):
             frameset,
             roles,
             {"PHASE_REFERENCE": None, "PHASE_DARK_CALIB": DarkCalibration},
+            multiple={"FLAT_RAW": 4, "P2VM_RAW": 6},
         )
         product = calibrate_p2vm_file(
             cal["FLAT"],

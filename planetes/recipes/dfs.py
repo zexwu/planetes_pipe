@@ -20,8 +20,6 @@ from planetes.products import (
     WavelengthReference,
 )
 
-RAW_INPUT_COUNTS = {"FLAT_RAW": 4, "P2VM_RAW": 6}
-
 
 def cpl_frame_type(cls):
     return (
@@ -37,9 +35,10 @@ def cpl_frame_type(cls):
     )
 
 
-def select_inputs(frameset, required, optional=None):
-    """Select SOF roles and load products; each step checks its raw metadata."""
+def select_inputs(frameset, required, optional=None, *, multiple=None):
+    """Load recipe-declared SOF roles; repeated roles return lists of paths."""
     optional = {} if optional is None else optional
+    multiple = {} if multiple is None else multiple
     roles = {**required, **optional}
     grouped = {}
     for frame in frameset:
@@ -55,12 +54,12 @@ def select_inputs(frameset, required, optional=None):
         entries = grouped.get(role, [])
         if not entries:
             continue
-        count = RAW_INPUT_COUNTS.get(role, 1)
+        count = multiple.get(role, 1)
         if len(entries) != count:
             raise ValueError(
                 f"Duplicate or incomplete input tag {role}: expected {count}, got {len(entries)}"
             )
-        paths[role] = entries if role in RAW_INPUT_COUNTS else entries[0]
+        paths[role] = entries if role in multiple else entries[0]
         for path in entries:
             if allowed is not None:
                 objects[role] = read_product(path, allowed)

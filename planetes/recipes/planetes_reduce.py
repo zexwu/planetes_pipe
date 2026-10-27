@@ -1,4 +1,4 @@
-"""PyCPL binding for the ordinary reduce scientific task."""
+"""SOF, CPL parameters and DFS adapter for the reduce step."""
 
 from cpl import ui
 
@@ -14,7 +14,20 @@ from planetes.recipes.dfs import (
     select_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
-from planetes.reduction import PARAMETERS, reduce_file
+from planetes.reduction import reduce_file
+
+PARAMETERS = {
+    "gd_search_min_m": (
+        "planetes.reduce.gd-search-min-m",
+        "gd-search-min-m",
+        "Coarse science GD lower initialization [m]",
+    ),
+    "gd_search_max_m": (
+        "planetes.reduce.gd-search-max-m",
+        "gd-search-max-m",
+        "Coarse science GD upper initialization [m]",
+    ),
+}
 
 
 class PlanetesReduce(ui.PyRecipe):
@@ -25,8 +38,8 @@ class PlanetesReduce(ui.PyRecipe):
     _author = "PLANETES contributors"
     _email = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "PLANETES reduce calibration/reduction"
-    _description = "Explicit SOF roles and shared scientific defaults; GRAVITY-derived categories and explicit PLANETES instrumental extensions."
+    _synopsis = "Extract per-frame instrumental interferometric observables"
+    _description = "Use explicit DARK, FLAT, WAVE and P2VM calibrations to extract every SINGLE_SCI_RAW frame. Return instrumental fluxes, visibility amplitude, GD and differential phase."
 
     def __init__(self):
         super().__init__()

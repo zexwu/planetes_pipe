@@ -1,4 +1,4 @@
-# Scientific methods in PLANETES 0.5.0
+# Scientific methods in PLANETES 0.5.1
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
@@ -11,7 +11,7 @@ Read the complete raw stack, accumulate sum and squared sum in float64, and
 return float32 temporal mean and population RMS. The variance is
 `max(E[x²] - E[x]², 0)`. Complete calibration requires at least two frames.
 
-The independent BAD product uses the original bad-pixel rule uses the spatial median of the mean image and of
+The independent BAD product uses the spatial median of the mean image and of
 the temporal RMS. Mean values above/below median mean ± threshold × median RMS
 set hot/dead bits 1/2; RMS above threshold × median RMS sets noisy bit 4.
 The default threshold remains 5. This RMS includes whatever temporal variations
@@ -110,6 +110,17 @@ Profile centers and valid sparse pixel indices are one-based on disk, with paire
 descriptive and changes no weights, masks or rejection. GRAVITY's existing UM QC
 cards are converted only when writing the header.
 
-Changing numerical length units changes floating-point rounding. The full-data
-comparison in [CHANGE_REPORT](CHANGE_REPORT.md) distinguishes those differences
-from step reorganization; formulae and physical defaults are retained.
+The 0.5.0 migration to metre arithmetic introduced floating-point rounding
+differences documented in the historical report linked from
+[CHANGE_REPORT](CHANGE_REPORT.md). Version 0.5.1 keeps the same arithmetic and
+representation; its complete old/new comparison retains every scientific array.
+
+
+## Subsequent scientific stages
+
+The implemented chain stops at per-frame instrumental P2VMRED. Averaging needs
+explicit estimators based on coherent flux, photometry, selected samples and noise;
+it cannot be defined by simply taking the mean of the current VISAMP arrays.
+Transfer-function calibration then needs astronomical calibrator observations and
+a source model. The optional instrumental phase reference in P2VM has a separate
+role. These stages are documented here without introducing unimplemented modules.

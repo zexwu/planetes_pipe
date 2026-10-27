@@ -1,122 +1,92 @@
-# PLANETES 0.5：按科学步骤组织
+# PLANETES 0.5.1：科学步骤与 ESO 接口的边界
 
-这次将 DARK、FLAT、WAVE、P2VM 和 REDUCE 放在同一层级。
-每个文件保留自己的文件输入、参数、科学计算、内部 helper 和返回结果。
-完整处理入口放在文件前部，下面是数组计算与算法细节。
-Python、PyEsoRex 和 GUI 调用同一份实现。
+这轮落实“借鉴 GRAVITY 的物理阶段、产品语义和标定链，保留适合 Python
+的简单步骤结构”。基于0.5.0已有的五个同级步骤，进一步明确输入、参数、
+返回产品和 ESO 接口各自归属。科学算法、单位、默认值和文件格式保持一致。
 
-## 文件与入口
+## 代码从哪里看
 
-| 步骤 | 文件入口 | 同文件的数组计算 | 主要输入 → 输出 |
+| 步骤 | 文件入口 | 同文件的计算函数 | 返回结果的物理含义 |
 | --- | --- | --- | --- |
-| DARK/BAD | dark.calibrate_dark_file | compute_dark / compute_badpix | raw dark → mean、temporal RMS、坏像素图 |
-| FLAT | flat.calibrate_flat_file | compute_flat / trace_spectrum | 四台望远镜 flat + DARK/BAD → 响应与提取几何 |
-| WAVE | wavelength.calibrate_wavelength_file | compute_wavelength / line matching | lamp + DARK/FLAT + line list → 波长图与拟合残差 |
-| P2VM | p2vm.calibrate_p2vm_file | extract_calibration_files / compute_p2vm | telescope/baseline 序列及标定 → 完整物理响应与逆矩阵 |
-| REDUCE | reduction.reduce_file | reduce_spectra / compute_gdelay | science + DARK/FLAT/WAVE/P2VM → 仪器级观测量 |
+| DARK/BAD | dark.calibrate_dark_file | compute_dark / compute_badpix | 背景均值、时间 RMS、坏像素 bits |
+| FLAT | flat.calibrate_flat_file | compute_flat / trace_spectrum | 响应、光谱 trace、稀疏提取几何 |
+| WAVE | wavelength.calibrate_wavelength_file | compute_wavelength / line matching | 每个输出、每个像素的波长及拟合残差 |
+| P2VM | p2vm.calibrate_p2vm_file | extract_calibration_files / compute_p2vm | 全24输出物理响应、反演矩阵、实际波长网格 |
+| P2VMRED | reduction.reduce_file | reduce_spectra / compute_gdelay | 逐帧 photometry、复相干通量、VISAMP、GD、相位、flags |
 
-每一步的 CPL 参数名称、说明和别名在本文件 `PARAMETERS` 中声明；
-Python 函数签名给出默认值。字典本身不依赖 CPL。
-PyCPL 在 recipes/ 中将这些定义翻译成 ParameterList。
-WAVE 没有新增可调参数，保留原有检测、匹配和剔除常量。
+每个文件的入口位于前部，下面是本步骤的数组计算和 helper。共享提取/重采样
+位于 extraction.py，产品定义位于 products.py，物理通道约定位于 instrument.py，
+FITS 布局和 keywords 位于 io/。现有 GUI 通过 FrameReducer 复用同一计算。
 
-```text
-planetes/
-├── dark.py                DARK/BAD 输入、参数与计算；load_dark
-├── flat.py                FLAT 输入、aperture 参数、response 与 traces
-├── wavelength.py          lamp/reference 输入、谱线匹配、波长拟合
-├── p2vm.py                序列、目标网格、通道识别、P2VM 计算
-├── reduction.py           science 输入、观测量、GD；FrameReducer/load_reducer
-├── extraction.py          共用像素提取、波数重采样、16帧分块提取
-├── products.py            具名数组、单位、轴、必要检查和父标定指纹
-├── instrument.py          telescope/baseline/output 约定与探测器配置
-├── qc.py / plotting.py    质量统计和绘图
-├── io/                    raw 元数据、产品 FITS、keywords、不覆盖写入
-└── recipes/               SOF、CPL 参数翻译与 DFS 产品登记
-```
+新增 [examples/reduce.py](../examples/reduce.py) 是普通线性 `# %%` 脚本。
+修改 calibration raw、science raw 和新输出目录后即可运行。它显式选择
+三组 DARK，完成五步并保存8份标定/逐帧产品。默认未提供仪器相位参照；
+需要时，在 P2VM 调用处显式传入参考 raw 和对应 DARK。
 
-`calibration/`、`tasks.py` 和 `identity.py` 已删除。
-P2VM 特有的序列组合、望远镜交集和调制通道识别归入 p2vm.py；
-extraction.py 保留多个步骤确实共用的提取功能。产品内容指纹作为
-products.py 的一个函数保留，用于防止同形状但来自不同标定的产品混用。
-没有增加 dispatcher、兼容转发模块或另一套算法目录。
+## 本轮实质改动
 
-CPL import 全部限定在 recipes/。SOF 适配器负责角色与数量，
-raw 的分类和科学关联由实际步骤检查。QC 读取产品，不再依赖步骤模块；
-普通诊断中的条件数直接针对已保存的 P2VM 逆矩阵计算。
-当前22个非初始化模块不存在循环 import，包括函数内部的 import。
+- 科学函数保留物理参数、单位和默认值。CPL 参数名称、CLI alias、说明移至
+  对应 recipes/planetes_*.py；科学模块不再含 CPL 参数注册字典。
+- FLAT/P2VM recipe 各自声明重复 SOF 输入的数量。通用 select_inputs() 接受
+  显式声明，不再按隐藏的全局类别规则推断数量和返回类型。
+- 参数翻译仍从科学函数签名读取默认值，不新增另一份默认配置或任务调度系统。
+- 文件入口、提取器、FrameReducer 的类型标注明确表达物理输入和返回对象。
+  除文档/类型标注外，46个科学函数的计算体和默认值与0.5.0相同。
+- 五个 recipe 的 synopsis/description 直接说明实际物理操作。既有参数名称、
+  别名、默认值和调用接口保持一致。
+- 图和产品合同明确区分仪器标定、逐帧信号、后续统计平均和天文传递函数标定。
 
-## 单位与检查
+## 科学阶段与标定链
 
-波长、OPD、GD 的 Python 数组、函数参数和 FITS 数值统一使用 **m**。
-删除 um/m 往返、原始编码复用和私有 `_encoding` 缓存。
-例如 `wavelength_m`、`gd_search_min_m=-30e-6`；
-粗搜步长为 `1e-8 m`，物理范围和 Newton 算法保持原定义。
-这是 GRAVITY 的波长数据表使用的米制约定；相位保留 rad，差分相位保留 deg，
-通量保留 ADU。GRAVITY 源码同时定义的 `... UM SC` QC 卡仅在写 header 时换算，
-不进入计算过程。Python 像素索引仍为零基，FITS 输出按参考使用一基。
+DARK/BAD、FLAT、WAVE、P2VM 描述仪器。P2VMRED 保存每一帧的仪器级测量，
+其通量为 ADU，长度为 m；它的波长网格和 FLAT/WAVE 父关系来自实际 P2VM 标定。
+main、lamp、science 数据组分别使用其明确选定的 DARK。
 
-检查保留在会影响结果的边界：
+后续平均阶段需要定义 VIS/VIS2/T3 的估计量、权重、去偏差和误差。
+天文标定还需要 calibrator 观测及源模型。P2VM 的仪器 phase reference
+和天文 calibrator 的作用分别说明；本轮只在文档中画出后续阶段。
 
-- 输入类别、曝光和探测器几何匹配；防止错扣 dark。
-- 父标定、波长覆盖和 ABCD/telescope 映射；防止同形状标定混用。
-- 稀疏索引、必要数组形状及参数范围；防止像素越界和无意义计算。
-- 外部 FITS 的单位、checksum、内容指纹和不覆盖写入。
-
-删去逐字段的通用 metadata/类型遍历、仅检查 hash 字符串外观的逻辑，以及
-SOF、文件入口、分块读取之间重复的 raw 分类检查。P2VM 序列不再在每次提取时
-重新检查同一批 raw/DARK。实时循环不计算产品指纹。
-QC 继续只报告，不新增 rejection、阈值或权重。
+本轮保留现有掩码、阈值、剔除、归一化、相位约定和报告型 QC。
+必要检查仍集中于物理关联、形状/索引、波长覆盖和外部文件边界。
 
 ## 流程图
 
-![代码组织与调用关系](architecture.png)
+![入口、科学步骤和公共部分](architecture.png)
 
-![数据和标定的流向](dataflow.png)
+![标定、逐帧结果和后续科学阶段](dataflow.png)
 
-## 实际验证结果
+## 验证结果
 
-| 验证 | 结果 |
+| 验证 | 实际结果 |
 | --- | --- |
-| 维护测试 | 54项通过，包括真实 PyCPL/PyEsoRex、父标定、单位、flags 与文件保护 |
-| 普通 Python | 阻止导入 CPL/PyEsoRex 后，五个步骤和实际 DARK/QC 计算仍能运行 |
-| 完整台架数据 | 复用之前逐像素核对的15份标准化 raw；3份 DARK、FLAT、WAVE、P2VM、science，冷/热各完整执行一遍 |
-| 结构变化的对照 | 旧算法直接使用米制输入，仅将有量纲的 GD 网格步长改为米制；每轮37个数组、合计74个数组逐字节一致 |
-| 离散选择 | 相对原微米计算，BAD、visibility flags、提取像素、baseline 映射、最终保留谱线的坐标不变 |
-| 文件 | 两轮共20份产品均能读回并通过内容指纹；米制长度连续读写不发生单位往返 |
-| 现有 Qt6 GUI | offscreen fake-data 启动、capture 元数据、浮点像素、显示 binning 一致性、dark-off/single-frame-dark 通过 |
-| 安装后调用 | 0.5.0 wheel 在项目目录外导入，5个recipe可发现，使用随包 line list 的真实 WAVE 执行通过 |
-| 包与依赖 | wheel/sdist 构建、uv lock检查通过；wheel 不包含已删除模块或研究 PDF |
+| 维护测试 | 55项通过，包含真实 PyCPL/PyEsoRex 执行 |
+| 外部参数 | 五个 recipe 的 canonical name、CLI alias、默认值保持一致；非默认波长网格、GD范围和phase开关实际传入科学函数 |
+| SOF规则 | 重排输入可正常处理；不完整 FLAT/P2VM 数量被对应 recipe 拒绝 |
+| 完整真实数据 | 原有15份标准化 raw，三份DARK、FLAT、WAVE、P2VM、science，旧/新冷/热各完整执行 |
+| 数值和离散结果 | 每轮37个数组，合计74个逐字节一致，包含 flags、提取索引、accepted谱线和全部科学数组 |
+| 产品语义 | 两轮共20产品的指纹、实际参数、父标定和所有ESO QC数值完全相同 |
+| 普通Python示例 | 阻止CPL/PyEsoRex导入后，完整处理512帧并保存8份产品；保存标定可用于同一实时核心 |
+| 现有Qt6 GUI | offscreen fake-data capture、元数据、显示binning一致性、dark-off/single-frame-dark通过 |
+| 安装后运行 | 0.5.1 wheel项目外导入、5个recipe发现及随包line list的实际WAVE执行通过 |
+| 静态检查 | Ruff、格式检查、无循环import；CPL import全部限定在recipes/ |
 
-结构整理与单位变化分开评估。直接把旧算法的输入全部改为米，再比较新实现，
-能检验本次代码移动和职责收敛是否引入额外改变。两者冷/热各37数组完全一致。
-旧微米算法与新米制计算的最大绝对差异如下，不能把它们描述为与旧版逐字节一致：
+本轮对照基线为 `e4e2b69`（0.5.0），使用同一数值环境并分别匹配冷/热缓存状态。
+GUI 使用记录数据与假相机。这些验证证明本轮接口整理保持已有结果；
+独立物理准确度、误差传播和真实硬件验收有各自的科学验证范围。
 
-| 数量 | 冷执行 | 热缓存执行 |
-| --- | ---: | ---: |
-| wavelength map [m] | 1.33e-17 | 1.56e-16 |
-| VISAMP | 4.36e-8 | 3.68e-7 |
-| science GD [m] | 7.10e-15 | 5.82e-14 |
-| differential phase [deg] | 2.96e-6 | 2.52e-5 |
+## 兼容与恢复
 
-对照使用同一 Python/NumPy/Numba 环境；冷、热分别比较，因为原算法本身存在
-已观测到的冷/热数值差异。拟合公式、物理默认值、原始像素、权重和科学切选未修改。
-GUI 验证使用记录数据，未连接真实台架硬件。
+版本 **0.5.1 / product format 4 / raw format 3**。
+0.5.0的Python科学入口、recipe参数和format-4产品可继续使用，本轮无需重生成标定。
+CPL参数注册字典属于recipe内部，不再从科学模块导入。
 
-## 使用与恢复
+修改前源码备份：
 
-本轮源码和 GUI 修改前备份：
+`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_202453_step_interfaces/`
 
-`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261028_000358_step_modules/`
+本轮产品、数值比较、GUI与示例结果：
 
-本轮数据产品、数值对照和 GUI 结果：
+`reduced/step_interfaces/20261027_202453/`
 
-`reduced/step_modules/20261028_000358/`
-
-Python 导入按上表对应的步骤；`load_dark` 在 dark.py，
-`load_reducer` 在 reduction.py。现有 GUI 与便携补丁已同步更新。
-
-版本为 **0.5.0 / product format 4 / raw format 3**。
-已有标准化 raw 可直接使用；旧 calibration/science 产品需要重新生成。
-旧 `*_um` 参数和 CLI `*-um` 别名改为 `*_m` / `*-m`，参数数值相应使用米。
-没有保留旧格式的隐式转换缓存。
+0.5.0的单位迁移、原有目录合并及数值变化记录保存在
+[上一版修改报告](https://github.com/zexwu/planetes_pipe/blob/e4e2b69f02403ff9c008d450cf2a2b345053b175/docs/CHANGE_REPORT.md)。

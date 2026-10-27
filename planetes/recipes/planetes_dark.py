@@ -1,14 +1,22 @@
-"""PyCPL binding for the ordinary dark scientific task."""
+"""SOF, CPL parameters and DFS adapter for the dark step."""
 
 from cpl import ui
 
 from planetes import __version__
-from planetes.dark import PARAMETERS, calibrate_dark_file
+from planetes.dark import calibrate_dark_file
 from planetes.recipes.dfs import (
     save_products,
     select_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
+
+PARAMETERS = {
+    "bad_pixel_threshold": (
+        "planetes.calib.bad-dark-threshold",
+        "bad-dark-threshold",
+        "Positive multiplier in the retained dark bad-pixel tests",
+    )
+}
 
 
 class PlanetesDark(ui.PyRecipe):
@@ -19,8 +27,8 @@ class PlanetesDark(ui.PyRecipe):
     _author = "PLANETES contributors"
     _email = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "PLANETES dark calibration/reduction"
-    _description = "Explicit SOF roles and shared scientific defaults; GRAVITY-derived categories and explicit PLANETES instrumental extensions."
+    _synopsis = "Measure detector dark statistics and bad pixels"
+    _description = "Measure the temporal mean and RMS of a DARK_RAW stack and return DARK and BAD products."
 
     def __init__(self):
         super().__init__()

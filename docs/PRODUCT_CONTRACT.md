@@ -1,4 +1,4 @@
-# PLANETES 0.5.0 product and raw contract (products 4 / raw 3)
+# PLANETES 0.5.1 product and raw contract (products 4 / raw 3)
 
 Science functions return named Python objects. `products.py` defines their units,
 axes and parent relationships; `io/fits.py` maps them to files. `recipes/` binds SOF and
@@ -144,9 +144,11 @@ The two names do not form a crash-atomic filesystem transaction.
 
 ## Parameters
 
-Each step declares canonical names and aliases in its own `PARAMETERS` dictionary.
-Python function signatures supply defaults. `recipes/parameters.py` only translates
-these ordinary definitions into CPL parameters; steps import no CPL code.
+Each recipe declares canonical names and aliases in its own `PARAMETERS` dictionary.
+Python step functions own scientific arguments, units and defaults.
+`recipes/parameters.py` translates the recipe declarations and reads defaults from
+the function signature; science modules contain no CPL parameter registry.
+Repeated SOF counts are declared by the flat/P2VM recipes, not by the shared loader.
 
 | Python keyword | Canonical CPL name | Default |
 | --- | --- | --- |
@@ -169,7 +171,7 @@ A phase DARK without reference fails; a disabled reference never enters the used
 input provenance. Repeated FLAT_RAW/P2VM_RAW tags are required; duplicate physical
 shutter combinations or incomplete sets fail.
 
-## Python organization in 0.5.0
+## Python organization in 0.5.1
 
 DARK, FLAT, WAVE, P2VM and REDUCE are peer step modules at package root. Each owns
 its input handling, parameters, scientific functions and returned products. Shared
@@ -182,3 +184,25 @@ Checks cover physical associations, array/index safety and external file contrac
 They are not a separate validation workflow. QC reports measurements and missing
 reasons without changing scientific cuts. Product format 4 records the new metre
 field/parameter names and fingerprints; standardized raw remain format 3.
+
+
+## Physical stages and product meaning
+
+DARK/BAD, FLAT, WAVE and P2VM characterize the instrument. Their products describe
+measured detector statistics, extraction geometry, wavelengths and the full physical
+response respectively. The P2VM inverse remains coupled to its saved wavelength
+grid and actual FLAT/WAVE parents.
+
+SINGLE_SCI_P2VMRED is a sequence of instrumental measurements: each frame retains
+four photometric spectra, six complex coherent spectra, visibility amplitudes and
+flags, with GD and differential-phase diagnostics. ADU are extracted instrumental
+counts, not a calibrated photon/electron flux or astrophysical flux density.
+
+Averaging would define estimators for VIS/VIS2/T3, their weights, debiasing and
+uncertainties. Astronomical calibration would measure/apply a transfer function
+using calibrator observations and a physical source model. These are subsequent
+scientific stages. The optional P2VM phase reference establishes an instrumental
+phase reference; it is not automatically an astronomical transfer-function calibrator.
+
+Version 0.5.1 changes interface ownership and documentation only. Format-4 products,
+physical conventions and fingerprints remain compatible with 0.5.0.
