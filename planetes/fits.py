@@ -12,6 +12,7 @@ from astropy.io import fits as afits
 from astropy.time import Time
 
 from . import keywords as kw
+from . import __version__
 from .instrument import TELESCOPES, BASELINES, ABCD_ORDER
 from .models import (
     DarkCalibration,
@@ -113,6 +114,16 @@ def validate_raw_metadata(metadata: RawMetadata, shape):
                 raise ValueError(f"Invalid raw {key}")
         elif key == "exposure_s" and (not np.isfinite(value) or value <= 0):
             raise ValueError("Exposure must be positive finite seconds")
+        elif key in ("detector", "orientation") and (
+            not isinstance(value, str) or not value.strip()
+        ):
+            raise ValueError(f"Invalid raw {key}")
+    if not setup.legacy and setup.exposure_source not in (
+        "readback",
+        "command",
+        "operator",
+    ):
+        raise ValueError("New raw data require a known exposure source")
     if (setup.height, setup.width) != shape[1:]:
         raise ValueError("Raw detector size differs from the recorded ROI")
     if setup.legacy and metadata.configuration_source != "legacy-role-map":
@@ -472,7 +483,7 @@ def encode_product(product, header=None):
         "qc_status": product.provenance.qc_status,
     }
     metadata = {
-        "software_version": __import__("planetes").__version__,
+        "software_version": __version__,
         "provenance": info,
         "setup": asdict(product.setup)
         if getattr(product, "setup", None) is not None
@@ -518,6 +529,10 @@ def read_product(path: Path, cls=None):
             table = hdus[ext]
             if (table.columns[name].unit or "") != unit:
                 raise ValueError(f"Incompatible units: {ext}.{name}")
+            if table.columns[name].format.endswith("L"):
+                raw = table.data._get_raw_data()[name]
+                if not np.isin(raw, [ord("T"), ord("F")]).all():
+                    raise ValueError("Invalid FITS logical flag encoding")
             return _native(table.data[name])
 
         def quantity(name, v, *, offset=0):

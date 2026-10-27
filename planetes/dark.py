@@ -67,7 +67,7 @@ def compute_badpix(dark: DarkCalibration, *, threshold: float = 5.0) -> BadPixel
     validate(dark)
     threshold = positive(threshold, "bad pixel threshold")
     mean_img, std_img = dark.mean_adu, dark.temporal_rms_adu
-    BAD_HOT, BAD_DEAD, BAD_RON = 1, 2, 4
+    BAD_HOT, BAD_DEAD, BAD_NOISY = 1, 2, 4
 
     med_mean = np.median(mean_img)
     med_rms = np.median(std_img)
@@ -80,7 +80,7 @@ def compute_badpix(dark: DarkCalibration, *, threshold: float = 5.0) -> BadPixel
 
     bpm[mean_img > range_max] |= BAD_HOT
     bpm[mean_img < range_min] |= BAD_DEAD
-    bpm[std_img > std_max] |= BAD_RON
+    bpm[std_img > std_max] |= BAD_NOISY
 
     return BadPixelMap(
         bpm,
@@ -93,7 +93,7 @@ def compute_badpix(dark: DarkCalibration, *, threshold: float = 5.0) -> BadPixel
 
 
 def compute_dark(chunks) -> DarkCalibration:
-    """Measure the retained population RMS and bad-pixel flags from a complete stack."""
+    """Measure temporal mean and population RMS from a complete stack."""
     mean, rms, count = frame_statistics(chunks)
     if count < 2:
         raise ValueError(

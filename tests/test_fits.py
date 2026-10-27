@@ -362,3 +362,41 @@ class CanonicalAndRawTests(unittest.TestCase):
             path = Path(temporary) / "legacy.fits"
             write_raw(path, data, raw)
             self.assertIsNone(read_raw_metadata(path).setup.exposure_s)
+
+    def test_invalid_fits_logical_bytes_are_rejected(self):
+        spectra = calibration_spectra(n_wave=15)
+        product = compute_reduce(
+            spectra.phase_reference, compute_p2vm(spectra, phase_correction=False)
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "science.fits"
+            write_product(path, product)
+            with fits.open(path, mode="update") as hdus:
+                hdus["PLANETES_VIS"].data._get_raw_data()["FLAG"][0, 0] = ord("X")
+                hdus["PLANETES_VIS"].add_checksum()
+            with self.assertRaisesRegex(ValueError, "logical flag"):
+                read_product(path)
+
+    def test_rollback_preserves_a_concurrent_replacement(self):
+        import os
+        from planetes.fits import encode_product
+
+        wave = calibration_arrays(n_wave=15)[-1]
+        link = os.link
+        with tempfile.TemporaryDirectory() as temporary:
+            paths = [Path(temporary) / "one.fits", Path(temporary) / "two.fits"]
+
+            def replace_first_then_fail(source, target):
+                if Path(target) == paths[1]:
+                    paths[0].unlink()
+                    paths[0].write_bytes(b"concurrent winner")
+                    raise OSError("injected second failure")
+                return link(source, target)
+
+            with patch("planetes.fits.os.link", side_effect=replace_first_then_fail):
+                with self.assertRaisesRegex(OSError, "injected"):
+                    with destinations(paths) as staged:
+                        for path in staged:
+                            encode_product(wave).writeto(path, checksum=True)
+            self.assertEqual(paths[0].read_bytes(), b"concurrent winner")
+            self.assertFalse(paths[1].exists())

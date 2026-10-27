@@ -451,7 +451,7 @@ def _grid_search_kernel(
 
 
 def wavelength_reference_path():
-    """Return the installed, schema-2 static line-list file."""
+    """Return the installed, format-3 static line-list file."""
     from importlib.resources import files
     from pathlib import Path
 

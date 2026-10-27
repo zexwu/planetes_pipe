@@ -172,7 +172,7 @@ def extract_calibration_files(
     phase_dark=None,
 ) -> CalibrationSpectra:
     """Extract calibration files and infer the retained physical output mapping."""
-    from .fits import identify_raw, check_raw_calibrations
+    from .fits import identify_raw, check_raw_calibrations, read_raw_metadata
     from .models import DarkCalibration
 
     if not isinstance(main_dark, DarkCalibration) or (
@@ -207,6 +207,7 @@ def extract_calibration_files(
         **{f"baseline_{k}": str(v) for k, v in baseline_cubes.items()},
     }
     if phase_reference is not None:
+        read_raw_metadata(phase_reference, category="SINGLE_SCI_RAW")
         selected_dark = main_dark if phase_dark is None else phase_dark
         phase_reference_spectra = model.extract_file(phase_reference, selected_dark)
         unknown.extend(check_raw_calibrations(phase_reference, selected_dark, flat))
