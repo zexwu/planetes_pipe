@@ -5,8 +5,8 @@ from collections.abc import Mapping
 import numpy as np
 from numpy.typing import NDArray
 
-from .. import log
-from ..instrument import (
+from . import log
+from .instrument import (
     IMAG_SLICE,
     N_BASELINES,
     N_DATA,
@@ -14,18 +14,32 @@ from ..instrument import (
     N_TELESCOPES,
     REAL_SLICE,
 )
-from ..numerics import compute_gdelay
-from ..product import CalibrationSpectra, P2VMProduct
+from .reduction import compute_gdelay
+from .models import (
+    CalibrationSpectra,
+    P2VMCalibration,
+    Provenance,
+    wavelength_grid,
+    validate_gd_range,
+)
 
 
 def compute_p2vm(
     spectra: CalibrationSpectra,
     *,
     phase_correction: bool = True,
-) -> P2VMProduct:
+    gd_search_min_um: float = -30.0,
+    gd_search_max_um: float = 30.0,
+) -> P2VMCalibration:
     """Compute the pixel-to-visibility matrix."""
     log.info("--- Step: P2VM ---")
 
+    if not isinstance(phase_correction, bool):
+        raise ValueError("phase_correction must be bool")
+    search_range = (gd_search_min_um, gd_search_max_um)
+    validate_gd_range(search_range)
+    if (3 * len(spectra.wavelength_um)) // 4 - len(spectra.wavelength_um) // 4 < 2:
+        raise ValueError("P2VM requires at least two central-band wavelength samples")
     spec_tel = spectra.telescope_spectra
     spec_bsl = spectra.baseline_spectra
     phase_reference = spectra.phase_reference
@@ -68,7 +82,9 @@ def compute_p2vm(
         w_end = (n_wave * 3) // 4
 
         opd = np.mean((phase * wl_grid)[:, w_start:w_end] / 2 / np.pi, axis=1)
-        gd = compute_gdelay(visdata[:, w_start:w_end], wl_grid[w_start:w_end])
+        gd = compute_gdelay(
+            visdata[:, w_start:w_end], wl_grid[w_start:w_end], search_range=search_range
+        )
 
         # Assume OPD=0 <-> GD=0; remove OPD zero-point
         _, opd0 = np.polyfit(gd, opd, 1)
@@ -114,7 +130,7 @@ def compute_p2vm(
         phase_A = coherence_phase_rad[regs[0]]
         coherence_phase_rad[regs] -= phase_A[None, :, :]
 
-    log.info("    Transmission normalization (sum of 24 outputs -> 1)...")
+    log.info("    Transmission normalization (mean over 24 outputs -> 1)...")
     transmission /= transmission.mean(axis=0)[None, :, :]
 
     log.info("    Coherence normalization...")
@@ -135,7 +151,7 @@ def compute_p2vm(
             f1f2 = np.sqrt(flux_product)
             coherence_amplitude[:, bsl, iw] /= f1f2
 
-    v2pm_matrix = _build_v2pm_matrix(
+    v2pm_matrix = build_v2pm_matrix(
         transmission,
         coherence_amplitude,
         coherence_phase_rad,
@@ -157,9 +173,10 @@ def compute_p2vm(
             wl_grid,
             bsl_to_tel,
             reg_to_bsl,
+            search_range=search_range,
         )
 
-        v2pm_matrix = _build_v2pm_matrix(
+        v2pm_matrix = build_v2pm_matrix(
             transmission,
             coherence_amplitude,
             coherence_phase_rad,
@@ -171,7 +188,7 @@ def compute_p2vm(
     elif phase_correction:
         log.info("Skipping phase correction: no phase-reference cube was provided.")
 
-    product = P2VMProduct(
+    product = P2VMCalibration(
         p2vm=p2vm,
         wavelength_um=wl_grid,
         baseline_regions=bsl_to_reg,
@@ -183,13 +200,26 @@ def compute_p2vm(
         group_delay_um=gd_per_baseline,
         ellipse_phase_rad=np.asarray(ellipse_phase),
         ellipse_amplitude=np.asarray(ellipse_amplitude),
+        provenance=Provenance(
+            producer="planetes.p2vm",
+            parameters={
+                "phase_correction": phase_correction,
+                "phase_reference_applied": bool(
+                    has_phase_reference and phase_correction
+                ),
+                "gd_search_min_um": gd_search_min_um,
+                "gd_search_max_um": gd_search_max_um,
+            },
+            inputs=spectra.provenance.inputs,
+            dependencies=spectra.provenance.dependencies,
+        ),
     )
     log.info("--- Step: P2VM [DONE] ---")
 
     return product
 
 
-def _build_v2pm_matrix(
+def build_v2pm_matrix(
     transmission: NDArray,
     coherence_amplitude: NDArray,
     coherence_phase_rad: NDArray,
@@ -209,6 +239,8 @@ def _correct_phase_reference(
     wavelength: NDArray,
     baseline_telescopes: Mapping[int, tuple[int, int]],
     region_to_baseline: Mapping[int, int],
+    *,
+    search_range=(-30.0, 30.0),
 ) -> NDArray:
     """Apply the phase-reference solution to the calibrated V2PM phases."""
     phase = phase.copy()
@@ -216,7 +248,9 @@ def _correct_phase_reference(
     wave0 = len(wavelength) // 2
 
     for telescope in range(1, N_TELESCOPES):
-        group_delay = compute_gdelay(visdata[:, telescope - 1, :], wavelength)
+        group_delay = compute_gdelay(
+            visdata[:, telescope - 1, :], wavelength, search_range=search_range
+        )
         phasor = np.exp(-1j * 2 * np.pi * group_delay[:, None] / wavelength)
         opl[:, telescope] = (
             np.angle(visdata[:, telescope - 1, wave0] * phasor[:, wave0])
@@ -234,7 +268,7 @@ def _correct_phase_reference(
         ).sum(axis=0)
 
     reference = np.ones((N_TELESCOPES, len(wavelength)), dtype=complex)
-    group_delay = compute_gdelay(visphase, wavelength)
+    group_delay = compute_gdelay(visphase, wavelength, search_range=search_range)
     for telescope in range(N_TELESCOPES - 1):
         reference[telescope + 1] = np.exp(
             2j * np.pi * group_delay[telescope] / wavelength
@@ -318,3 +352,56 @@ def fit_ellipse_linear(spec: NDArray, envs: NDArray) -> tuple[NDArray, NDArray]:
         visamp[:, iwl] = np.sqrt(X_fit**2 + Y_fit**2)
 
     return phase, visamp
+
+
+def calibrate_p2vm_file(
+    flat,
+    wave,
+    main_dark,
+    *,
+    telescope_flats,
+    baseline_cubes,
+    phase_reference=None,
+    phase_dark=None,
+    phase_correction=True,
+    wavelength_min_um=1.15,
+    wavelength_max_um=1.30,
+    wavelength_channels=151,
+    gd_search_min_um=-30.0,
+    gd_search_max_um=30.0,
+) -> P2VMCalibration:
+    """Run the complete file-level P2VM task on explicitly selected input roles."""
+    from dataclasses import replace
+    from .extraction import extract_calibration_files
+
+    if phase_dark is not None and phase_reference is None:
+        raise ValueError("phase_dark requires phase_reference")
+    if not isinstance(phase_correction, bool):
+        raise ValueError("phase_correction must be bool")
+    grid = wavelength_grid(wavelength_min_um, wavelength_max_um, wavelength_channels)
+    spectra = extract_calibration_files(
+        flat,
+        wave,
+        main_dark,
+        telescope_flats=telescope_flats,
+        baseline_cubes=baseline_cubes,
+        wavelength_um=grid,
+        phase_reference=phase_reference if phase_correction else None,
+        phase_dark=phase_dark if phase_correction else None,
+    )
+    result = compute_p2vm(
+        spectra,
+        phase_correction=phase_correction,
+        gd_search_min_um=gd_search_min_um,
+        gd_search_max_um=gd_search_max_um,
+    )
+    params = {
+        **result.provenance.parameters,
+        "wavelength_min_um": wavelength_min_um,
+        "wavelength_max_um": wavelength_max_um,
+        "wavelength_channels": wavelength_channels,
+        "phase_dark_reused": bool(
+            phase_reference is not None and phase_correction and phase_dark is None
+        ),
+    }
+    return replace(result, provenance=replace(result.provenance, parameters=params))

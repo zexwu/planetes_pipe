@@ -1,25 +1,18 @@
-"""PLANETES data reduction."""
+"""PLANETES scientific reduction and optional ESO recipe adapters."""
 
 import logging
 
-import colorlog
-
-__version__ = "0.2.0"
-
-
+__version__ = "0.3.0"
 log = logging.getLogger("planetes")
-if not log.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(
-        colorlog.ColoredFormatter(
-            "[%(filename)-12s:%(lineno)-4s %(log_color)s%(levelname)5s%(reset)s] "
-            "%(message)s"
-        )
-    )
-    log.addHandler(handler)
-log.propagate = False
 
 
 def configure_logging(level: str = "INFO") -> None:
-    """Set the package log level for the current process."""
+    """Configure console logging explicitly at an application entry point."""
+    if not log.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(
+            logging.Formatter("[%(name)s:%(lineno)d %(levelname)s] %(message)s")
+        )
+        log.addHandler(handler)
     log.setLevel(level.upper())
+    log.propagate = False

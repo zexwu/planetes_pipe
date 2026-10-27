@@ -8,21 +8,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from . import log
 from .instrument import BASELINES, N_BASELINES, N_TELESCOPES, TELESCOPES
-from .product import ReducedProduct
-
-plt.rcParams.update(
-    {
-        "font.size": 12,
-        "figure.figsize": (12, 8),
-        "image.cmap": "inferno",
-        "image.origin": "lower",
-        "image.interpolation": "nearest",
-        "image.aspect": "auto",
-        "figure.autolayout": False,
-        "figure.constrained_layout.use": False,
-        "figure.dpi": 300,
-    }
-)
+from .models import ReducedObservables
 
 
 def genfig(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
@@ -38,7 +24,7 @@ def genfig(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
 
 
 def plot_reduced(
-    reduced: ReducedProduct,
+    reduced: ReducedObservables,
     output: Path,
     *,
     object_label: str = "PLANETES",
@@ -56,7 +42,6 @@ def plot_reduced(
     group_delay_um = reduced.group_delay_um
 
     log.info(f"--- Step: PLOTTING {object_label} ---")
-    plt.rcParams["font.size"] = 14
 
     with PdfPages(output) as pdf:
         mean_flux = photometric_flux_adu.mean(axis=-1)

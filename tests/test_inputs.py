@@ -9,8 +9,8 @@ import unittest
 import numpy as np
 from astropy.io import fits
 
-from planetes.cube import iter_cube
-from planetes.numerics import frame_mean_std
+from planetes.fits import iter_raw_cube as iter_cube
+from planetes.dark import frame_statistics
 
 
 class InputTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class InputTests(unittest.TestCase):
             fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(cube)]).writeto(cube_path)
 
             chunks = list(iter_cube(cube_path))
-            mean, std = frame_mean_std(chunks)
+            mean, std, _ = frame_statistics(chunks)
             expected = cube.astype(np.float32)
 
             self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
@@ -37,11 +37,13 @@ class InputTests(unittest.TestCase):
                 path
             )
 
-            with self.assertRaisesRegex(ValueError, "3D FITS cube"):
+            with self.assertRaisesRegex(
+                ValueError, "three-dimensional raw detector cube"
+            ):
                 list(iter_cube(path))
 
     def test_scientific_core_imports_without_runner_or_project_configuration(self):
-        command = "import sys; from planetes.algorithms import flat, wavelength, p2vm, reduction; assert 'cpl' not in sys.modules; assert 'planetes.config' not in sys.modules"
+        command = "import sys; from planetes import flat, wavelength, p2vm, reduction; assert 'cpl' not in sys.modules; assert 'planetes.config' not in sys.modules"
         result = subprocess.run(
             [sys.executable, "-c", command], capture_output=True, text=True, timeout=30
         )
