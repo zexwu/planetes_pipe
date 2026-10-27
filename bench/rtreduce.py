@@ -5,23 +5,23 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-try:
-    from . import PipelineContext
-    from .rtp2vm import P2VMReducer, extract_spec_sparse_single, twopx_interp_single
-except ImportError:
-    from recipes import PipelineContext
-    from rtp2vm import P2VMReducer, extract_spec_sparse_single, twopx_interp_single
+from rtp2vm import P2VMReducer
+
+from planetes.cube import iter_cube
+from planetes.numerics import frame_mean
 
 
 def main() -> None:
     """Benchmark and display visibility amplitudes for the fake science cube."""
-    base_dir = Path(__file__).resolve().parent
-    reducer = P2VMReducer(base_dir / "reduced")
+    project_dir = Path(__file__).resolve().parents[1]
+    reducer = P2VMReducer(project_dir / "reduced")
 
-    ctx = PipelineContext(base_dir / "conf.yaml")
-    cube = ctx.load_fits(Path("./2026_02_05/sci2/sci.fits"))
-    dark = ctx.load_fits(Path("./2026_02_05/sci2/sci_dark.fits"))
-    cube -= dark.mean(axis=0)[None, ...]
+    # Set explicit bench files and calibration directory here before benchmarking.
+    science = project_dir / "2026_02_05/sci2/sci.fits"
+    science_dark = project_dir / "2026_02_05/sci2/sci_dark.fits"
+    cube = np.concatenate(list(iter_cube(science)), axis=0)
+    dark = frame_mean(iter_cube(science_dark))
+    cube -= dark[None, ...]
 
     import timeit
 

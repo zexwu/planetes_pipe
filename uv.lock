@@ -196,15 +196,6 @@ wheels = [
 ]
 
 [[package]]
-name = "graphviz"
-version = "0.21"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f8/b3/3ac91e9be6b761a4b30d66ff165e54439dcd48b83f4e20d644867215f6ca/graphviz-0.21.tar.gz", hash = "sha256:20743e7183be82aaaa8ad6c93f8893c923bd6658a04c32ee115edb3c8a835f78", size = 200434, upload-time = "2025-06-15T09:35:05.824Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/4c/e0ce1ef95d4000ebc1c11801f9b944fa5910ecc15b5e351865763d8657f8/graphviz-0.21-py3-none-any.whl", hash = "sha256:54f33de9f4f911d7e84e4191749cac8cc5653f815b06738c54db9a15ab8b1e42", size = 47300, upload-time = "2025-06-15T09:35:04.433Z" },
-]
-
-[[package]]
 name = "kiwisolver"
 version = "1.4.9"
 source = { registry = "https://pypi.org/simple" }
@@ -554,30 +545,56 @@ wheels = [
 
 [[package]]
 name = "planetes"
-version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "astropy" },
     { name = "colorlog" },
-    { name = "graphviz" },
     { name = "matplotlib" },
     { name = "numba" },
     { name = "numpy" },
-    { name = "pyyaml" },
     { name = "scipy" },
+]
+
+[package.optional-dependencies]
+eso = [
+    { name = "pycpl" },
+    { name = "pyesorex" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "astropy", specifier = ">=7.2.0" },
     { name = "colorlog", specifier = "==6.10.1" },
-    { name = "graphviz", specifier = ">=0.21" },
     { name = "matplotlib", specifier = "==3.8.4" },
     { name = "numba", specifier = ">=0.62.0" },
     { name = "numpy", specifier = "==2.4.2" },
-    { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "pycpl", marker = "extra == 'eso'", url = "https://ftp.eso.org/pub/dfs/pipelines/libraries/pycpl/pycpl-1.0.4.post1.tar.gz" },
+    { name = "pyesorex", marker = "extra == 'eso'", url = "https://ftp.eso.org/pub/dfs/pipelines/libraries/pyesorex/pyesorex-1.0.4.tar.gz" },
     { name = "scipy", specifier = "==1.17.1" },
 ]
+provides-extras = ["eso"]
+
+[[package]]
+name = "pycpl"
+version = "1.0.4.post1"
+source = { url = "https://ftp.eso.org/pub/dfs/pipelines/libraries/pycpl/pycpl-1.0.4.post1.tar.gz" }
+dependencies = [
+    { name = "astropy" },
+    { name = "numpy" },
+]
+sdist = { hash = "sha256:3a52eeb80290e0569e084c1d8e06409bc3411b6f002b166df99cff40d3cd4fe1" }
+
+[package.metadata]
+requires-dist = [
+    { name = "astropy" },
+    { name = "numpy" },
+    { name = "pandas", marker = "extra == 'pandas'" },
+    { name = "pandas", marker = "extra == 'test'" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "scipy", marker = "extra == 'test'" },
+    { name = "sphinx", marker = "extra == 'doc'" },
+]
+provides-extras = ["pandas", "doc", "test"]
 
 [[package]]
 name = "pyerfa"
@@ -596,6 +613,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/56/b22b35c8551d2228ff8d445e63787112927ca13f6dc9e2c04f69d742c95b/pyerfa-2.0.1.5-cp39-abi3-win32.whl", hash = "sha256:d30b9b0df588ed5467e529d851ea324a67239096dd44703125072fd11b351ea2", size = 339955, upload-time = "2024-11-11T15:22:23.087Z" },
     { url = "https://files.pythonhosted.org/packages/b4/11/97233cf23ad5411ac6f13b1d6ee3888f90ace4f974d9bf9db887aa428912/pyerfa-2.0.1.5-cp39-abi3-win_amd64.whl", hash = "sha256:66292d437dcf75925b694977aa06eb697126e7b86553e620371ed3e48b5e0ad0", size = 349410, upload-time = "2024-11-11T15:22:24.817Z" },
 ]
+
+[[package]]
+name = "pyesorex"
+version = "1.0.4"
+source = { url = "https://ftp.eso.org/pub/dfs/pipelines/libraries/pyesorex/pyesorex-1.0.4.tar.gz" }
+dependencies = [
+    { name = "pycpl" },
+]
+sdist = { hash = "sha256:b75aab4bac3fe87f4c00093cd988efd96d548f3f4f7325fef54229d4c89a9097" }
+
+[package.metadata]
+requires-dist = [
+    { name = "pycpl" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "sphinx", marker = "extra == 'doc'" },
+]
+provides-extras = ["doc", "test"]
 
 [[package]]
 name = "pyparsing"

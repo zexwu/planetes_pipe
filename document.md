@@ -1,22 +1,25 @@
 # Calibration Procedures
 
-This note summarizes the algorithms currently used by the calibration stages of the pipeline:
+Version 0.2 uses PyCPL recipes and FITS products. Scientific operations below retain the numerical definitions from the original implementation. The recipes communicate through FITS; extracted calibration spectra remain in memory inside the P2VM recipe.
+
+
+This note summarizes the algorithms used by the calibration recipes and their in-memory extraction step:
 
 - `flat`
 - `wave`
-- `preproc --object p2vm`
+- calibration-spectrum extraction
 - `p2vm`
 
 The description follows the implementation in the codebase and is meant to explain what is actually computed, in what order, and with what assumptions.
 
 ## 1. `flat`: detector calibration and spectral tracing
 
-Implemented in [recipes/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes/flat.py).
+Implemented in [planetes/algorithms/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/algorithms/flat.py).
 
 ### Inputs
 
-- dark cube: `conf["calib"]["dark"]`
-- one flat cube per telescope: `conf["calib"]["flat"]`
+- dark cube: the `DARK_RAW` input
+- one named flat cube per telescope: the `TEL_FLAT_*` inputs
 
 ### Procedure
 
@@ -50,12 +53,11 @@ Implemented in [recipes/flat.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes/fl
 
 ### Products
 
-- `dark_map`
-- `bad_map`
-- `flat_map`
-- `profile_map`
-- sparse extraction coordinates: `profile_xs`, `profile_ys`
-- traced centroids: `xs`, `ys`
+- `dark_map_adu`
+- `bad_pixel_flags`
+- `flat_map_adu`
+- sparse extraction coordinates: `profile_x_pixels`, `profile_y_pixels` (`-1` marks excluded bad pixels)
+- traced spatial centroids: `trace_y_pixels` (the corresponding `x` coordinate is the detector pixel index)
 
 ### Main assumption
 
@@ -63,15 +65,15 @@ Each interferometric output is well approximated by a narrow, smooth trace in th
 
 ## 2. `wave`: wavelength calibration
 
-Implemented in [recipes/wave.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes/wave.py).
+Implemented in [planetes/algorithms/wavelength.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/algorithms/wavelength.py).
 
 ### Inputs
 
 - `flat` product:
   - sparse extraction coordinates
   - traced output geometry
-- wave lamp cube: `conf["calib"]["wave"]`
-- wave dark cube: `conf["calib"]["wave_dark"]`
+- wave lamp cube: the `WAVE_RAW` input
+- wave dark cube: the `WAVE_DARK` input
 
 ### Procedure
 
@@ -86,7 +88,7 @@ Implemented in [recipes/wave.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes/wa
    - detect peaks above `median + sigma * MAD`
 
 4. Match detected peaks to a laboratory line list:
-   - a list of known line wavelengths is hardcoded in the recipe
+   - known line wavelengths are loaded from the static `PLANETES_LINE_LIST` FITS, generated without changing the values in `planetes/data/wavelength_lines.ecsv`
    - a quadratic wavelength-to-pixel mapping is estimated with a RANSAC-like search
    - this provides a reference mapping between known wavelengths and mean-spectrum peaks
 
@@ -97,47 +99,35 @@ Implemented in [recipes/wave.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes/wa
    - combine that result with the global line identification to obtain `(x, y, wavelength)` samples
 
 6. Fit a global 2D wavelength solution:
-   - fit `wavelength = f(x, y)` with a polynomial of configurable degree
+   - fit `wavelength = f(x, y)` with the recipe's cubic polynomial
    - reject outliers iteratively using residual clipping
    - evaluate the fitted polynomial on the traced output coordinates
 
-7. Fit an alternate aberration-based model:
-   - keep only lines matched in all outputs
-   - fit a 1D dispersion relation along the mean trace
-   - fit a 2D polynomial correction in detector coordinates for the line shifts
-   - combine the two to build an aberration-corrected wavelength map
-
 ### Products
 
-- `wave.npz`
-  - `wave_map`
-  - QC summary and region match counts
-- `wave_aberr.npz`
-  - alternate `wave_map`
-  - QC summary and region match counts
+- `planetes_wave.fits`: `wavelength_map_um`
 
 ### Main assumptions
 
 - the detector-to-wavelength mapping is smooth and well represented by a low-order polynomial
 - line ordering is preserved across outputs
-- the aberration term is a smooth low-order correction to a dominant 1D dispersion law
 
-## 3. `preproc --object p2vm`: extraction and common-grid interpolation
+## 3. Calibration-spectrum extraction and common-grid interpolation
 
-Implemented in [recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes/preproc.py).
+Implemented in [planetes/processing.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/processing.py).
 
 ### Inputs
 
 - `flat` product:
-  - `dark_map`
+  - `dark_map_adu`
   - sparse extraction coordinates
-  - `flat_map`
+  - `flat_map_adu`
 - `wave` product:
-  - `wave_map`
+  - `wavelength_map_um`
 - calibration cubes:
   - one P2VM cube per baseline
   - one photometric flat cube per telescope
-  - optional `wavesc` cube
+  - optional `PHASE_REFERENCE` cube
 
 ### Procedure
 
@@ -149,7 +139,7 @@ Implemented in [recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes
 
 3. Interpolate from pixel space to wavelength space:
    - interpolation is done in wavenumber, not wavelength
-   - this uses the detector `wave_map` and the target `wl_grid`
+   - this uses `wavelength_map_um` and the target wavelength grid
 
 4. For each input calibration cube:
    - subtract `dark_map`
@@ -171,15 +161,16 @@ Implemented in [recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes
 7. Cross-check the mapping:
    - the outputs inferred from telescope intersections must match the outputs inferred from baseline modulation
 
-### Products
+### In-memory result
 
-- `spec_tel`: extracted telescope calibration spectra
-- `spec_bsl`: extracted baseline calibration spectra
-- `spec_wavesc`: extracted optional phase-reference spectra
-- `spec_flat`: flat response on the common grid
-- `tel_regs`, `bsl_regs`
-- `bsl_to_reg`, `bsl_to_tel`
-- `wl_grid`
+- `telescope_spectra`: extracted telescope calibration spectra
+- `baseline_spectra`: extracted baseline calibration spectra
+- `phase_reference`: extracted optional phase-reference spectra
+- `baseline_regions`, `baseline_telescopes`
+- `wavelength_um`
+
+These arrays form `CalibrationSpectra` and are passed directly to `compute_p2vm`;
+there is no preprocessing product on disk.
 
 ### Main assumptions
 
@@ -188,18 +179,17 @@ Implemented in [recipes/preproc.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes
 
 ## 4. `p2vm`: pixel-to-visibility matrix calibration
 
-Implemented in [recipes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes/p2vm.py).
+Implemented in [planetes/algorithms/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/planetes/algorithms/p2vm.py).
 
 ### Inputs
 
-- `preproc("p2vm")` product:
-  - `spec_tel`
-  - `spec_bsl`
-  - optional `spec_wavesc`
-  - `spec_flat`
-  - `bsl_to_reg`
-  - `bsl_to_tel`
-  - `wl_grid`
+- in-memory `CalibrationSpectra`:
+  - `telescope_spectra`
+  - `baseline_spectra`
+  - optional `phase_reference`
+  - `baseline_regions`
+  - `baseline_telescopes`
+  - `wavelength_um`
 
 ### Procedure
 
@@ -245,18 +235,25 @@ Implemented in [recipes/p2vm.py](/Users/zexwu/zexwu_lib/planetes_pipe/recipes/p2
    - this yields the final P2VM
 
 9. Optional phase correction:
-   - if `spec_wavesc` is available, apply an additional phase-reference correction and rebuild the P2VM
+   - if `phase_reference` is available, apply an additional phase-reference correction and rebuild the P2VM
+
+The V2PM is persisted through its physical calibration terms: photometric
+transmission, coherence amplitude, and coherence phase. The recipe expands
+these into a Cartesian matrix only while computing the per-wavelength P2VM.
 
 ### Products
 
-- `v2pm`
 - `p2vm`
-- `opd_per_baseline`
-- `gd_per_baseline`
-- `wl_grid`
-- `bsl_to_reg`
-- `bsl_to_tel`
-- `ellipse_results`
+- `wavelength_um`
+- `baseline_regions`
+- `baseline_telescopes`
+- `transmission`
+- `coherence_amplitude`
+- `coherence_phase_rad`
+- `opd_um`
+- `group_delay_um`
+- `ellipse_phase_rad`
+- `ellipse_amplitude`
 
 ### Main assumptions
 
@@ -272,7 +269,7 @@ The calibration steps are chained as follows:
    - detector background, bad pixels, and output traces
 2. `wave`
    - detector-coordinate to wavelength mapping
-3. `preproc --object p2vm`
+3. calibration-spectrum extraction
    - extract and interpolate all calibration cubes onto a common spectral grid
 4. `p2vm`
    - derive the visibility-to-pixel model and its inverse
@@ -281,5 +278,40 @@ After these steps, science reduction can consume:
 
 - sparse extraction geometry from `flat`
 - wavelength calibration from `wave`
-- common-grid flat response and baseline/output mapping from `preproc`
 - inversion matrices from `p2vm`
+
+Only `planetes_flat.fits`, `planetes_wave.fits`, and `planetes_p2vm.fits` are persisted by calibration;
+extracted calibration spectra remain in memory.
+
+## Persisted array contract
+
+Axis names below describe the current scientific meaning and are encoded by the versioned FITS product schema.
+
+| Product | Field | Axes | Unit / meaning |
+| --- | --- | --- | --- |
+| Flat | `profile_x_pixels` | output, sample | detector pixel; `-1` is invalid |
+| Flat | `profile_y_pixels` | output, sample | detector pixel; `-1` is invalid |
+| Flat | `flat_map_adu` | detector-y, detector-x | ADU |
+| Flat | `dark_map_adu` | detector-y, detector-x | ADU |
+| Flat | `bad_pixel_flags` | detector-y, detector-x | bit flags: hot=1, dead=2, noisy=4 |
+| Flat | `trace_y_pixels` | output, detector-x | detector pixel |
+| Wave | `wavelength_map_um` | output, detector-x | micrometre |
+| P2VM | `transmission` | output, telescope, wavelength | normalized photometric V2PM term |
+| P2VM | `p2vm` | data-channel, output, wavelength | inverse of the expanded Cartesian V2PM |
+| P2VM | `wavelength_um` | wavelength | micrometre |
+| P2VM | `coherence_amplitude` | output, baseline, wavelength | normalized amplitude, including cross-talk terms |
+| P2VM | `coherence_phase_rad` | output, baseline, wavelength | radian; includes optional phase-reference correction |
+| P2VM | `opd_um` | baseline, frame | micrometre |
+| P2VM | `group_delay_um` | baseline, frame | micrometre |
+| P2VM | `ellipse_phase_rad` | baseline, frame, wavelength | radian |
+| P2VM | `ellipse_amplitude` | baseline, frame, wavelength | dimensionless unit-circle radius |
+| Reduced | `photometric_flux_adu` | frame, telescope, wavelength | ADU |
+| Reduced | `coherent_flux_adu` | frame, baseline, wavelength | complex ADU |
+| Reduced | `visibility_amplitude` | frame, baseline, wavelength | dimensionless |
+| Reduced | `flags` | frame, baseline, wavelength | boolean; true means invalid |
+| Reduced | `wavelength_um` | wavelength | micrometre |
+| Reduced | `group_delay_um` | frame, baseline | micrometre |
+| Reduced | `differential_phase_deg` | frame, baseline, wavelength | degree |
+
+`baseline_regions` records the four detector outputs in A, C, B, D order;
+`baseline_telescopes` records the two telescope indices for each baseline.

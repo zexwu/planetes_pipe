@@ -1,0 +1,13 @@
+"""Fixed PLANETES detector and output ordering."""
+
+TELESCOPES = ("4", "3", "2", "1")
+BASELINES = ("43", "42", "41", "32", "31", "21")
+ABCD_ORDER = ("A", "C", "B", "D")
+
+N_TELESCOPES = len(TELESCOPES)
+N_BASELINES = len(BASELINES)
+N_OUTPUTS = N_BASELINES * len(ABCD_ORDER)
+N_DATA = N_TELESCOPES + 2 * N_BASELINES
+
+REAL_SLICE = slice(N_TELESCOPES, N_TELESCOPES + N_BASELINES)
+IMAG_SLICE = slice(REAL_SLICE.stop, N_DATA)

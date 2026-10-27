@@ -8,3 +8,7 @@ AGENT.md
 2026_02_05
 .DS_Store
 calib_zexuan*
+*.egg-info/
+build/
+output/
+pyesorex.log

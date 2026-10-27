@@ -1,0 +1,39 @@
+# %ECSV 1.0
+# ---
+# datatype:
+# - {name: wavelength_nm, unit: nm, datatype: float64}
+# - {name: origin, datatype: string}
+# meta: !!omap
+# - {description: PLANETES wavelength-calibration lines; NIST additions are marked explicitly}
+# schema: astropy-2.0
+wavelength_nm origin
+965.78 pipeline_reference
+978.450 NIST_addition
+1047.01 pipeline_reference
+1067.357 NIST_addition
+1148.81 pipeline_reference
+1166.871 NIST_addition
+1211.23 pipeline_reference
+1213.974 NIST_addition
+1234.339 NIST_addition
+1240.283 NIST_addition
+1243.93 pipeline_reference
+1245.612 NIST_addition
+1248.766 NIST_addition
+1270.23 pipeline_reference
+1280.27 pipeline_reference
+1295.67 pipeline_reference
+1300.83 pipeline_reference
+1321.40 pipeline_reference
+1327.26 pipeline_reference
+1331.32 pipeline_reference
+1336.71 pipeline_reference
+1340.65 pipeline_reference
+1350.42 pipeline_reference
+1359.93 pipeline_reference
+1362.27 pipeline_reference
+1367.86 pipeline_reference
+1371.86 pipeline_reference
+1382.57 pipeline_reference
+1390.75 pipeline_reference
+1409.37 pipeline_reference
