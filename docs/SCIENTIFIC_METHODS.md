@@ -1,7 +1,7 @@
-# Scientific methods in PLANETES 0.3
+# Scientific methods in PLANETES 0.4
 
 This note describes the retained numerical operations. Public arrays, units,
-FITS encoding and parameters are defined in [the product contract](docs/PRODUCT_CONTRACT.md).
+FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
 File tasks and array calculations live together in the corresponding scientific
 module. PyCPL and the GUI call these functions.
 
@@ -11,7 +11,7 @@ Read the complete raw stack, accumulate sum and squared sum in float64, and
 return float32 temporal mean and population RMS. The variance is
 `max(E[x²] - E[x]², 0)`. Complete calibration requires at least two frames.
 
-The original bad-pixel rule uses the spatial median of the mean image and of
+The independent BAD product uses the original bad-pixel rule uses the spatial median of the mean image and of
 the temporal RMS. Mean values above/below median mean ± threshold × median RMS
 set hot/dead bits 1/2; RMS above threshold × median RMS sets noisy bit 4.
 The default threshold remains 5. This RMS includes whatever temporal variations
@@ -26,10 +26,12 @@ peaks, trace a Gaussian centroid column by column, then smooth with the retained
 median filter and cubic fit. Gaussian iteration counts and arithmetic are unchanged.
 
 Accept pixels under the original strict inequality
-`abs(y - trace_y) < profile_width / 2`, excluding the dark BPM. Sparse X/Y arrays
+`abs(y - trace_y) < profile_width / 2`, excluding the explicitly selected BAD map. Sparse X/Y arrays
 retain the original accumulation order. Paired (-1,-1) entries represent invalid
 pixels and padding when different outputs have different sample counts. The
-flat product contains response and geometry; dark statistics are a separate product.
+flat product contains response, geometry and retained Gaussian fit sigmas;
+DARK statistics and BAD flags are separate products. Fit sigmas are descriptive
+QC; the extraction aperture remains profile_width.
 
 ## Wavelength solution (`wavelength.py`)
 
@@ -71,7 +73,8 @@ half of the band supplies OPD phase slope and coherent-sum group delay. Fit
 OPD against GD to remove the OPD zero point.
 
 At each wavelength, fit each of all 24 detector outputs as
-`c + a*cos(phi) + b*sin(phi)`. Persist coherence amplitude `sqrt(a²+b²)` and
+`c + a*cos(phi) + b*sin(phi)`. Retain the existing fitted DC coefficient and residual ADU RMS without refitting.
+Persist coherence amplitude `sqrt(a²+b²)` and
 phase `atan2(b,a)`, including cross-talk outputs. Fit photometric transmission
 from telescope flats, apply the original transmission/coherence normalizations,
 and set the A output's phase reference within each baseline.
@@ -97,3 +100,13 @@ frames. GUI binning affects only display.
 
 Flux is instrumental ADU. No new uncertainty model, transfer-function correction,
 closure-phase definition or OIFITS/Phase 3 product is introduced here.
+
+## File representations and QC
+
+Internal wavelength/OPD/GD units remain um. Corresponding FITS quantities use m;
+profile centers and valid sparse pixel indices are one-based on disk, with paired
+(-1,-1) invalid sentinels retained. The codec remembers original storage quantities
+only while decoded scientific state is unchanged, preventing repeated conversion
+drift. These floating-point boundary conversions are evaluated separately from
+same-array core equivalence. QC in [QC_PARAMETERS](QC_PARAMETERS.md) is descriptive:
+it changes no fitting weights, masks, rejection or scientific defaults.

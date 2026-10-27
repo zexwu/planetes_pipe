@@ -5,7 +5,6 @@ from planetes import __version__
 from planetes.wavelength import calibrate_wavelength_file
 from planetes.models import (
     DarkCalibration,
-    DarkImage,
     FlatCalibration,
     WavelengthReference,
 )
@@ -27,7 +26,7 @@ class PlanetesWave(ui.PyRecipe):
     _email = ""
     _copyright = "PLANETES contributors"
     _synopsis = "PLANETES wave calibration/reduction"
-    _description = "Explicit SOF roles and shared scientific defaults; schema-2 instrumental products."
+    _description = "Explicit SOF roles and shared scientific defaults; GRAVITY-derived categories and explicit PLANETES instrumental extensions."
 
     def __init__(self):
         super().__init__()
@@ -36,26 +35,24 @@ class PlanetesWave(ui.PyRecipe):
     def run(self, frameset, settings):
         options = scientific_settings(self, settings)
         frames = ui.FrameSet(list(frameset))
-        if not any(frame.tag == "PLANETES_LINE_LIST" for frame in frames):
+        if not any(frame.tag == "LINE_LIST" for frame in frames):
             frames.append(
-                ui.Frame(
-                    file=str(wavelength_reference_path()), tag="PLANETES_LINE_LIST"
-                )
+                ui.Frame(file=str(wavelength_reference_path()), tag="LINE_LIST")
             )
         paths, cal, used = select_inputs(
             frames,
             {
-                "WAVE_RAW": None,
-                "DARK_CALIB": (DarkCalibration, DarkImage),
-                "PLANETES_FLAT": FlatCalibration,
-                "PLANETES_LINE_LIST": WavelengthReference,
+                "WAVELAMP_RAW": None,
+                "DARK": DarkCalibration,
+                "FLAT": FlatCalibration,
+                "LINE_LIST": WavelengthReference,
             },
         )
         product = calibrate_wavelength_file(
-            paths["WAVE_RAW"],
-            cal["DARK_CALIB"],
-            cal["PLANETES_FLAT"],
-            reference=cal["PLANETES_LINE_LIST"],
+            paths["WAVELAMP_RAW"],
+            cal["DARK"],
+            cal["FLAT"],
+            reference=cal["LINE_LIST"],
             **options,
         )
         return save_product("planetes_wave.fits", product, used, self)

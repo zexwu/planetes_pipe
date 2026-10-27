@@ -1,6 +1,34 @@
 {
-  "original_sha256": "6762e9649377dd808798e6d40595f423b3b142a7cfd0559cd6729ee1c09d1d2f",
-  "updated_sha256": "bbd3137136208e001ad1fddc9b94f8efe91dbe44f95adce675aa5b7b74ee2c40",
-  "original_backup": "/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_132125_restructure/gui/camview_p2vm.py",
-  "target": "/Users/zexwu/zexwu_lib/devel/camview_p2vm.py"
+  "baseline_commit": "61f519f",
+  "pipeline_version": "0.4.0",
+  "files": [
+    {
+      "path": "camview.py",
+      "patch": "camview.patch",
+      "original_sha256": "3bc9c671779cd57f4aba7b8c80387ee96b3df6334c6454d1b35f813df2842f7e",
+      "updated_sha256": "12c7775f9f16f3831fd1c0114ff6fd857e9015a5275fe82883885255b545197e",
+      "backup": "/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/devel/camview.py"
+    },
+    {
+      "path": "camview_p2vm.py",
+      "patch": "camview_p2vm.patch",
+      "original_sha256": "bbd3137136208e001ad1fddc9b94f8efe91dbe44f95adce675aa5b7b74ee2c40",
+      "updated_sha256": "8f26684380ab31ac0c652dc18b02083a2646e82ba9bef9aac190cf5c2b9c5acf",
+      "backup": "/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/devel/camview_p2vm.py"
+    },
+    {
+      "path": "scripts/utils.py",
+      "patch": "acquisition-utils.patch",
+      "original_sha256": "7167baba543e7beeea99b39a167da651e5bb49e8b3d74a7f4f0de97b8a5edb1d",
+      "updated_sha256": "a3b26de302c79da1ad7f4c32afd40c5e401830e78e0a8815d2b100841b4c36c2",
+      "backup": "/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/devel/scripts/utils.py"
+    },
+    {
+      "path": "scripts/take_p2vm.py",
+      "patch": "take-p2vm.patch",
+      "original_sha256": "c2638b76543ba68e8dc1109264370dd2f12821394b892c4855d0b7a65d0a1c7a",
+      "updated_sha256": "9b8bb9c240ade81265e5ef2872c67f223fa797913c5c7535f0001134b7c4f51d",
+      "backup": "/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/devel/scripts/take_p2vm.py"
+    }
+  ]
 }

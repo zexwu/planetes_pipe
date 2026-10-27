@@ -5,7 +5,6 @@ from planetes import __version__
 from planetes.reduction import reduce_file
 from planetes.models import (
     DarkCalibration,
-    DarkImage,
     FlatCalibration,
     WavelengthCalibration,
     P2VMCalibration,
@@ -27,7 +26,7 @@ class PlanetesReduce(ui.PyRecipe):
     _email = ""
     _copyright = "PLANETES contributors"
     _synopsis = "PLANETES reduce calibration/reduction"
-    _description = "Explicit SOF roles and shared scientific defaults; schema-2 instrumental products."
+    _description = "Explicit SOF roles and shared scientific defaults; GRAVITY-derived categories and explicit PLANETES instrumental extensions."
 
     def __init__(self):
         super().__init__()
@@ -40,19 +39,19 @@ class PlanetesReduce(ui.PyRecipe):
         paths, cal, used = select_inputs(
             frameset,
             {
-                "SCIENCE_RAW": None,
-                "DARK_CALIB": (DarkCalibration, DarkImage),
-                "PLANETES_FLAT": FlatCalibration,
-                "PLANETES_WAVE": WavelengthCalibration,
-                "PLANETES_P2VM": P2VMCalibration,
+                "SINGLE_SCI_RAW": None,
+                "DARK": DarkCalibration,
+                "FLAT": FlatCalibration,
+                "WAVE": WavelengthCalibration,
+                "P2VM": P2VMCalibration,
             },
         )
         product = reduce_file(
-            paths["SCIENCE_RAW"],
-            cal["DARK_CALIB"],
-            cal["PLANETES_FLAT"],
-            cal["PLANETES_WAVE"],
-            cal["PLANETES_P2VM"],
+            paths["SINGLE_SCI_RAW"],
+            cal["DARK"],
+            cal["FLAT"],
+            cal["WAVE"],
+            cal["P2VM"],
             **options,
         )
         return save_product("planetes_reduced.fits", product, used, self)

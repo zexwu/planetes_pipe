@@ -5,11 +5,9 @@ from planetes import __version__
 from planetes.p2vm import calibrate_p2vm_file
 from planetes.models import (
     DarkCalibration,
-    DarkImage,
     FlatCalibration,
     WavelengthCalibration,
 )
-from planetes.instrument import TELESCOPES, BASELINES
 from planetes.eso.common import (
     parameter_list,
     scientific_settings,
@@ -27,7 +25,7 @@ class PlanetesP2VM(ui.PyRecipe):
     _email = ""
     _copyright = "PLANETES contributors"
     _synopsis = "PLANETES p2vm calibration/reduction"
-    _description = "Explicit SOF roles and shared scientific defaults; schema-2 instrumental products."
+    _description = "Explicit SOF roles and shared scientific defaults; GRAVITY-derived categories and explicit PLANETES instrumental extensions."
 
     def __init__(self):
         super().__init__()
@@ -47,23 +45,23 @@ class PlanetesP2VM(ui.PyRecipe):
     def run(self, frameset, settings):
         options = scientific_settings(self, settings)
         roles = {
-            "DARK_CALIB": (DarkCalibration, DarkImage),
-            "PLANETES_FLAT": FlatCalibration,
-            "PLANETES_WAVE": WavelengthCalibration,
-            **{f"TEL_FLAT_{n}": None for n in TELESCOPES},
-            **{f"P2VM_RAW_{n}": None for n in BASELINES},
+            "DARK": DarkCalibration,
+            "FLAT": FlatCalibration,
+            "WAVE": WavelengthCalibration,
+            "FLAT_RAW": None,
+            "P2VM_RAW": None,
         }
         paths, cal, used = select_inputs(
             frameset,
             roles,
-            {"PHASE_REFERENCE": None, "PHASE_DARK_CALIB": (DarkCalibration, DarkImage)},
+            {"PHASE_REFERENCE": None, "PHASE_DARK_CALIB": DarkCalibration},
         )
         product = calibrate_p2vm_file(
-            cal["PLANETES_FLAT"],
-            cal["PLANETES_WAVE"],
-            cal["DARK_CALIB"],
-            telescope_flats={n: paths[f"TEL_FLAT_{n}"] for n in TELESCOPES},
-            baseline_cubes={n: paths[f"P2VM_RAW_{n}"] for n in BASELINES},
+            cal["FLAT"],
+            cal["WAVE"],
+            cal["DARK"],
+            telescope_flats=paths["FLAT_RAW"],
+            baseline_cubes=paths["P2VM_RAW"],
             phase_reference=paths.get("PHASE_REFERENCE"),
             phase_dark=cal.get("PHASE_DARK_CALIB"),
             **options,

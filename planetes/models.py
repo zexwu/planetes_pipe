@@ -1,6 +1,6 @@
 """Scientific arrays, units, axes and calibration relationships; no file or runner code."""
 
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from hashlib import sha256
 from itertools import combinations
 import json
@@ -21,9 +21,48 @@ from .instrument import (
 Array = NDArray
 
 
-def array(unit: str, axes: str):
+def array(unit: str, axes: str, *, offset: int = 0):
     """Declare scientific units and Python axis order once, alongside the field."""
-    return field(metadata={"unit": unit, "axes": axes})
+    return field(metadata={"unit": unit, "axes": axes, "offset": offset})
+
+
+@dataclass(frozen=True, slots=True)
+class DetectorSetup:
+    """Physical camera configuration; missing legacy fields remain unknown."""
+
+    exposure_s: float | None = None
+    exposure_source: str = "readback"
+    origin_x: int | None = None
+    origin_y: int | None = None
+    width: int | None = None
+    height: int | None = None
+    binning_x: int | None = None
+    binning_y: int | None = None
+    detector: str | None = None
+    orientation: str | None = None
+    legacy: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class RawMetadata:
+    """Raw category, physical shutters 1..4 and explicitly sourced capture metadata."""
+
+    category: str
+    shutters: tuple[bool, bool, bool, bool]
+    setup: DetectorSetup
+    configuration_source: str
+    host_start_utc: str | None = None
+    host_end_utc: str | None = None
+    exposure_start_utc: str | None = None
+    original: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalRepresentation:
+    """Original quantities in storage units, reusable only for unchanged scientific state."""
+
+    decoded_digest: str
+    quantities: dict[str, Array]
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +73,11 @@ class Provenance:
     parameters: dict = field(default_factory=dict)
     inputs: dict[str, str] = field(default_factory=dict)
     dependencies: dict[str, str] = field(default_factory=dict)
+    unverified: tuple[str, ...] = ()
+    qc_status: dict[str, str] = field(default_factory=dict)
+    representation: CanonicalRepresentation | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 def provenance_field():
@@ -50,12 +94,20 @@ class DarkImage:
 
 @dataclass(frozen=True, slots=True)
 class DarkCalibration:
-    """Temporal mean/RMS and the retained hot/dead/noisy bit flags from a stack."""
+    """Measured temporal mean/population RMS and actual stack frame count."""
 
     mean_adu: Array = array("adu", "detector_y,detector_x")
     temporal_rms_adu: Array = array("adu", "detector_y,detector_x")
-    bad_pixel_flags: Array = array("", "detector_y,detector_x")
     n_frames: int
+    setup: DetectorSetup | None = field(default=None, kw_only=True)
+    provenance: Provenance = provenance_field()
+
+
+@dataclass(frozen=True, slots=True)
+class BadPixelMap:
+    """Retained hot=1/dead=2/noisy=4 bits, derived from the named full DARK."""
+
+    bad_pixel_flags: Array = array("", "detector_y,detector_x")
     provenance: Provenance = provenance_field()
 
 
@@ -66,10 +118,21 @@ Dark = DarkCalibration | DarkImage
 class FlatCalibration:
     """Flat response and extraction geometry, including paired (-1,-1) sentinels."""
 
-    profile_x_pixels: Array = array("pixel", "output,sample")
-    profile_y_pixels: Array = array("pixel", "output,sample")
+    profile_x_pixels: Array = array("pixel", "output,sample", offset=1)
+    profile_y_pixels: Array = array("pixel", "output,sample", offset=1)
     flat_map_adu: Array = array("adu", "detector_y,detector_x")
-    trace_y_pixels: Array = array("pixel", "output,detector_x")
+    trace_y_pixels: Array = array("pixel", "output,detector_x", offset=1)
+    profile_sigma_pixels: Array = field(
+        default_factory=lambda: np.empty((0, 0)),
+        metadata={"unit": "pixel", "axes": "output,detector_x"},
+        kw_only=True,
+    )
+    telescope_flux_adu: Array = field(
+        default_factory=lambda: np.empty(0),
+        metadata={"unit": "adu", "axes": "telescope"},
+        kw_only=True,
+    )
+    setup: DetectorSetup | None = field(default=None, kw_only=True)
     provenance: Provenance = provenance_field()
 
 
@@ -78,6 +141,21 @@ class WavelengthCalibration:
     """Wavelength at each detector sample in the parent flat's extraction geometry."""
 
     wavelength_map_um: Array = array("um", "output,detector_x")
+    fit_residual_um: Array = field(
+        default_factory=lambda: np.empty(0),
+        metadata={"unit": "um", "axes": "line"},
+        kw_only=True,
+    )
+    fit_x_pixels: Array = field(
+        default_factory=lambda: np.empty(0),
+        metadata={"unit": "pixel", "axes": "line"},
+        kw_only=True,
+    )
+    fit_y_pixels: Array = field(
+        default_factory=lambda: np.empty(0),
+        metadata={"unit": "pixel", "axes": "line"},
+        kw_only=True,
+    )
     provenance: Provenance = provenance_field()
 
 
@@ -105,6 +183,16 @@ class P2VMCalibration:
     group_delay_um: Array = array("um", "baseline,frame")
     ellipse_phase_rad: Array = array("rad", "baseline,frame,wavelength")
     ellipse_amplitude: Array = array("", "baseline,frame,wavelength")
+    dc_term_adu: Array = field(
+        default_factory=lambda: np.empty((0, 0, 0)),
+        metadata={"unit": "adu", "axes": "output,baseline,wavelength"},
+        kw_only=True,
+    )
+    fit_rms_adu: Array = field(
+        default_factory=lambda: np.empty((0, 0, 0)),
+        metadata={"unit": "adu", "axes": "output,baseline,wavelength"},
+        kw_only=True,
+    )
     provenance: Provenance = provenance_field()
 
 
@@ -143,8 +231,7 @@ class CalibrationSpectra:
     provenance: Provenance = provenance_field()
 
 
-def fingerprint(product) -> str:
-    """Hash scientific content and parent dependencies, independent of file encoding."""
+def _digest(product, quantities=None) -> str:
     digest = sha256()
     info = {
         "type": type(product).__name__,
@@ -157,21 +244,108 @@ def fingerprint(product) -> str:
             continue
         value = getattr(product, item.name)
         if item.metadata:
+            unit = item.metadata["unit"]
+            if quantities is not None and item.name in quantities:
+                value = quantities[item.name]
+                unit = "m" if unit == "um" else unit
             values = np.ascontiguousarray(value, dtype=value.dtype.newbyteorder("<"))
-            info[item.name] = [values.dtype.str, values.shape, dict(item.metadata)]
+            info[item.name] = [
+                values.dtype.str,
+                values.shape,
+                unit,
+                item.metadata["axes"],
+            ]
             digest.update(values.tobytes())
         else:
-            info[item.name] = value
+            info[item.name] = asdict(value) if is_dataclass(value) else value
     digest.update(
         json.dumps(
             info,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
-            default=lambda value: value.item(),
+            default=lambda v: v.item(),
         ).encode()
     )
     return digest.hexdigest()
+
+
+def canonical_quantities(product) -> dict[str, Array]:
+    """Convert um to m once; retain exact original m values after validated decoding."""
+    record = product.provenance.representation
+    if record is not None and record.decoded_digest == _digest(product):
+        return record.quantities
+    quantities = {}
+    for f in fields(product):
+        if not f.metadata:
+            continue
+        value = getattr(product, f.name)
+        if f.metadata["unit"] == "um":
+            quantities[f.name] = value / 1e6
+        elif f.metadata.get("offset"):
+            quantities[f.name] = (
+                np.where(value < 0, value, value + f.metadata["offset"])
+                if value.dtype.kind in "iu"
+                else value + f.metadata["offset"]
+            )
+    return quantities
+
+
+def fingerprint(product) -> str:
+    """Hash scientific quantities in canonical storage units, including physical setup."""
+    return _digest(product, canonical_quantities(product))
+
+
+def retain_representation(product, quantities):
+    """Attach immutable source quantities after decoding, without storing an HDU/header."""
+    from dataclasses import replace
+
+    snapshot = {}
+    for name, values in (canonical_quantities(product) | quantities).items():
+        saved = np.array(values, copy=True)
+        saved.flags.writeable = False
+        snapshot[name] = saved
+    record = CanonicalRepresentation(_digest(product), snapshot)
+    return replace(
+        product, provenance=replace(product.provenance, representation=record)
+    )
+
+
+def check_setup(
+    raw: DetectorSetup, calibration: DetectorSetup | None, *, exposure: bool, role: str
+) -> tuple[str, ...]:
+    """Reject known physical conflicts; only explicitly legacy inputs may lack fields."""
+    names = [
+        "detector",
+        "origin_x",
+        "origin_y",
+        "width",
+        "height",
+        "binning_x",
+        "binning_y",
+        "orientation",
+    ]
+    if exposure:
+        names.append("exposure_s")
+    unknown = []
+    for name in names:
+        actual = getattr(raw, name)
+        expected = getattr(calibration, name) if calibration is not None else None
+        if actual is None or expected is None:
+            if not raw.legacy and not (calibration is not None and calibration.legacy):
+                raise ValueError(f"Missing {role} configuration: {name}")
+            unknown.append(f"{role}.{name}")
+        elif name == "exposure_s":
+            # Encoding roundoff only, not a detector/physical matching tolerance.
+            if abs(actual - expected) > 4 * abs(
+                np.spacing(max(abs(actual), abs(expected)))
+            ):
+                raise ValueError(
+                    f"Incompatible {role} exposure_s: {actual} != {expected}"
+                )
+        elif actual != expected:
+            raise ValueError(f"Incompatible {role} {name}: {actual} != {expected}")
+    return tuple(unknown)
 
 
 def positive(value: float, name: str) -> float:
@@ -234,7 +408,8 @@ def require_parent(child, role: str, parent) -> None:
 def validate(product) -> None:
     """Check scientific shapes, index safety and the fixed instrumental conventions."""
     required = {
-        FlatCalibration: ("dark",),
+        BadPixelMap: ("dark",),
+        FlatCalibration: ("dark", "bad"),
         WavelengthCalibration: ("flat",),
         P2VMCalibration: ("flat", "wave"),
     }
@@ -256,7 +431,10 @@ def validate(product) -> None:
             if value.dtype.kind not in "fiucb":
                 raise ValueError(f"Non-numeric scientific array: {item.name}")
             if not isinstance(product, VisibilityObservables) and (
-                np.iscomplexobj(value) or not np.isfinite(value).all()
+                np.iscomplexobj(value)
+                or (
+                    item.name != "profile_sigma_pixels" and not np.isfinite(value).all()
+                )
             ):
                 raise ValueError(
                     f"Calibration array must be finite and real: {item.name}"
@@ -271,23 +449,23 @@ def validate(product) -> None:
                 or not isinstance(product.n_frames, (int, np.integer))
                 or product.n_frames < 2
                 or product.temporal_rms_adu.shape != shape
-                or product.bad_pixel_flags.shape != shape
             ):
                 raise ValueError(
-                    "Complete dark calibration requires matching mean/RMS/flags and >=2 frames"
-                )
-            if (
-                product.bad_pixel_flags.dtype.kind not in "iu"
-                or ((product.bad_pixel_flags < 0) | (product.bad_pixel_flags > 7)).any()
-            ):
-                raise ValueError(
-                    "Dark bad-pixel flags must use the retained integer bits 1,2,4"
+                    "Complete dark calibration requires matching mean/RMS and >=2 frames"
                 )
             if (
                 not np.isfinite(product.temporal_rms_adu).all()
                 or (product.temporal_rms_adu < 0).any()
             ):
                 raise ValueError("Temporal RMS must be finite and nonnegative")
+    elif isinstance(product, BadPixelMap):
+        flags = product.bad_pixel_flags
+        if (
+            0 in flags.shape
+            or flags.dtype.kind not in "iu"
+            or ((flags < 0) | (flags > 7)).any()
+        ):
+            raise ValueError("BAD must use the retained integer bits 1,2,4")
     elif isinstance(product, FlatCalibration):
         ny, nx = product.flat_map_adu.shape
         xs, ys = product.profile_x_pixels, product.profile_y_pixels
@@ -299,6 +477,19 @@ def validate(product) -> None:
             raise ValueError(
                 "Flat geometry must describe 24 outputs with matching X/Y indices"
             )
+        if product.profile_sigma_pixels.size and (
+            product.profile_sigma_pixels.shape != product.trace_y_pixels.shape
+            or np.isinf(product.profile_sigma_pixels).any()
+            or (
+                product.profile_sigma_pixels[np.isfinite(product.profile_sigma_pixels)]
+                <= 0
+            ).any()
+        ):
+            raise ValueError(
+                "Fitted profile sigma must match traces and be positive or NaN"
+            )
+        if product.telescope_flux_adu.size and product.telescope_flux_adu.shape != (4,):
+            raise ValueError("Flat flux must describe four telescopes")
         if xs.dtype.kind not in "iu" or ys.dtype.kind not in "iu":
             raise ValueError("Extraction indices must be integers")
         valid = (xs >= 0) & (ys >= 0)
@@ -313,6 +504,14 @@ def validate(product) -> None:
         if product.wavelength_map_um.shape[0] != N_OUTPUTS:
             raise ValueError("Wavelength map must describe 24 outputs")
         validate_wavelength(product.wavelength_map_um)
+        if not (
+            product.fit_residual_um.shape
+            == product.fit_x_pixels.shape
+            == product.fit_y_pixels.shape
+        ):
+            raise ValueError(
+                "Wave fit residuals and coordinates must have matching lengths"
+            )
     elif isinstance(product, WavelengthReference):
         validate_wavelength(product.wavelength_um)
         if len(product.wavelength_um) < 3 or len(product.origin) != len(
@@ -337,6 +536,10 @@ def validate(product) -> None:
         for name, shape in expected.items():
             if getattr(product, name).shape != shape:
                 raise ValueError(f"Invalid {name} shape; expected {shape}")
+        for name in ("dc_term_adu", "fit_rms_adu"):
+            value = getattr(product, name)
+            if value.size and value.shape != (N_OUTPUTS, N_BASELINES, nw):
+                raise ValueError(f"Invalid {name} shape")
         _validate_baselines(product)
     elif isinstance(product, VisibilityObservables):
         validate_wavelength(product.wavelength_um)

@@ -1,8 +1,0 @@
-Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
-Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
-If this causes problems, reconfigure your locale. See the locale(1) manual
-for more information.
-OMP: Info #276: omp_set_nested routine deprecated, please use omp_set_max_active_levels instead.
-qt.qpa.fonts: Populating font family aliases took 193 ms. Replace uses of missing font family "Sans Serif" with one that exists to avoid this cost. 
-This plugin does not support propagateSizeHints()
-{'checks': ['raw frame / single dark subtraction', 'display binning invariance', 'dark-off pause', 'current-frame DarkImage', 'wrong-category rejection'], 'all_passed': True, 'frames_timed': 128, 'raw_frame_shape': [1024, 1280], 'mean_ms': 1.1035367706426769, 'median_ms': 1.100166526157409, 'p95_ms': 1.1629728367552161, 'hardware_connected': False}

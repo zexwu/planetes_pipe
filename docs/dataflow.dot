@@ -1,22 +1,22 @@
 digraph Dataflow {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.5, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.3 — 标定与科学数据流程", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.4 — 原始数据、标定与科学结果", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.15,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
-  rawdark [label="多帧原始 dark\n按 main / lamp / science 分别选择"];
-  dark [label="dark 任务\n均值 · temporal RMS · 坏像素", style="rounded,filled", fillcolor="#eff6ff"];
-  darkfits [label="DarkCalibration\nplanetes_dark.fits", shape=folder];
-  rawflat [label="四个望远镜 flat cube"];
-  flat [label="flat 任务\n响应 · trace · 稀疏提取几何", style="rounded,filled", fillcolor="#eff6ff"];
-  flatfits [label="FlatCalibration\nplanetes_flat.fits", shape=folder];
-  rawwave [label="波长灯 cube + 静态谱线"];
-  wave [label="wave 任务\n谱线匹配 · 波长解", style="rounded,filled", fillcolor="#eff6ff"];
-  wavefits [label="WavelengthCalibration\nplanetes_wave.fits", shape=folder];
-  rawp2vm [label="4 个 telescope + 6 个 baseline cube\n可选 phase reference / 独立 dark"];
-  p2vm [label="p2vm 任务\n提取 · 物理响应 · 求逆", style="rounded,filled", fillcolor="#eff6ff"];
-  p2vmfits [label="P2VMCalibration\nplanetes_p2vm.fits\n保存目标波长网格", shape=folder];
-  rawscience [label="science cube / 单帧 raw\n明确选择 science dark"];
-  science [label="reduce_file / FrameReducer\n共用提取、归一化、flags", style="rounded,filled", fillcolor="#eff6ff"];
-  results [label="离线：完整仪器结果 → 显式 FITS\n实时：内存可见度 + flags → GUI\nGD / 差分相位可选计算", shape=folder];
+  rawdark [label="DARK_RAW\nmain / lamp / science 分别选择"];
+  dark [label="planetes_dark\n完整多帧 mean + temporal RMS", style="rounded,filled", fillcolor="#eff6ff"];
+  darkfits [label="DARK + 独立 BAD\n保留 hot/dead/noisy 判据\n两份校验后发布", shape=folder];
+  rawflat [label="FLAT_RAW × 4\n按物理快门识别望远镜"];
+  flat [label="planetes_flat\n响应 · trace · 稀疏提取几何", style="rounded,filled", fillcolor="#eff6ff"];
+  flatfits [label="FLAT\nDARK/BAD 父关系与探测器几何", shape=folder];
+  rawwave [label="WAVELAMP_RAW + LINE_LIST\n选用匹配曝光的 lamp DARK"];
+  wave [label="planetes_wave\n保留谱线匹配与波长拟合", style="rounded,filled", fillcolor="#eff6ff"];
+  wavefits [label="WAVE\n全输出波长图 + accepted residuals", shape=folder];
+  rawp2vm [label="FLAT_RAW × 4 + P2VM_RAW × 6\n可选 phase reference / 独立 DARK"];
+  p2vm [label="planetes_p2vm\n提取 · 物理响应 · 求逆", style="rounded,filled", fillcolor="#eff6ff"];
+  p2vmfits [label="P2VM\n全 24 输出响应 + inverse\n保存目标波长网格", shape=folder];
+  rawscience [label="SINGLE_SCI_RAW\n选用匹配曝光的 science DARK"];
+  science [label="planetes_reduce / FrameReducer\n共用计算与 invalid flags", style="rounded,filled", fillcolor="#eff6ff"];
+  results [label="离线：SINGLE_SCI_P2VMRED\n逐帧仪器通量/VISAMP/GD/差分相位\n实时：内存可见度与 flags → GUI", shape=folder];
   {rank=same; rawdark; dark; darkfits;}
   {rank=same; rawflat; flat; flatfits;}
   {rank=same; rawwave; wave; wavefits;}
@@ -27,16 +27,16 @@ digraph Dataflow {
   rawwave -> wave -> wavefits;
   rawp2vm -> p2vm -> p2vmfits;
   rawscience -> science -> results;
-  darkfits -> flat;
-  darkfits -> wave;
-  darkfits -> p2vm;
-  darkfits -> science;
+  darkfits -> flat [label="DARK + BAD"];
+  darkfits -> wave [label="lamp DARK"];
+  darkfits -> p2vm [label="main / phase DARK"];
+  darkfits -> science [label="science DARK"];
   flatfits -> wave;
   flatfits -> p2vm;
   flatfits -> science;
   wavefits -> p2vm;
   wavefits -> science;
-  p2vmfits -> science [label="采用保存的网格"];
+  p2vmfits -> science [label="使用保存的网格"];
   rawdark -> rawflat -> rawwave -> rawp2vm -> rawscience [style=invis];
   dark -> flat -> wave -> p2vm -> science [style=invis];
 }

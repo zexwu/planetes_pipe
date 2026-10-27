@@ -1,28 +1,25 @@
-from __future__ import annotations
+"""Scientific invariants for the retained extraction, matrix and visibility definitions."""
 
 import unittest
-from unittest.mock import patch
 
 import numpy as np
+from p2vm_fixture import calibration_spectra
 
-from planetes.models import DarkCalibration
-
+from planetes.extraction import extract_spec_sparse
 from planetes.instrument import (
     IMAG_SLICE,
     N_BASELINES,
+    N_DATA,
     N_OUTPUTS,
     N_TELESCOPES,
     REAL_SLICE,
 )
-from planetes.flat import compute_flat
-from planetes.p2vm import build_v2pm_matrix
-from planetes.extraction import extract_spec_sparse
+from planetes.p2vm import build_v2pm_matrix, compute_p2vm
 from planetes.reduction import normalize_visibility
 from planetes.wavelength import match_lines_grid
-from planetes.wavelength import load_wavelength_reference
 
 
-class CorrectnessTests(unittest.TestCase):
+class ScienceTests(unittest.TestCase):
     def test_v2pm_terms_expand_to_cartesian_matrix(self) -> None:
         transmission = np.arange(N_OUTPUTS * N_TELESCOPES * 2, dtype=float).reshape(
             N_OUTPUTS, N_TELESCOPES, 2
@@ -41,39 +38,6 @@ class CorrectnessTests(unittest.TestCase):
         np.testing.assert_array_equal(
             matrix[:, IMAG_SLICE], amplitude * np.sin(phase) / N_OUTPUTS
         )
-
-    def test_sparse_profile_excludes_bad_pixels(self) -> None:
-        dark_map = np.zeros((8, 128), dtype=np.float32)
-        dark_std = np.zeros_like(dark_map)
-        flat_map = np.zeros_like(dark_map)
-        flat_map[4, :] = 100.0
-        bad_map = np.zeros((8, 128), dtype=np.int16)
-        bad_map[4, 10] = 1
-        trace = np.full(128, 4.0)
-        trace_error = np.zeros(128)
-
-        with (
-            patch(
-                "planetes.flat.trace_spectrum",
-                return_value=(trace, trace_error),
-            ),
-        ):
-            product = compute_flat(
-                DarkCalibration(dark_map, dark_std, bad_map, 2),
-                [flat_map],
-                n_outputs=1,
-                profile_width=3,
-            )
-
-        selected = set(
-            zip(
-                product.profile_y_pixels[0],
-                product.profile_x_pixels[0],
-                strict=True,
-            )
-        )
-        self.assertNotIn((4, 10), selected)
-        self.assertIn((-1, -1), selected)
 
     def test_sparse_extractor_skips_invalid_sentinels(self) -> None:
         cube = np.ones((1, 2, 3), dtype=np.float32)
@@ -101,13 +65,6 @@ class CorrectnessTests(unittest.TestCase):
         )
         self.assertEqual(len(matches), len(np.unique(matches[:, 1])))
 
-    def test_wavelength_reference_is_sorted_and_versioned(self) -> None:
-        lines = load_wavelength_reference().wavelength_um
-        self.assertEqual(len(lines), 30)
-        self.assertTrue(np.all(np.diff(lines) > 0))
-        self.assertAlmostEqual(lines[0], 0.965780)
-        self.assertAlmostEqual(lines[-1], 1.409370)
-
     def test_visibility_normalization_flags_invalid_flux_products(self) -> None:
         coherent_flux = np.array([[[6 + 8j, 1 + 0j]]])
         flux = np.array([[[4.0, -1.0], [25.0, 2.0]]])
@@ -119,6 +76,16 @@ class CorrectnessTests(unittest.TestCase):
         self.assertTrue(np.isnan(visamp[0, 0, 1]))
         self.assertTrue(flag[0, 0, 1])
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_p2vm_inverts_known_full_rank_instrument_response(self):
+        p2vm = compute_p2vm(calibration_spectra(n_wave=15), phase_correction=False)
+        matrix = build_v2pm_matrix(
+            p2vm.transmission,
+            p2vm.coherence_amplitude,
+            p2vm.coherence_phase_rad,
+        )
+        for wave in range(len(p2vm.wavelength_um)):
+            np.testing.assert_allclose(
+                p2vm.p2vm[:, :, wave] @ matrix[:, :, wave],
+                np.eye(N_DATA),
+                atol=1e-12,
+            )

@@ -165,6 +165,9 @@ def compute_wave(
 
     wave_product = WavelengthCalibration(
         wavelength_map_um=wavemap,
+        fit_residual_um=residuals[~reject].copy(),
+        fit_x_pixels=x_flat[~reject].copy(),
+        fit_y_pixels=y_flat[~reject].copy(),
         provenance=Provenance(
             producer="planetes.wavelength", dependencies={"flat": fingerprint(flat)}
         ),
@@ -448,7 +451,7 @@ def _grid_search_kernel(
 
 
 def wavelength_reference_path():
-    """Return the installed, schema-2 static line-list file."""
+    """Return the installed, format-3 static line-list file."""
     from importlib.resources import files
     from pathlib import Path
 
@@ -471,8 +474,9 @@ def calibrate_wavelength_file(
     """Read a lamp cube and return a wavelength solution, without writing files."""
     from dataclasses import replace
     from .dark import frame_mean
-    from .fits import iter_raw_cube
+    from .fits import iter_raw_cube, check_raw_calibrations
 
+    unknown = check_raw_calibrations(path, dark, flat, category="WAVELAMP_RAW")
     validate(dark)
     reference = load_wavelength_reference() if reference is None else reference
     validate(reference)
@@ -483,7 +487,8 @@ def calibrate_wavelength_file(
     result = compute_wave(image, flat, reference.wavelength_um)
     info = Provenance(
         producer="planetes.wavelength",
-        inputs={"wave_raw": str(path)},
+        inputs={"wavelamp_raw": str(path)},
+        unverified=unknown,
         dependencies={
             "flat": fingerprint(flat),
             "dark": fingerprint(dark),

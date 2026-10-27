@@ -1,549 +1,122 @@
 --- a/camview_p2vm.py
 +++ b/camview_p2vm.py
-@@ -12,15 +12,15 @@
-     refresh-rate, binning, capture, dark subtraction, ROI spectrum, and finesse
-     controls.  This module adds calibration overlays to the image: border boxes
-     show the sparse extraction regions for every baseline ABCD output, and
--    finite dashed line segments show wavelength marker positions from ``wave.npz``.
-+    finite dashed line segments show wavelength marker positions from ``planetes_wave.fits``.
+@@ -43,7 +43,7 @@
+ import sys
+ import time
+ from collections import deque
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ from pathlib import Path
  
- Visibility spectrum
-     Six subplots, one per baseline, showing the current normalized visibility
-     amplitude versus wavelength.  The wavelength axis is fixed to the calibrated
-     ``wl_grid`` span so zooming cannot change X; all baselines share X and Y.
-     The controls above the plots enable/disable P2VM updates and select the
--    P2VM calibration directory.  The Camera tab produces the dark-subtracted
--    frames that are reduced here.
-+    P2VM calibration directory.  The same raw frame feeds the display and the common scientific core;
-+    the selected dark is subtracted once in each path.
+ import numpy as np
+@@ -57,6 +57,7 @@
+ from planetes.reduction import FrameReducer
+ from planetes.dark import load_dark
+ from planetes.models import DarkImage
++from scripts import utils as capture_utils
+ from planetes.instrument import BASELINES, ABCD_ORDER
  
- Visibility history
-     Six stacked subplots, one per baseline, showing wavelength-averaged
-@@ -54,11 +54,14 @@
- from pyqtgraph.Qt.QtGui import QColor, QPalette
  
- from camview import INIT_REFRESH_RATE, MainWindow, TestbedProxy, rebin
--from planetes_pipe.rtp2vm import P2VMReducer
--
--
--BASELINE_NAMES = ("43", "42", "41", "32", "31", "21")
--ABCD_NAMES = ("A", "B", "C", "D")
-+from planetes.reduction import FrameReducer
-+from planetes.dark import load_dark
-+from planetes.models import DarkImage
-+from planetes.instrument import BASELINES, ABCD_ORDER
+@@ -282,6 +283,7 @@
+ 
+         camera_widget = self.takeCentralWidget()
+         self._add_p2vm_camera_controls(camera_widget)
++        self._add_capture_metadata_controls()
+         self.tabs = QtWidgets.QTabWidget()
+         self.camera_tab_index = self.tabs.addTab(camera_widget, "Camera")
+         self.visibility_tab_index = self.tabs.addTab(
+@@ -295,6 +297,94 @@
+ 
+         self._add_calibration_overlays()
+         self.p2vm_ready = True
 +
++    def _add_capture_metadata_controls(self):
++        """Make capture type explicit, with physical shutter configuration confirmed at start."""
++        self.data_typ_radio_flat = QtWidgets.QRadioButton("FLAT")
++        self.data_typ_radio_p2vm = QtWidgets.QRadioButton("P2VM")
++        for button in (self.data_typ_radio_flat,self.data_typ_radio_p2vm):
++            self.group_data_typ.addButton(button)
++            self.data_typ_layout.addWidget(button)
++            button.toggled.connect(self._change_data_typ)
++        self.capture_writer = self._write_capture
++        self.capture_check = lambda: capture_utils.check_camera(self.cam,self.capture_metadata)
++        self.capture_configuration = None
 +
-+BASELINE_NAMES = BASELINES
-+ABCD_NAMES = ABCD_ORDER
- VISIBILITY_Y_RANGE = (0.0, 1.5)
- HISTORY_Y_RANGE = (0.8, 1.2)
- HISTORY_DRAW_INTERVAL_S = 1 / 30
-@@ -101,7 +104,7 @@
-     stream wraps back to frame zero, allowing continuous local playback.
-     """
- 
--    def __init__(self, cube_path: Path, dark_path: Path | None = None):
-+    def __init__(self, cube_path: Path):
-         self.cube_path = Path(cube_path).expanduser().resolve()
-         if not self.cube_path.exists():
-             raise FileNotFoundError(f"Fake science cube not found: {self.cube_path}")
-@@ -110,20 +113,12 @@
-         if self._cube.ndim != 3:
-             raise ValueError(f"Expected a 3D fake cube, got {self._cube.shape}")
- 
--        self._dark = None
--        if dark_path is not None:
--            dark_path = Path(dark_path).expanduser().resolve()
--            if dark_path.exists():
--                self._dark = fits.getdata(dark_path).astype(np.float32).mean(axis=0)
--
-         self._index = 0
- 
-     def get(self) -> np.ndarray:
--        """Return the next fake detector frame, optionally dark-subtracted."""
-+        """Return the next raw detector frame; dark subtraction belongs to the common core."""
-         frame = self._cube[self._index].astype(np.float32, copy=False)
-         self._index = (self._index + 1) % len(self._cube)
--        if self._dark is not None:
--            frame = frame - self._dark
-         return frame
- 
- 
-@@ -136,8 +131,8 @@
-     PLANETES bench services.
-     """
- 
--    def __init__(self, cube_path: Path, dark_path: Path | None = None):
--        self._stream = FakeImageStream(cube_path, dark_path)
-+    def __init__(self, cube_path: Path):
-+        self._stream = FakeImageStream(cube_path)
-         _, height, width = self._stream._cube.shape
-         self._properties = {
-             "exposure_time": 100_000,
-@@ -205,7 +200,7 @@
-         Real catkit2 camera service or ``FakeCamera``.  The inherited Camera tab
-         uses this object for image display, capture, exposure, and dark controls.
-     reducer
--        Loaded ``P2VMReducer`` containing flat, wave, and P2VM calibration
-+        Loaded ``FrameReducer`` containing flat, wave, and P2VM calibration
-         products.  It is called once per displayed frame when P2VM is enabled.
-     source_label
-         Short string displayed in the P2VM status label to remind the operator
-@@ -219,8 +214,8 @@
-         Checkbox controlling whether incoming frames are reduced and plotted.
-     reducer_dir_edit
-         Visibility-tab text field containing the active P2VM calibration
--        directory.  The directory must contain ``flat.npz``, ``wave.npz``, and
--        ``p2vm.npz``.
-+        directory.  The directory must contain ``planetes_flat.fits``, ``planetes_wave.fits``, and
-+        ``planetes_p2vm.fits``.
-     dark_source_combo
-         Camera-tab editable selector containing the dark source.
-         Fake mode defaults to ``--fake-dark``.  Bench mode defaults to the
-@@ -242,7 +237,7 @@
-     def __init__(
-         self,
-         cam,
--        reducer: P2VMReducer,
-+        reducer: FrameReducer,
-         *,
-         source_label: str,
-         reducer_dark_path: Path | None = None,
-@@ -267,14 +262,17 @@
-         self.latest_mean_vis = None
-         self.visibility_dirty = False
-         self.p2vm_overlay_items = []
--        self.reducer_dir = reducer.reduced_dir
-+        self.reducer_dir = reducer.calibration_dir
-         self.reducer_dark_path = reducer_dark_path
-         self.reducer_dark_follows_capture = reducer_dark_path is None
-         self.reducer_dark_data = None
-+        self.reducer_dark_calibration = None
-+        self.reducer_dark_signature = None
-         self.reducer_dark_loaded_from = None
-         self.display_dark_cache = None
-         self.display_dark_cache_key = None
-         self.p2vm_input_frame = None
-+        self.memory_dark = None
- 
-         super().__init__(cam, parent=parent)
-         if self.reducer_dark_path is None:
-@@ -331,9 +329,15 @@
-         self.dark_source_combo = QtWidgets.QComboBox()
-         self.dark_source_combo.setEditable(True)
-         if self.reducer_dark_path is not None:
--            self.dark_source_combo.addItem(str(self.reducer_dark_path), str(self.reducer_dark_path))
--        self.dark_source_combo.currentTextChanged.connect(self._set_dark_source_from_text)
--        self.dark_source_combo.lineEdit().editingFinished.connect(self._set_dark_source_from_text)
-+            self.dark_source_combo.addItem(
-+                str(self.reducer_dark_path), str(self.reducer_dark_path)
-+            )
-+        self.dark_source_combo.currentTextChanged.connect(
-+            self._set_dark_source_from_text
-+        )
-+        self.dark_source_combo.lineEdit().editingFinished.connect(
-+            self._set_dark_source_from_text
-+        )
- 
-         select_dark = QtWidgets.QPushButton("Select dark")
-         select_dark.clicked.connect(self._select_dark_path)
-@@ -360,7 +364,7 @@
-         The dark path and overlay controls are intentionally placed on the
-         Camera tab, because they affect camera-frame interpretation.  This tab
-         keeps the P2VM update toggle and the calibration-directory selector used
--        to choose which ``flat.npz`` / ``wave.npz`` / ``p2vm.npz`` set is applied.
-+        to choose which ``planetes_flat.fits`` / ``planetes_wave.fits`` / ``planetes_p2vm.fits`` set is applied.
- 
-         Plots
-         -----
-@@ -399,8 +403,8 @@
-         self.visibility_curves = []
-         self.visibility_value_labels = []
-         colors = _plot_colors(self.reducer.n_baselines)
--        wl_min = float(self.reducer.wl_grid.min())
--        wl_max = float(self.reducer.wl_grid.max())
-+        wl_min = float(self.reducer.wavelength_um.min())
-+        wl_max = float(self.reducer.wavelength_um.max())
-         wl_span = wl_max - wl_min
- 
-         for bsl in range(self.reducer.n_baselines):
-@@ -498,7 +502,7 @@
-             curve = plot.plot(
-                 pen=pg.mkPen(colors[bsl], width=2),
-             )
--            curve.setSkipFiniteCheck(True)
-+            curve.setSkipFiniteCheck(False)
-             curve.setClipToView(True)
-             self.history_plots.append(plot)
-             self.history_curves.append(curve)
-@@ -515,9 +519,13 @@
-     def _clear_dark_cache(self) -> None:
-         """Drop cached dark arrays after the selected dark source changes."""
-         self.reducer_dark_data = None
-+        self.reducer_dark_calibration = None
-+        self.reducer_dark_signature = None
-         self.reducer_dark_loaded_from = None
-         self.display_dark_cache = None
-         self.display_dark_cache_key = None
-+        if hasattr(self, "history_curves"):
-+            self._clear_history()
- 
-     def _binned_dark(self, dark: np.ndarray, factor: int) -> np.ndarray:
-         """Return a cached binned dark frame for the current display binning."""
-@@ -535,6 +543,9 @@
-     def _set_dark_source_from_text(self) -> None:
-         """Update the selected dark path from the editable Camera-tab selector."""
-         text = self.dark_source_combo.currentText().strip()
-+        if text == "Current frame (2D)":
-+            self._clear_dark_cache()
-+            return
-         path = Path(text).expanduser() if text else None
-         if path == self.reducer_dark_path and not self.reducer_dark_follows_capture:
-             return
-@@ -589,8 +600,10 @@
-     def _load_reducer_dir(self, path: Path) -> None:
-         """Load a new reducer and refresh all calibration-dependent UI state."""
-         try:
--            reducer = P2VMReducer(path)
-+            reducer = FrameReducer.from_directory(path)
-         except Exception as exc:
-+            self.p2vm_ready = False
-+            self._clear_current_visibility()
-             self.reducer_dir_status.setText(f"P2VM error: {exc}")
-             return
- 
-@@ -601,8 +614,9 @@
-             )
-             return
- 
-+        self.p2vm_ready = True
-         self.reducer = reducer
--        self.reducer_dir = reducer.reduced_dir
-+        self.reducer_dir = reducer.calibration_dir
-         self.reducer_dir_edit.setText(str(self.reducer_dir))
-         self.reducer_dir_status.setText(f"loaded: {self.reducer_dir.name}")
-         self._reset_visibility_axes()
-@@ -629,8 +643,8 @@
- 
-     def _reset_visibility_axes(self) -> None:
-         """Update wavelength-axis limits after loading a new P2VM directory."""
--        wl_min = float(self.reducer.wl_grid.min())
--        wl_max = float(self.reducer.wl_grid.max())
-+        wl_min = float(self.reducer.wavelength_um.min())
-+        wl_max = float(self.reducer.wavelength_um.max())
-         wl_span = wl_max - wl_min
-         for plot in self.visibility_plots:
-             plot.getViewBox().setRange(
-@@ -685,53 +699,78 @@
-         self._set_overlay_visible(self.overlay_enabled.isChecked())
- 
-     def _load_reducer_dark(self) -> np.ndarray:
--        """Load the selected dark frame from memory, a file, or a directory.
--
--        If ``reducer_dark_path`` is a directory, the newest FITS-like file in
--        that directory is used.  If the selected data are a cube, the mean over
--        frames is used as the 2D dark frame.
--        """
-+        """Resolve the selected candidate and load its typed subtraction input once."""
-         text = self.dark_source_combo.currentText().strip()
-+        if text == "Current frame (2D)":
-+            if self.memory_dark is None:
-+                raise ValueError("No current-frame dark has been set")
-+            self.reducer_dark_calibration = self.memory_dark
-+            self.reducer_dark_data = self.memory_dark.mean_adu
-+            self.reducer_dark_loaded_from = None
-+            return self.reducer_dark_data
-         selected = Path(text).expanduser() if text else None
-         if selected != self.reducer_dark_path:
-             self.reducer_dark_path = selected
-             self.reducer_dark_follows_capture = False
-             self._clear_dark_cache()
--        if self.reducer_dark_path is None:
-+        if selected is None:
-             raise FileNotFoundError("No dark path selected")
--
--        path = Path(self.reducer_dark_path).expanduser()
--        if path.is_dir():
--            newest = _latest_fits_in_dir(path)
--            if newest is None:
--                raise FileNotFoundError(f"No FITS dark files found in {path}")
--            path = newest
--        if not path.exists():
--            raise FileNotFoundError(f"Dark path not found: {path}")
--
--        if self.reducer_dark_data is not None and self.reducer_dark_loaded_from == path:
--            return self.reducer_dark_data
--
--        data = _first_fits_data(path)
--        if data.ndim == 3:
--            dark = data.mean(axis=0)
--        elif data.ndim == 2:
--            dark = data
--        else:
--            raise ValueError(f"Expected 2D/3D dark data in {path}, got {data.shape}")
--
--        self.reducer_dark_data = dark.astype(np.float32)
--        self.reducer_dark_loaded_from = path
-+        path = _latest_fits_in_dir(selected) if selected.is_dir() else selected
-+        if path is None or not path.exists():
-+            raise FileNotFoundError(f"No dark FITS found: {selected}")
-+        stat = path.stat()
-+        signature = (path, stat.st_size, stat.st_mtime_ns)
-+        if signature != self.reducer_dark_signature:
-+            calibration = load_dark(path)
-+            self.reducer_dark_calibration = calibration
-+            self.reducer_dark_data = calibration.mean_adu
-+            self.reducer_dark_loaded_from = path
-+            self.reducer_dark_signature = signature
-+            self.display_dark_cache = None
-+            self.display_dark_cache_key = None
-         return self.reducer_dark_data
++    def _change_data_typ(self):
++        if getattr(self,"data_typ_radio_flat",None) is not None and self.data_typ_radio_flat.isChecked():
++            self.data_typ,self.data_typ_path = "FLAT","flat"
++        elif getattr(self,"data_typ_radio_p2vm",None) is not None and self.data_typ_radio_p2vm.isChecked():
++            self.data_typ,self.data_typ_path = "P2VM","p2vm"
++        else:
++            super()._change_data_typ()
 +
-+    def _take_dark(self) -> None:
-+        """Use the current unbinned raw frame for subtraction, without inventing noise."""
-+        if self.raw_image is None:
-+            self.reducer_dir_status.setText(
-+                "Waiting for a raw frame before setting dark"
-+            )
-+            return
-+        self.memory_dark = DarkImage(
-+            np.array(self.raw_image, dtype=np.float32, copy=True)
-+        )
-+        self.reducer_dark_follows_capture = False
-+        self._clear_dark_cache()
-+        blocked = self.dark_source_combo.blockSignals(True)
++    def _confirm_capture_configuration(self):
++        dialog=QtWidgets.QDialog(self)
++        dialog.setWindowTitle("Confirm fixed capture settings")
++        form=QtWidgets.QFormLayout(dialog)
++        shutters=[]
++        previous=self.capture_configuration or {}
++        for i in range(1,5):
++            check=QtWidgets.QCheckBox(f"Physical shutter {i} open")
++            check.setChecked(str(i) in previous.get("active",""))
++            form.addRow(check); shutters.append(check)
++        detector=QtWidgets.QLineEdit(previous.get("detector",""))
++        orientation=QtWidgets.QLineEdit(previous.get("orientation",""))
++        bx=QtWidgets.QSpinBox();bx.setRange(0,64);bx.setValue(previous.get("binning_x",0))
++        by=QtWidgets.QSpinBox();by.setRange(0,64);by.setValue(previous.get("binning_y",0))
++        for label,widget in [("Detector identifier",detector),("Sensor orientation",orientation),
++                             ("Physical camera binning X",bx),("Physical camera binning Y",by)]:
++            form.addRow(label,widget)
++        confirmation=QtWidgets.QCheckBox("I confirm these settings remain fixed for this cube")
++        form.addRow(confirmation)
++        buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel)
++        buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
++        if not dialog.exec():
++            return None
++        if not confirmation.isChecked():
++            raise ValueError("Confirm the physical configuration before capture")
++        return {"active":"".join(str(i+1) for i,c in enumerate(shutters) if c.isChecked()),
++                "detector":detector.text().strip(),"orientation":orientation.text().strip(),
++                "binning_x":bx.value(),"binning_y":by.value()}
++
++    def _start_capture(self):
 +        try:
-+            index = self.dark_source_combo.findText("Current frame (2D)")
-+            if index < 0:
-+                self.dark_source_combo.addItem("Current frame (2D)")
-+                index = self.dark_source_combo.count() - 1
-+            self.dark_source_combo.setCurrentIndex(index)
-+        finally:
-+            self.dark_source_combo.blockSignals(blocked)
-+        self.remove_dark_button.setVisible(True)
-+        self.remove_dark_button.setChecked(True)
-+        self.remove_dark = True
-+        self._style_remove_dark_button()
- 
-     def _dark_status_text(self) -> tuple[str, str]:
-         """Return compact and full text for the dark used by P2VM."""
-+        if self.dark_source_combo.currentText().strip() == "Current frame (2D)":
-+            return (
-+                "current frame (2D)",
-+                "Subtraction only; temporal RMS and bad pixels not measured",
-+            )
-         path = self.reducer_dark_loaded_from or self.reducer_dark_path
-         if path is None:
-             return "none", ""
- 
-         path = Path(path)
-         compact = path.name or str(path)
-+        if isinstance(self.reducer_dark_calibration, DarkImage):
-+            compact += " (2D; noise not measured)"
-         if path.is_dir() and self.reducer_dark_loaded_from is None:
-             compact += "/"
-         return compact, str(path)
-@@ -775,13 +814,15 @@
-             return
- 
-         for bsl, curve in enumerate(self.visibility_curves):
--            curve.setData(self.reducer.wl_grid, self.latest_visamp[bsl])
-+            curve.setData(self.reducer.wavelength_um, self.latest_visamp[bsl])
- 
-         for bsl, value_label in enumerate(self.visibility_value_labels):
-             plot = self.visibility_plots[bsl]
-             x0, x1 = plot.viewRange()[0]
-             y0, y1 = plot.viewRange()[1]
--            value_label.setText(f"B{BASELINE_NAMES[bsl]} {self.latest_mean_vis[bsl]:.3f}")
-+            value_label.setText(
-+                f"B{BASELINE_NAMES[bsl]} {self.latest_mean_vis[bsl]:.3f}"
-+            )
-             value_label.setPos(x1, y1)
- 
-         self.visibility_dirty = False
-@@ -805,6 +846,16 @@
-         self._set_history_x_window(self.history_frame - 1, force=force)
-         self.last_history_draw_time = now
-         self.history_dirty = False
++            configuration=self._confirm_capture_configuration()
++            if configuration is None:
++                return
++            category={"OBJECT":"SINGLE_SCI_RAW","DARK":"DARK_RAW","WAVE":"WAVELAMP_RAW",
++                      "FLAT":"FLAT_RAW","P2VM":"P2VM_RAW"}[self.data_typ]
++            self.capture_metadata=capture_utils.camera_metadata(self.cam,category,configuration["active"],configuration,source="operator")
++            self.capture_configuration=configuration
++            self._capture_save_path=self.capturePath
++            super()._start_capture()
++            if self.captureTimer.isActive():
++                for control in self._fixed_capture_controls():
++                    control.setEnabled(False)
++        except Exception as exc:
++            QtWidgets.QMessageBox.warning(self,"Capture settings",str(exc))
 +
-+    def _clear_current_visibility(self):
-+        """Do not present the last successful spectrum as a new valid result."""
-+        self.latest_visamp = None
-+        self.latest_mean_vis = None
-+        self.visibility_dirty = False
-+        for curve in self.visibility_curves:
-+            curve.setData([], [])
-+        for label in self.visibility_value_labels:
-+            label.setText("")
++    def _fixed_capture_controls(self):
++        return [self.exposure_spin,self.line_edit,*self.group_data_typ.buttons()]
++
++    def _write_capture(self,path,cube):
++        capture_utils.check_camera(self.cam,self.capture_metadata)
++        metadata=replace(self.capture_metadata,host_end_utc=capture_utils.utc_now())
++        capture_utils.save_to_fits(cube,path,metadata=metadata)
++
++    def _capture_cube(self):
++        try:
++            super()._capture_cube()
++        except Exception as exc:
++            self.captureTimer.stop()
++            self.capture_button.setText("Capture")
++            self.capture_button.setEnabled(True)
++            self.ndits_spin.setEnabled(True)
++            QtWidgets.QMessageBox.warning(self,"Capture stopped",str(exc))
++        finally:
++            if not self.captureTimer.isActive():
++                for control in self._fixed_capture_controls():
++                    control.setEnabled(True)
  
-     def _refresh(self):
-         """Refresh one camera frame and update all optional live views.
-@@ -829,7 +880,7 @@
-             try:
-                 dark = self._load_reducer_dark()
-                 display = image - self._binned_dark(dark, factor)
--                self.p2vm_input_frame = np.asarray(raw, dtype=np.float32) - dark
-+                self.p2vm_input_frame = raw
-             except Exception as exc:
-                 dark_error = exc
- 
-@@ -841,12 +892,16 @@
-         self._temp_update_view()
-         self._refresh_mouse_value()
-         self._update_finesse_view()
--        self.saturated_values.setText(f"{self._get_nb_saturated_pixels()} pixels saturated")
-+        self.saturated_values.setText(
-+            f"{self._get_nb_saturated_pixels()} pixels saturated"
-+        )
-         if self.p2vm_ready and self.p2vm_enabled.isChecked():
-             if not self.remove_dark:
-+                self._clear_current_visibility()
-                 self.reducer_dir_status.setText("P2VM waiting: dark removal off")
-                 return
-             if self.p2vm_input_frame is None:
-+                self._clear_current_visibility()
-                 if dark_error is not None:
-                     self.reducer_dir_status.setText(f"P2VM waiting: {dark_error}")
-                 return
-@@ -855,15 +910,18 @@
-     def _update_p2vm(self, frame: np.ndarray) -> None:
-         """Reduce one raw frame and update the spectrum/history tabs.
- 
--        ``frame`` is already dark-subtracted by the Camera-tab data flow.  The
-+        ``frame`` is raw and unbinned; the common core subtracts the selected dark once.  The
-         reducer returns VISAMP per baseline and wavelength.  This method
-         updates the current spectrum curves, appends wavelength-averaged VISAMP
-         values to the history buffers, expands the history X range if needed,
-         and updates the per-panel spectrum labels.
-         """
-         try:
--            result = self.reducer.reduce(frame)
-+            result = self.reducer.reduce_frame(
-+                frame, dark=self.reducer_dark_calibration
-+            )
-         except Exception as exc:
-+            self._clear_current_visibility()
-             self.reducer_dir_status.setText(f"P2VM error: {exc}")
-             self.reducer_dir_status.setToolTip("")
-             return
-@@ -872,8 +930,9 @@
-         self.reducer_dir_status.setText(f"P2VM ok: dark {dark_text}")
-         self.reducer_dir_status.setToolTip(dark_tooltip)
- 
--        mean_vis = np.nanmean(result.visamp, axis=1)
--        self.latest_visamp = result.visamp
-+        visamp = np.where(result.flags[0], np.nan, result.visibility_amplitude[0])
-+        mean_vis = np.ma.array(visamp, mask=result.flags[0]).mean(axis=1).filled(np.nan)
-+        self.latest_visamp = visamp
-         self.latest_mean_vis = mean_vis
-         self.visibility_dirty = True
-         self._draw_visibility()
-@@ -890,23 +949,27 @@
-         """Draw calibration overlays on the inherited Camera tab.
- 
-         ABCD extraction regions are drawn as border-only detector-coordinate
--        rectangles using ``profile_xs`` and ``profile_ys`` from ``flat.npz``.
-+        rectangles using ``profile_xs`` and ``profile_ys`` from ``planetes_flat.fits``.
-         Labels identify each region as ``B<baseline> <A/B/C/D>`` according to
--        ``bsl_to_reg`` from ``p2vm.npz``.  Finite dashed vertical wavelength
--        markers are derived from the mean detector ``wave_map`` in ``wave.npz``.
-+        ``bsl_to_reg`` from ``planetes_p2vm.fits``.  Finite dashed vertical wavelength
-+        markers are derived from the mean detector ``wave_map`` in ``planetes_wave.fits``.
-         """
-         colors = _plot_colors(self.reducer.n_baselines)
-         reg_labels = {}
--        for bsl, regs in self.reducer.bsl_to_reg.items():
-+        for bsl, regs in self.reducer.p2vm.baseline_regions.items():
-             for idx, reg in enumerate(regs):
-                 reg_labels[int(reg)] = (bsl, ABCD_NAMES[idx])
- 
--        for reg in range(self.reducer.n_outputs):
--            mask_x = self.reducer.profile_xs[reg]
--            mask_y = self.reducer.profile_ys[reg]
-+        for reg in range(len(self.reducer.extractor.profile_x_pixels)):
-+            mask_x = self.reducer.extractor.profile_x_pixels[reg]
-+            mask_y = self.reducer.extractor.profile_y_pixels[reg]
-+            valid = (mask_x >= 0) & (mask_y >= 0)
-+            mask_x, mask_y = mask_x[valid], mask_y[valid]
-             bsl, abcd = reg_labels.get(reg, (reg // 4, "?"))
-             color = colors[bsl % len(colors)]
--            baseline_name = BASELINE_NAMES[bsl] if bsl < len(BASELINE_NAMES) else str(bsl)
-+            baseline_name = (
-+                BASELINE_NAMES[bsl] if bsl < len(BASELINE_NAMES) else str(bsl)
-+            )
- 
-             x0 = float(mask_x.min())
-             x1 = float(mask_x.max() + 1)
-@@ -928,11 +991,15 @@
-             self.cameraImageView.addItem(text)
-             self.p2vm_overlay_items.append(text)
- 
--        height = float(self.reducer.wave_map.shape[0])
--        mean_wave = np.nanmean(self.reducer.wave_map, axis=0)
--        for wave in np.linspace(self.reducer.wl_grid.min(), self.reducer.wl_grid.max(), 5):
-+        height = float(self.reducer.extractor.detector_shape[0])
-+        mean_wave = np.nanmean(self.reducer.extractor.wavelength_map_um, axis=0)
-+        for wave in np.linspace(
-+            self.reducer.wavelength_um.min(), self.reducer.wavelength_um.max(), 5
-+        ):
-             x = int(np.nanargmin(np.abs(mean_wave - wave)))
--            pen = pg.mkPen(color=(230, 230, 230, 150), width=1, style=_pen_style("DashLine"))
-+            pen = pg.mkPen(
-+                color=(230, 230, 230, 150), width=1, style=_pen_style("DashLine")
-+            )
-             line = pg.PlotDataItem([x, x], [0, max(0.0, height - 1)], pen=pen)
-             self.cameraImageView.addItem(line)
-             self.p2vm_overlay_items.append(line)
-@@ -1016,7 +1083,7 @@
-         Connect to the real catkit2 bench service specified by host, port, and
-         service name.
-     --reduced-dir
--        Directory containing ``flat.npz``, ``wave.npz``, and ``p2vm.npz``.
-+        Directory containing ``planetes_flat.fits``, ``planetes_wave.fits``, and ``planetes_p2vm.fits``.
-     --fake-refresh-ms
-         Camera refresh interval used only in fake mode.  Bench mode keeps the
-         original ``camview`` refresh interval.
-@@ -1024,9 +1091,19 @@
-     repo = Path(__file__).resolve().parent
-     parser = argparse.ArgumentParser(description=__doc__)
-     parser.add_argument("--source", choices=("fake", "bench"), default="fake")
--    parser.add_argument("--reduced-dir", type=Path, default=repo / "planetes_pipe/reduced")
--    parser.add_argument("--fake-cube", type=Path, default=repo / "planetes_pipe/2026_02_05/sci2/sci.fits")
--    parser.add_argument("--fake-dark", type=Path, default=repo / "planetes_pipe/2026_02_05/sci2/sci_dark.fits")
-+    parser.add_argument(
-+        "--reduced-dir", type=Path, default=repo / "planetes_pipe/reduced"
-+    )
-+    parser.add_argument(
-+        "--fake-cube",
-+        type=Path,
-+        default=repo / "planetes_pipe/2026_02_05/sci2/sci.fits",
-+    )
-+    parser.add_argument(
-+        "--fake-dark",
-+        type=Path,
-+        default=repo / "planetes_pipe/2026_02_05/sci2/sci_dark.fits",
-+    )
-     parser.add_argument("--no-fake-dark", action="store_true")
-     parser.add_argument("--fake-refresh-ms", type=int, default=30)
-     parser.add_argument("--bench-host", default="127.0.0.1")
-@@ -1052,7 +1129,7 @@
-     app = QtWidgets.QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
-     _set_dark_palette(app)
- 
--    reducer = P2VMReducer(config.reduced_dir)
-+    reducer = FrameReducer.from_directory(config.reduced_dir)
-     cam, source_label = _make_camera(config)
- 
-     if config.source == "bench":
-@@ -1065,7 +1142,9 @@
-         source_label=source_label,
-         reducer_dark_path=reducer_dark_path,
-     )
--    refresh_ms = config.fake_refresh_ms if config.source == "fake" else INIT_REFRESH_RATE
-+    refresh_ms = (
-+        config.fake_refresh_ms if config.source == "fake" else INIT_REFRESH_RATE
-+    )
-     window.refreshTimer.setInterval(refresh_ms)
-     window.resize(int(1280 / 1.2), int(1024 / 1.2))
-     window.show()
+     def _add_p2vm_camera_controls(self, camera_widget: QtWidgets.QWidget) -> None:
+         """Add unified dark-source and overlay controls below the Camera tab.

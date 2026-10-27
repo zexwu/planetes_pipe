@@ -1,26 +1,25 @@
 digraph Architecture {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.5, fontname="PingFang SC", fontsize=20, label="PLANETES 0.3 — 一套科学实现，三个入口", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.5, fontname="PingFang SC", fontsize=20, label="PLANETES 0.4 — 科学计算与执行入口", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.16,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
-  python [label="Python / 研究脚本\n显式文件和参数"];
-  eso [label="PyEsoRex → eso/\nSOF 角色 · 参数 · DFS 登记"];
-  gui [label="Qt6 台架 GUI\n原始未 bin 帧 + 明确 dark"];
-  tasks [label="按科学任务组织\ndark.py · flat.py · wavelength.py\np2vm.py · reduction.py\n文件任务 + 数组计算", style="rounded,filled", fillcolor="#eff6ff"];
-  live [label="reduction.FrameReducer\n载入时准备标定快照"];
-  kernels [label="extraction.py + reduction.py\n共用扣暗、提取、重采样\n通量、可见度归一化与 flags", style="rounded,filled", fillcolor="#eff6ff"];
-  models [label="models.py + instrument.py\n科学对象 · 单位 · 轴 · 仪器约定\n父标定指纹检查"];
-  fits [label="fits.py\n原始数据读取\n共用 FITS 编解码与安全发布"];
-  memory [label="内存科学对象\nPython 显式保存；GUI 直接显示", shape=folder];
-  disk [label="schema-2 FITS\n单位、映射、参数、来源、校验和\n原始文件只读；目标不覆盖", shape=folder];
+  python [label="Python / 研究脚本\n显式文件、参数和保存"];
+  eso [label="PyEsoRex → eso/ (PyCPL)\nSOF 类别 · 参数 · DFS 签名"];
+  gui [label="Qt6 GUI\n原始未 bin 帧 + 明确 dark"];
+  tasks [label="五个独立科学任务\ndark · flat · wavelength · p2vm · reduction\n文件入口调用数组计算", style="rounded,filled", fillcolor="#eff6ff"];
+  live [label="FrameReducer\n标定快照准备一次"];
+  kernels [label="共用科学计算\n扣暗 · 稀疏提取 · 重采样\n物理响应 · 可见度 · flags", style="rounded,filled", fillcolor="#eff6ff"];
+  models [label="models.py + instrument.py\n具名科学对象 · 单位 · 数组轴\nDARK/BAD/FLAT/WAVE 父关系与物理配置"];
+  fits [label="fits.py + keywords.py + qc.py\n原始元数据 · FITS 单位/坐标边界\n有源码依据的命名/QC · 校验与不覆盖发布"];
+  acquisition [label="自动 take_p2vm / GUI capture\n读回或明确命令/人工配置"];
+  raw [label="format-3 raw\n原像素/dtype · 命名图像扩展\n物理快门 · DIT/ROI · 来源", shape=folder];
+  disk [label="format-3 科学产品\n独立 DARK + BAD · 标定表 · 仪器级结果\n必要 PLANETES 扩展保留", shape=folder];
   {rank=same; python; eso; gui;}
-  python -> tasks;
-  eso -> tasks;
-  gui -> live;
-  tasks -> kernels;
-  live -> kernels;
-  tasks -> fits [label="读取 / ESO 写出"];
+  python -> tasks; eso -> tasks; gui -> live;
+  tasks -> kernels; live -> kernels;
   kernels -> models;
-  models -> memory [label="返回"];
-  memory -> fits [label="显式保存"];
+  models -> fits [label="显式编解码"];
   fits -> disk;
+  acquisition -> fits [label="同一 raw writer"];
+  fits -> raw [label="写出新文件"];
+  raw -> tasks [label="共同 reader"];
 }

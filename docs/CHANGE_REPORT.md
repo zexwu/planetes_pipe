@@ -1,121 +1,81 @@
-# PLANETES 0.3 修改汇报
+# PLANETES 0.4 修改汇报
 
-2026-10-27。新版按科学任务整理了整个 package，Python、PyEsoRex 和实际
-Qt6 GUI 共用计算。完整真实数据回归中，在相同数值环境和对应的 Numba
-缓存状态下，旧版的 27 个科学字段全部逐位保持；Python 与 ESO 的 7 个产品、
-科学参数和父标定指纹也一致。
+2026-10-27，基于 61f519f，按确认的 GRAVITY 对齐方案实施。五个 recipe 和
+Python/GUI 共用科学实现；本轮改变数据合同、命名和 QC，不改变现有科学算法。
+原始文件与原环境保留，新产品使用 format 3，旧 schema-2 产品需要重新生成。
 
-这次完成的是科学代码、数据契约和执行接口的整理。结果仍是仪器级观测量，
-不等于已经满足全部 ESO 最终交付或 Phase 3 要求。
+## 改了什么
 
-## 修改位置和目的
+| 部分 | 当前行为与原因 |
+| --- | --- |
+| DARK / BAD | 独立科学对象与两个产品；dark recipe 同时产生；保留 hot=1/dead=2/noisy=4 和原判据；先校验全部，再不覆盖发布 |
+| SOF | 使用重复 FLAT_RAW/P2VM_RAW，通过原始头的物理快门识别望远镜/基线；输入顺序和文件名不决定身份 |
+| 文件任务 | 完整 DARK 为正式任务必需；检查已知 DIT、ROI、物理 binning、探测器和 orientation；历史未知项明确记录 |
+| 原始数据 | IMAGING_DATA_SC、真实分类、物理快门、曝光/ROI/来源；保留像素与 dtype；旧 raw 写成独立副本 |
+| FITS 产品 | 参考 GRAVITY 1.9.6 的同义结构/字段和单位；文件用 m、一基像素坐标，内部仍用 um、零基坐标 |
+| 科学内容 | 完整24输出响应、inverse、OPD/GD、ellipse、flags 保留；C_MATRIX 保存拟合 DC 系数，inverse 独立命名 |
+| QC | 按源码公式补齐适用 dark/BAD/flat/wave/P2VM 指标；没有测量依据的指标写缺失原因，自定义诊断退出 ESO QC 命名空间 |
+| 参数与来源 | 显式映射 planetes.calib.* / planetes.reduce.*；保留四个 flat、六个 baseline 和实际参考的完整来源 |
+| 内容关联 | 保留少量私有指纹；载入后保留原文件单位表示，避免重复转换漂移；修改数组/参数会使旧关联失效 |
+| 自动采集 + Qt6 | 同一 raw writer；设置在采集开始记录；配置来源明确；不再把所有图像强制转 int16；没有操作真实台架 |
 
-| 原来的组织 | 当前组织 | 实际作用 |
-| --- | --- | --- |
-| processing.py 与 algorithms/ 同时组织任务 | dark / flat / wavelength / p2vm / reduction.py | 一项科学任务放在一个模块；文件入口与数组函数名称明确 |
-| product.py 与 io/products.py 容易混淆 | models.py 与 fits.py | 前者定义科学对象、单位、轴和关系；后者负责读取和编码 |
-| 暗场附着在 flat，暗场选择由各入口处理 | 独立 dark 任务、DarkCalibration 和 DarkImage | 完整统计与仅用于相减的图像有不同类型；flat 必须用完整统计 |
-| 实时独立实现及自身网格 | FrameReducer + 共享 extraction / normalization | 使用 P2VM 保存的网格、相同扣暗规则和 flags |
-| 对形状相同的标定缺少关联约束 | 科学指纹和父标定关系 | 拒绝不同 flat/wave/P2VM 混用；预备状态保存只读数组快照 |
-| 部分参数隐藏在计算/框架层 | 普通科学函数默认值，PyCPL 映射 | 宽度、阈值、网格、相位开关和 GD 范围含义一致 |
-| DFS 头与产品填充可能分步失败 | 临时目录中完成、签名、读回后原子发布 | 失败不留下最终名半成品；文件及符号链接均不覆盖 |
-| bench 中另有科学算法 | 仅保留公共核心的计时示例 | 实时示例不再维护第二份算法 |
-| import 时设置日志/绘图样式 | 显式 configure_logging / 绘图调用 | 导入数值库不改变应用的日志和绘图全局设置 |
+[数据合同](PRODUCT_CONTRACT.md) 给出字段/shape/单位及参考符号对应关系；
+[QC 文档](QC_PARAMETERS.md) 列出公式、统计域、样本数和缺失条件。
+参考固定为本机 GRAVITY 1.9.6 源码，未声称这是 GRAVITY 最新版或已获 ESO 审核。
 
-旧 Python API 和 schema-1 FITS 不做兼容包装。新增 schema 2 的 7 个产品类别，
-科学数组有明确单位/轴；基线映射有零基索引表，暗场记录真实帧数，复数与布尔
-flags 无损保存，全部 HDU 有校验和。30 条静态谱线的值和 origin 标签保留。
-详见 [产品与参数契约](PRODUCT_CONTRACT.md)。
-
-## 模块和数据流程
+## 流程图
 
 ![模块职责](architecture.png)
 
-普通 Python 文件任务返回内存对象。ESO 层只映射角色/参数、调用这些任务，
-再登记 DFS 产品。GUI 调用 FrameReducer；文件与单帧处理共享数值内核。
-无需重新引入全局 YAML 或另一套流程调度层。
-
 ![数据流程](dataflow.png)
 
-main、lamp 和 science dark 按实际用途独立选择。flat 的 BPM 由建立它的完整
-暗场确定；science dark 的变化不重新定义这个 mask。相位参考可以使用独立
-暗场，未提供时记录主暗场复用。science/实时采用 P2VM 的目标波长坐标，
-任何输出覆盖不足均明确失败。
+main、lamp、science DARK 分别选择；FLAT mask 由其 DARK/BAD 父关系固定。
+PyCPL 负责 recipe 参数、FrameSet 与 DFS，科学计算和 FITS 合同不依赖它。
+当前输出是逐帧仪器级结果，保留必要 PLANETES 扩展。
 
-PNG 可用于汇报，SVG 可缩放，DOT 为可编辑源文件。
+## 实际验证
 
-## 保留的科学定义与明确修复
+真实回归使用 15 个 raw FITS，共 10,401,966,720 字节；标准化副本全部逐像素、
+shape/dtype 验证。原文件只读。旧源码冻结于 61f519f，使用同一 Python 3.13
+数值环境并分别检查冷/热缓存。
 
-保留 4T、6B、24 输出、A,C,B,D 次序、全部物理交叉项、原有默认坏像素判据、
-提取选点和累加顺序、拟合和剔除规则、相位符号、归一化、16 帧分块、GD
-粗网格步长和 Newton 更新、Numba cache/fastmath。开放参数不代表改变默认算法。
-
-针对不合法或不一致的输入，新行为包括：拒绝错配的父标定、拒绝覆盖不足、
-不从二维 dark 编造 RMS/BPM、ragged 提取几何用成对哨兵补齐、GUI 对无效波段
-显示间隙并排除均值、GUI 暗场关闭/错误时暂停并清除当前结果。GD 上下限
-约束粗搜索初始化，Newton 仍可越界；没有新增截断规则。
-
-## 验证证据
-
-输入为 `2026_02_05/p2vm2` 和 `sci2` 的 15 个完整原始 FITS，
-总计 10,401,966,720 字节。旧版从冻结的 38341e0 源码运行，新版执行五种
-真实 PyEsoRex recipe（包括三个独立 dark 调用），另跑完整 Python 调用链。
-每次写入新目录，原始数据及已有产品保留。
-
-| 检查 | 实际结果 |
+| 检查 | 结果 |
 | --- | --- |
-| 冷启动对应冷启动 | 27/27 个旧科学字段逐位相同，映射一致 |
-| 缓存复跑对应缓存复跑 | 27/27 个旧科学字段逐位相同，映射一致 |
-| Python 对应 ESO | 7 个产品、44 个字段/科学指纹比较全部一致 |
-| 主科学/ESO 环境测试 | 48 项全部通过，含真实 PyCPL/PyEsoRex |
-| 实际 GUI 环境测试 | 48 项中 41 项通过，7 项因该环境未装 CPL/执行器而跳过 |
-| FITS 完整性 | 7 个最终产品全部 HDU checksum/datasum、科学指纹及读回通过 |
-| 失败写出 | DFS 临时头后失败、读回失败、并发目标、符号链接等不覆盖/不残留 |
-| Qt6 实际窗口 | 录制 raw 帧下单次扣暗、display binning 不变性、暗场启停、二维 dark、错类别拒绝通过 |
-| 实时核心耗时 | 1024×1280 完整 raw 单帧，预热后 128 次；均值 1.104 ms，中位数 1.100 ms，P95 1.163 ms |
+| 维护测试 | 53 项通过，包括实际 PyCPL/PyEsoRex 执行、独立 QC 期望值、单位/指纹、元数据冲突、发布失败/并发保护 |
+| 相同数组输入的旧/新核心 | 冷、热各23个科学数组逐字节一致；BAD bits 另行逐位一致，基线映射保持一致 |
+| 完整新 recipes 对旧版 | 冷、热合计60个数组全部在事先固定的格式转换控制界限内 |
+| 普通 Python 对 recipes | 10个产品、37个数组逐字节一致，物理映射一致 |
+| 两个实际采集入口 | 自动脚本 fake 完整13个 raw；Qt6 实际窗口 offscreen 测试通过，像素/来源/配置变化、dark及显示 binning 科学不变性通过 |
+| 干净包安装 | 项目外 wheel 安装、5个 recipe 发现、默认打包谱线的真实 wave 执行通过 |
+| 实时科学核心 | 1024×1280 raw 帧预热后128次，中位数1.000 ms，均值1.039 ms；不含采集/绘图和GD/差分相位 |
 
-实时计时包含扣暗、提取、P2VM 和 flags，不包含采集/界面绘制，也未计算
-GD/差分相位。GUI 默认 fake 刷新 30 ms、台架设置默认 500 ms；此处耗时只
-证明核心计算在本机该工作负载下足够快，真实台架采集仍需部署验证。
+格式边界的 um↔m 和一基坐标转换会产生少量浮点舍入。因此先运行“冻结旧核心
++ 仅格式转换”的控制链，在运行候选版前锁定每个数组的差异界限；没有事后放宽
+容差。60项中45项与转换控制直接数值一致，其余也均未超过原先界限。
+同数组核心比较使用逐字节判定，未以格式转换为理由放宽。旧核心自身已有
+冷/热差异，fastmath/cache 保持原设置。
 
-![实际 Qt6 可见度窗口](validation/gui_visibility.png)
+两轮文件链相对旧版的最大绝对差分别为：VISAMP 3.73×10⁻⁷、GD
+5.89×10⁻⁸ um、差分相位 2.54×10⁻⁵ deg。它们是本数据集上的格式转换
+传播差异，不能用作仪器性能或标定精度估计。
 
-逐字段证据：[冷启动](validation/comparison_schema_final_cold.json)、
-[缓存复跑](validation/comparison_schema_final_warm.json)、
-[Python 与 ESO](validation/comparison_python_eso.json)。
-其他记录：[测试](validation/tests.log)、[GUI 环境](validation/gui_environment_tests.log)、
-[GUI 验证与计时](validation/gui_results.json)、[产品完整性](validation/summary.json)、
-[环境](validation/versions.json)、[执行记录](validation/recipe_execution.json)。
-完整日志和产品保留在本机：
-`reduced/restructure_validation/20261027_132125/schema_final_cold`、
-`schema_final_warm`、`schema_python_cold`。
+## 备份、证据与维护
 
-旧版自身的冷编译与热缓存结果存在小差异。对应状态下逐位比较通过；本次未用
-容差放宽掩盖差异，也未更换算法参数。原控制实验保留在
-[历史记录](history/v0.2/validation/cache_probe.json)。跨数值环境运行也不据此
-宣称逐位相同。
+本轮开始前的完整源码、四个外部采集/GUI文件及其哈希保存在：
 
-## 备份、Git 和恢复
+`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_223235_gravity_conventions/`
 
-本轮开始前冻结 v0.2 源码和外部 GUI：
-`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261027_132125_restructure/`。
-包含 `source.tar`、`source/`、原 GUI 文件、冻结计划和逐文件 SHA256；
-[68 个备份文件重新核验全部相符](validation/backup_verification.json)。
-最初的旧版备份 `20261027_095248/` 仍保留。生成物 build/lib 和旧 recipes 缓存
-移至本轮备份的 generated/，不作为第二份源码维护。
+完整标准化数据、新旧产品、冻结转换界限和比较结果在：
 
-核心整理提交为 `967e324`，分支为 `codex/scientific-core-restructure`。
-Qt6 viewer 所在 devel 目录未由 Git 管理，其精确补丁、原/新哈希和恢复说明
-单独保存，见 [GUI 集成](GUI_INTEGRATION.md)。旧 Qt5 viewer 和采集代码保留。
+`reduced/gravity_conventions/20261027_223235/`
 
-## 使用与后续
+一次性运行脚本、日志及批准的计划/审查记录归档到上述备份目录的 evidence/；
+不纳入源码包。维护测试仍集中在原来的四个 test 模块。外部代码的精确补丁与
+before/after 哈希在 integration/qt6/，[GUI 文档](GUI_INTEGRATION.md) 说明部署与恢复。
 
-[README](../README.md) 提供五个 recipe、完整 Python 链与实时调用示例；
-[examples](../examples/) 提供新 SOF 模板。用 schema 2 从 raw 重新生成标定，
-不要将旧文件重命名充当新产品。发布目录提供源码归档、wheel 和哈希。wheel 已在项目外安装并通过完整测试，
-五个 recipe 均可发现，实际 wave 执行使用了安装包内的默认静态参考。
-见 [安装测试](validation/wheel_tests.log) 和 [默认参考验证](validation/installed_reference.json)。
+## 下一步
 
-下一阶段应与采集端/ESO 明确 raw 观测元数据、曝光与时间单位、分类字典和
-EDPS 关联规则，再分别验证误差传播、天文传递函数、闭合相位/OIFITS 和
-Phase 3。本轮没有新定义这些科学量，也未连接或操作台架硬件。
+在台架环境确认真实相机、物理 binning、orientation 和快门配置，并做实际采集
+验收。当前本地 GUI 环境没有 catkit2；fake/offscreen 通过不能替代硬件验收。
+之后再推进 ESO 字典确认、EDPS 关联、误差传播、传递函数和最终 OIFITS/Phase 3。
+这些工作不通过伪造时间、有效带宽、gain、SNR 或误差字段来提前宣称完成。

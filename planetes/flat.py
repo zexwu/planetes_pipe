@@ -10,6 +10,8 @@ from .instrument import N_OUTPUTS
 from .models import (
     FlatCalibration,
     DarkCalibration,
+    BadPixelMap,
+    require_parent,
     Provenance,
     fingerprint,
     positive,
@@ -21,6 +23,7 @@ PROFILE_WIDTH = 10.0
 
 def compute_flat(
     dark: DarkCalibration,
+    bad: BadPixelMap,
     flat_maps: list[NDArray],
     *,
     n_outputs: int = N_OUTPUTS,
@@ -32,8 +35,12 @@ def compute_flat(
             "Flat construction requires complete dark RMS/bad-pixel calibration"
         )
     validate(dark)
+    validate(bad)
+    require_parent(bad, "dark", dark)
+    if bad.bad_pixel_flags.shape != dark.mean_adu.shape:
+        raise ValueError("BAD and DARK detector shapes differ")
     profile_width = positive(profile_width, "profile width")
-    bad_map = dark.bad_pixel_flags
+    bad_map = bad.bad_pixel_flags
 
     flat_map = np.mean(flat_maps, axis=0)
 
@@ -53,6 +60,7 @@ def compute_flat(
     ref_ys = np.sort(ref_ys[top_indices])
 
     ys_list = []
+    sigmas = []
     profile_xs = []
     profile_ys = []
 
@@ -60,8 +68,13 @@ def compute_flat(
     for i, ref_y in enumerate(ref_ys):
         log.debug(f"    Tracing spectrum {i+1}/{n_outputs} at Y={ref_y}...")
         xs = np.arange(w)
-        ys, ys_err = trace_spectrum(
-            flat_map, bad_map, ref_x=w // 2, ref_y=ref_y, range_y=h_half
+        ys, ys_err, fitted_sigma = trace_spectrum(
+            flat_map,
+            bad_map,
+            ref_x=w // 2,
+            ref_y=ref_y,
+            range_y=h_half,
+            diagnostics=True,
         )
 
         ys_med = medfilt(ys, kernel_size=3)
@@ -82,6 +95,7 @@ def compute_flat(
         profile_ys.append(sparse_y)
 
         ys_list.append(ys_smoothed)
+        sigmas.append(fitted_sigma)
 
     width = max(map(len, profile_xs))
     padded_x = np.full((n_outputs, width), -1, dtype=np.int64)
@@ -94,10 +108,15 @@ def compute_flat(
         profile_y_pixels=padded_y,
         flat_map_adu=flat_map,
         trace_y_pixels=np.array(ys_list),
+        profile_sigma_pixels=np.asarray(sigmas),
+        telescope_flux_adu=np.asarray(
+            [np.sum(image, dtype=np.float64) for image in flat_maps]
+        ),
+        setup=dark.setup,
         provenance=Provenance(
             producer="planetes.flat",
             parameters={"profile_width": profile_width},
-            dependencies={"dark": fingerprint(dark)},
+            dependencies={"dark": fingerprint(dark), "bad": fingerprint(bad)},
         ),
     )
     return product
@@ -173,10 +192,11 @@ def fit_gaussian(x, y, p0, max_iter=6):
     return np.array([a, x0, sigma, c]), x0_err
 
 
-def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
+def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y, *, diagnostics=False):
     ny, nx = image.shape
     y_centers = np.full(nx, np.nan)
     y_errs = np.full(nx, np.nan)
+    widths = np.full(nx, np.nan)
 
     y_full = np.arange(ny)
 
@@ -203,6 +223,7 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
             new_popt, y_err = fit_gaussian(y, z, popt)
 
             if abs(new_popt[1] - y_curr) < 2.0 and y_err < 0.5:
+                widths[x] = abs(new_popt[2])
                 popt = new_popt
                 y_curr = popt[1]
 
@@ -220,34 +241,53 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
     _scan(ref_x, nx, 1, p0)
     _scan(ref_x - 1, -1, -1, p0)
 
-    return y_centers, y_errs
+    return (y_centers, y_errs, widths) if diagnostics else (y_centers, y_errs)
 
 
 def calibrate_flat_file(
-    telescope_flats, dark: DarkCalibration, *, profile_width: float = PROFILE_WIDTH
+    telescope_flats,
+    dark: DarkCalibration,
+    bad: BadPixelMap,
+    *,
+    profile_width: float = PROFILE_WIDTH,
 ) -> FlatCalibration:
-    """Read four explicitly named telescope flats and return the calibrated geometry."""
+    """Resolve four FLAT_RAW shutters and return geometry, without saving products."""
     from dataclasses import replace
     from .dark import frame_mean
-    from .fits import iter_raw_cube
+    from .fits import (
+        iter_raw_cube,
+        identify_raw,
+        read_raw_metadata,
+        check_raw_calibrations,
+    )
     from .instrument import TELESCOPES
 
-    if not isinstance(dark, DarkCalibration):
-        raise ValueError("Flat construction requires a complete DarkCalibration")
-    validate(dark)
-    maps = [
-        frame_mean(iter_raw_cube(telescope_flats[name])) - dark.mean_adu
-        for name in TELESCOPES
-    ]
-    if any(image.shape != dark.mean_adu.shape for image in maps):
-        raise ValueError("Flat and dark detector shapes differ")
-    result = compute_flat(dark, maps, profile_width=profile_width)
+    telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
+    unknown = []
+    maps = []
+    setup = read_raw_metadata(telescope_flats[TELESCOPES[0]]).setup
+    for name in TELESCOPES:
+        unknown.extend(check_raw_calibrations(telescope_flats[name], dark))
+        from .models import check_setup
+
+        unknown.extend(
+            check_setup(
+                read_raw_metadata(telescope_flats[name]).setup,
+                setup,
+                exposure=False,
+                role="flat sequence",
+            )
+        )
+        maps.append(frame_mean(iter_raw_cube(telescope_flats[name])) - dark.mean_adu)
+    result = compute_flat(dark, bad, maps, profile_width=profile_width)
     return replace(
         result,
+        setup=setup,
         provenance=replace(
             result.provenance,
             inputs={
-                f"tel_flat_{name}": str(telescope_flats[name]) for name in TELESCOPES
+                f"flat_raw_T{name}": str(telescope_flats[name]) for name in TELESCOPES
             },
+            unverified=tuple(sorted(set(unknown))),
         ),
     )
