@@ -8,23 +8,22 @@ import unittest
 import numpy as np
 from astropy.io import fits
 
-from planetes.algorithms.p2vm import _build_v2pm_matrix, compute_p2vm
+from planetes.p2vm import build_v2pm_matrix, compute_p2vm
 from planetes.instrument import N_DATA
-from planetes.io.products import read_product, write_product
-from planetes.product import CalibrationSpectra
-from p2vm_fixture import calibration_arrays
+from planetes.fits import read_product, write_product
+from p2vm_fixture import calibration_arrays, calibration_spectra
 
 
 class P2VMFitsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         arrays = calibration_arrays(n_wave=15)
-        cls.spectra = CalibrationSpectra(*arrays[:6])
+        cls.spectra = calibration_spectra(n_wave=15)
         cls.flat, cls.wave = arrays[-2:]
         cls.p2vm = compute_p2vm(cls.spectra, phase_correction=False)
 
     def test_p2vm_inverts_known_full_rank_instrument_response(self):
-        matrix = _build_v2pm_matrix(
+        matrix = build_v2pm_matrix(
             self.p2vm.transmission,
             self.p2vm.coherence_amplitude,
             self.p2vm.coherence_phase_rad,
@@ -46,6 +45,8 @@ class P2VMFitsTests(unittest.TestCase):
                 write_product(path, product)
                 loaded = read_product(path, type(product))
                 for field in fields(product):
+                    if field.name == "provenance":
+                        continue
                     before, after = (
                         getattr(product, field.name),
                         getattr(loaded, field.name),
@@ -61,8 +62,8 @@ class P2VMFitsTests(unittest.TestCase):
             path = Path(tmp) / "wave.fits"
             write_product(path, self.wave)
             with fits.open(path, mode="update") as hdus:
-                hdus["WAVE_MAP"].header["BUNIT"] = "nm"
-                hdus["WAVE_MAP"].add_checksum()
+                hdus["WAVELENGTH_MAP_UM"].header["BUNIT"] = "nm"
+                hdus["WAVELENGTH_MAP_UM"].add_checksum()
             with self.assertRaisesRegex(ValueError, "units or axes"):
                 read_product(path, type(self.wave))
 

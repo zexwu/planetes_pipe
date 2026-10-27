@@ -1,46 +1,58 @@
-"""PyCPL entry point for instrumental science visibility extraction."""
-
-from typing import Any
+"""PyCPL binding for the ordinary reduce scientific task."""
 
 from cpl import ui
-
 from planetes import __version__
-from planetes.algorithms.reduction import compute_reduce
-from planetes.io.products import read_product
-from planetes.processing import extract_target_spectra
-from planetes.product import FlatProduct, P2VMProduct, WaveProduct
-from planetes.eso.common import new_output, save_product, select_inputs
+from planetes.reduction import reduce_file
+from planetes.models import (
+    DarkCalibration,
+    DarkImage,
+    FlatCalibration,
+    WavelengthCalibration,
+    P2VMCalibration,
+)
+from planetes.eso.common import (
+    parameter_list,
+    scientific_settings,
+    select_inputs,
+    save_product,
+)
 
 
 class PlanetesReduce(ui.PyRecipe):
-    """Apply detector, wavelength, and P2VM calibration to one science cube."""
+    """Execute the same reduce function available to Python callers."""
 
     _name = "planetes_reduce"
     _version = __version__
     _author = "PLANETES contributors"
     _email = ""
-    _copyright = "PLANETES contributors; ESO interface under development"
-    _synopsis = "Extract PLANETES instrumental visibility observables"
-    _description = "Inputs: SCIENCE_RAW, PLANETES_FLAT, PLANETES_WAVE, PLANETES_P2VM; optional SCIENCE_DARK. Output: planetes_reduced.fits. This intermediate product has no on-sky transfer-function calibration or propagated science errors."
+    _copyright = "PLANETES contributors"
+    _synopsis = "PLANETES reduce calibration/reduction"
+    _description = "Explicit SOF roles and shared scientific defaults; schema-2 instrumental products."
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
-        self.parameters = ui.ParameterList()
+        self.parameters = parameter_list(
+            "reduce", reduce_file, ["gd_search_min_um", "gd_search_max_um"]
+        )
 
-    def run(self, frameset: ui.FrameSet, settings: dict[str, Any]) -> ui.FrameSet:
-        """Read explicit calibration products and register the instrumental result."""
-        if settings:
-            raise ValueError(f"Unknown reduction parameters: {', '.join(settings)}")
-        inputs, used = select_inputs(
+    def run(self, frameset, settings):
+        options = scientific_settings(self, settings)
+        paths, cal, used = select_inputs(
             frameset,
-            ["SCIENCE_RAW", "PLANETES_FLAT", "PLANETES_WAVE", "PLANETES_P2VM"],
-            ["SCIENCE_DARK"],
+            {
+                "SCIENCE_RAW": None,
+                "DARK_CALIB": (DarkCalibration, DarkImage),
+                "PLANETES_FLAT": FlatCalibration,
+                "PLANETES_WAVE": WavelengthCalibration,
+                "PLANETES_P2VM": P2VMCalibration,
+            },
         )
-        output = new_output("planetes_reduced.fits")
-        flat = read_product(inputs["PLANETES_FLAT"], FlatProduct)
-        wave = read_product(inputs["PLANETES_WAVE"], WaveProduct)
-        p2vm = read_product(inputs["PLANETES_P2VM"], P2VMProduct)
-        spectra = extract_target_spectra(
-            inputs["SCIENCE_RAW"], flat, wave, dark=inputs.get("SCIENCE_DARK")
+        product = reduce_file(
+            paths["SCIENCE_RAW"],
+            cal["DARK_CALIB"],
+            cal["PLANETES_FLAT"],
+            cal["PLANETES_WAVE"],
+            cal["PLANETES_P2VM"],
+            **options,
         )
-        return save_product(output, compute_reduce(spectra, p2vm), used, self)
+        return save_product("planetes_reduced.fits", product, used, self)

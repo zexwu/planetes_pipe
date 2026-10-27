@@ -5,6 +5,8 @@ from unittest.mock import patch
 
 import numpy as np
 
+from planetes.models import DarkCalibration
+
 from planetes.instrument import (
     IMAG_SLICE,
     N_BASELINES,
@@ -12,12 +14,12 @@ from planetes.instrument import (
     N_TELESCOPES,
     REAL_SLICE,
 )
-from planetes.algorithms.flat import build_flat_product
-from planetes.algorithms.p2vm import _build_v2pm_matrix
-from planetes.algorithms.extraction import extract_spec_sparse
-from planetes.algorithms.reduction import normalize_visibility
-from planetes.algorithms.wavelength import match_lines_grid
-from planetes.io.reference import load_wavelength_lines
+from planetes.flat import compute_flat
+from planetes.p2vm import build_v2pm_matrix
+from planetes.extraction import extract_spec_sparse
+from planetes.reduction import normalize_visibility
+from planetes.wavelength import match_lines_grid
+from planetes.wavelength import load_wavelength_reference
 
 
 class CorrectnessTests(unittest.TestCase):
@@ -28,7 +30,7 @@ class CorrectnessTests(unittest.TestCase):
         amplitude = np.full((N_OUTPUTS, N_BASELINES, 2), 2.0)
         phase = np.full((N_OUTPUTS, N_BASELINES, 2), np.pi / 3)
 
-        matrix = _build_v2pm_matrix(transmission, amplitude, phase)
+        matrix = build_v2pm_matrix(transmission, amplitude, phase)
 
         np.testing.assert_array_equal(
             matrix[:, :N_TELESCOPES], transmission / N_OUTPUTS
@@ -52,17 +54,12 @@ class CorrectnessTests(unittest.TestCase):
 
         with (
             patch(
-                "planetes.algorithms.flat.compute_bad_map_from_stats",
-                return_value=bad_map,
-            ),
-            patch(
-                "planetes.algorithms.flat.trace_spectrum",
+                "planetes.flat.trace_spectrum",
                 return_value=(trace, trace_error),
             ),
         ):
-            product = build_flat_product(
-                dark_map,
-                dark_std,
+            product = compute_flat(
+                DarkCalibration(dark_map, dark_std, bad_map, 2),
                 [flat_map],
                 n_outputs=1,
                 profile_width=3,
@@ -105,7 +102,7 @@ class CorrectnessTests(unittest.TestCase):
         self.assertEqual(len(matches), len(np.unique(matches[:, 1])))
 
     def test_wavelength_reference_is_sorted_and_versioned(self) -> None:
-        lines = load_wavelength_lines()
+        lines = load_wavelength_reference().wavelength_um
         self.assertEqual(len(lines), 30)
         self.assertTrue(np.all(np.diff(lines) > 0))
         self.assertAlmostEqual(lines[0], 0.965780)

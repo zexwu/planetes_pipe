@@ -1,4 +1,4 @@
-/absolute/raw/dark.fits DARK_RAW
+/absolute/dark-output/planetes_dark.fits DARK_CALIB
 /absolute/raw/tel4.fits TEL_FLAT_4
 /absolute/raw/tel3.fits TEL_FLAT_3
 /absolute/raw/tel2.fits TEL_FLAT_2

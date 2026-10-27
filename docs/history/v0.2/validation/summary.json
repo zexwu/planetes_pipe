@@ -1,0 +1,39 @@
+{
+  "unique_raw_files": 15,
+  "raw_bytes": 10401966720,
+  "products": [
+    {
+      "file": "/Users/zexwu/zexwu_lib/planetes_pipe/reduced/eso_v02_validation/20261027_095248/candidate_final/flat/planetes_flat.fits",
+      "hdus": 7,
+      "checksum_ok": true,
+      "qc": {
+        "ESO QC BAD PIXEL FRACTION": 0.00199127197265625
+      }
+    },
+    {
+      "file": "/Users/zexwu/zexwu_lib/planetes_pipe/reduced/eso_v02_validation/20261027_095248/candidate_final/wave/planetes_wave.fits",
+      "hdus": 2,
+      "checksum_ok": true,
+      "qc": {
+        "ESO QC WAVE MIN": 0.946032796199422,
+        "ESO QC WAVE MAX": 1.37281724572921
+      }
+    },
+    {
+      "file": "/Users/zexwu/zexwu_lib/planetes_pipe/reduced/eso_v02_validation/20261027_095248/candidate_final/p2vm/planetes_p2vm.fits",
+      "hdus": 11,
+      "checksum_ok": true,
+      "qc": {
+        "ESO QC P2VM CONDITION MAX": 26.2026608871308
+      }
+    },
+    {
+      "file": "/Users/zexwu/zexwu_lib/planetes_pipe/reduced/eso_v02_validation/20261027_095248/candidate_final/science/planetes_reduced.fits",
+      "hdus": 10,
+      "checksum_ok": true,
+      "qc": {
+        "ESO QC VIS FLAG FRACTION": 0.0
+      }
+    }
+  ]
+}

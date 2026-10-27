@@ -5,25 +5,35 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks, medfilt
 
-from .. import log
-from ..instrument import N_OUTPUTS
-from ..product import FlatProduct
+from . import log
+from .instrument import N_OUTPUTS
+from .models import (
+    FlatCalibration,
+    DarkCalibration,
+    Provenance,
+    fingerprint,
+    positive,
+    validate,
+)
 
-PROFILE_WIDTH = 10
-BAD_THRESHOLD = 5.0
+PROFILE_WIDTH = 10.0
 
 
-def build_flat_product(
-    dark_map: NDArray,
-    dark_std: NDArray,
+def compute_flat(
+    dark: DarkCalibration,
     flat_maps: list[NDArray],
     *,
     n_outputs: int = N_OUTPUTS,
-    profile_width: int = PROFILE_WIDTH,
-    bad_threshold: float = BAD_THRESHOLD,
-) -> FlatProduct:
+    profile_width: float = PROFILE_WIDTH,
+) -> FlatCalibration:
     """Compute flat maps and traces from pre-reduced detector images."""
-    bad_map = compute_bad_map_from_stats(dark_map, dark_std, threshold=bad_threshold)
+    if not isinstance(dark, DarkCalibration):
+        raise ValueError(
+            "Flat construction requires complete dark RMS/bad-pixel calibration"
+        )
+    validate(dark)
+    profile_width = positive(profile_width, "profile width")
+    bad_map = dark.bad_pixel_flags
 
     flat_map = np.mean(flat_maps, axis=0)
 
@@ -73,13 +83,22 @@ def build_flat_product(
 
         ys_list.append(ys_smoothed)
 
-    product = FlatProduct(
-        profile_x_pixels=np.array(profile_xs),
-        profile_y_pixels=np.array(profile_ys),
+    width = max(map(len, profile_xs))
+    padded_x = np.full((n_outputs, width), -1, dtype=np.int64)
+    padded_y = np.full_like(padded_x, -1)
+    for i, (sx, sy) in enumerate(zip(profile_xs, profile_ys)):
+        padded_x[i, : len(sx)] = sx
+        padded_y[i, : len(sy)] = sy
+    product = FlatCalibration(
+        profile_x_pixels=padded_x,
+        profile_y_pixels=padded_y,
         flat_map_adu=flat_map,
-        dark_map_adu=dark_map,
-        bad_pixel_flags=bad_map,
         trace_y_pixels=np.array(ys_list),
+        provenance=Provenance(
+            producer="planetes.flat",
+            parameters={"profile_width": profile_width},
+            dependencies={"dark": fingerprint(dark)},
+        ),
     )
     return product
 
@@ -204,23 +223,31 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
     return y_centers, y_errs
 
 
-def compute_bad_map_from_stats(
-    mean_img: NDArray, std_img: NDArray, threshold: float = 5.0
-) -> NDArray:
-    """Build a bad-pixel map from precomputed temporal mean and RMS images."""
-    BAD_HOT, BAD_DEAD, BAD_RON = 1, 2, 4
+def calibrate_flat_file(
+    telescope_flats, dark: DarkCalibration, *, profile_width: float = PROFILE_WIDTH
+) -> FlatCalibration:
+    """Read four explicitly named telescope flats and return the calibrated geometry."""
+    from dataclasses import replace
+    from .dark import frame_mean
+    from .fits import iter_raw_cube
+    from .instrument import TELESCOPES
 
-    med_mean = np.median(mean_img)
-    med_rms = np.median(std_img)
-
-    range_max = med_mean + threshold * med_rms
-    range_min = med_mean - threshold * med_rms
-    std_max = med_rms * threshold
-
-    bpm = np.zeros(mean_img.shape, dtype=np.int16)
-
-    bpm[mean_img > range_max] |= BAD_HOT
-    bpm[mean_img < range_min] |= BAD_DEAD
-    bpm[std_img > std_max] |= BAD_RON
-
-    return bpm
+    if not isinstance(dark, DarkCalibration):
+        raise ValueError("Flat construction requires a complete DarkCalibration")
+    validate(dark)
+    maps = [
+        frame_mean(iter_raw_cube(telescope_flats[name])) - dark.mean_adu
+        for name in TELESCOPES
+    ]
+    if any(image.shape != dark.mean_adu.shape for image in maps):
+        raise ValueError("Flat and dark detector shapes differ")
+    result = compute_flat(dark, maps, profile_width=profile_width)
+    return replace(
+        result,
+        provenance=replace(
+            result.provenance,
+            inputs={
+                f"tel_flat_{name}": str(telescope_flats[name]) for name in TELESCOPES
+            },
+        ),
+    )

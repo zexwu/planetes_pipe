@@ -9,14 +9,20 @@ import sys
 import tempfile
 import unittest
 
+import planetes
 import numpy as np
 from astropy.io import fits
 
-from planetes.algorithms.p2vm import compute_p2vm
+from planetes.p2vm import compute_p2vm
 from planetes.instrument import BASELINES, TELESCOPES
-from planetes.io.products import read_product
-from planetes.product import FlatProduct, P2VMProduct, WaveProduct
-from planetes.processing import extract_calibration_spectra
+from planetes.fits import read_product
+from planetes.models import (
+    FlatCalibration,
+    P2VMCalibration,
+    WavelengthCalibration,
+    wavelength_grid,
+)
+from planetes.extraction import extract_calibration_files
 from p2vm_fixture import write_recipe_inputs
 
 
@@ -39,25 +45,29 @@ class PyCPLP2VMTests(unittest.TestCase):
         self.recipe = PlanetesP2VM()
 
     def test_shuffled_tagged_inputs_match_direct_scientific_calculation(self):
-        flat = read_product(self.paths["PLANETES_FLAT"], FlatProduct)
-        wave = read_product(self.paths["PLANETES_WAVE"], WaveProduct)
-        spectra = extract_calibration_spectra(
+        flat = read_product(self.paths["PLANETES_FLAT"], FlatCalibration)
+        wave = read_product(self.paths["PLANETES_WAVE"], WavelengthCalibration)
+        spectra = extract_calibration_files(
             flat,
             wave,
+            read_product(self.paths["DARK_CALIB"]),
+            wavelength_um=wavelength_grid(),
             telescope_flats={
                 name: self.paths[f"TEL_FLAT_{name}"] for name in TELESCOPES
             },
             baseline_cubes={name: self.paths[f"P2VM_RAW_{name}"] for name in BASELINES},
             phase_reference=self.paths["PHASE_REFERENCE"],
-            phase_dark=self.paths["PHASE_DARK"],
+            phase_dark=read_product(self.paths["PHASE_DARK_CALIB"]),
         )
         expected = compute_p2vm(spectra, phase_correction=True)
         with chdir(self.root):
             products = self.recipe.run(self.frames, {})
         self.assertEqual(len(products), 1)
         output = self.root / products[0].file
-        actual = read_product(output, P2VMProduct)
+        actual = read_product(output, P2VMCalibration)
         for field in fields(expected):
+            if field.name == "provenance":
+                continue
             before, after = getattr(expected, field.name), getattr(actual, field.name)
             if isinstance(before, np.ndarray):
                 np.testing.assert_array_equal(before, after)
@@ -87,7 +97,7 @@ class PyCPLP2VMTests(unittest.TestCase):
         find_spec("pyesorex") is not None, "PyEsoRex runtime not installed"
     )
     def test_pyesorex_discovers_and_runs_recipe_without_yaml(self):
-        recipe_directory = Path(__file__).resolve().parents[1] / "planetes" / "eso"
+        recipe_directory = Path(planetes.__file__).parent / "eso"
         sof = self.root / "p2vm.sof"
         sof.write_text("".join(f"{path} {tag}\n" for tag, path in self.paths.items()))
         result = subprocess.run(
@@ -107,7 +117,7 @@ class PyCPLP2VMTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         path = self.root / "planetes_p2vm.fits"
-        product = read_product(path, P2VMProduct)
+        product = read_product(path, P2VMCalibration)
         self.assertEqual(product.p2vm.shape, (16, 24, 151))
         self.assertFalse(list(self.root.glob("*.yaml")))
         with fits.open(path) as hdus:

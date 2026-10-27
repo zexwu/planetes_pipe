@@ -8,13 +8,19 @@ import sys
 import tempfile
 import unittest
 
+import planetes
 import numpy as np
 from astropy.io import fits
 
-from planetes.algorithms.reduction import compute_reduce
-from planetes.io.products import read_product
-from planetes.processing import extract_target_spectra
-from planetes.product import FlatProduct, P2VMProduct, ReducedProduct, WaveProduct
+from planetes.reduction import reduce_file
+from planetes.fits import read_product, write_product
+from planetes.models import DarkImage
+from planetes.models import (
+    FlatCalibration,
+    P2VMCalibration,
+    ReducedObservables,
+    WavelengthCalibration,
+)
 from p2vm_fixture import write_recipe_inputs
 
 
@@ -22,8 +28,8 @@ from p2vm_fixture import write_recipe_inputs
     find_spec("pyesorex") is not None, "PyEsoRex runtime not installed"
 )
 class ESOChainTests(unittest.TestCase):
-    def test_all_four_recipes_are_discoverable(self):
-        recipes = Path(__file__).resolve().parents[1] / "planetes/eso"
+    def test_all_five_recipes_are_discoverable(self):
+        recipes = Path(planetes.__file__).parent / "eso"
         result = subprocess.run(
             [sys.executable, "-m", "pyesorex", f"--recipe-dir={recipes}", "--recipes"],
             capture_output=True,
@@ -32,6 +38,7 @@ class ESOChainTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for name in [
+            "planetes_dark",
             "planetes_flat",
             "planetes_wave",
             "planetes_p2vm",
@@ -40,7 +47,7 @@ class ESOChainTests(unittest.TestCase):
             self.assertIn(name, result.stdout)
 
     def test_science_recipe_preserves_dark_subtraction_and_masks(self):
-        recipes = Path(__file__).resolve().parents[1] / "planetes/eso"
+        recipes = Path(planetes.__file__).parent / "eso"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             inputs = write_recipe_inputs(root / "inputs")
@@ -79,9 +86,13 @@ class ESOChainTests(unittest.TestCase):
             fits.HDUList([fits.PrimaryHDU(header=header), fits.ImageHDU(dark)]).writeto(
                 dark_file
             )
+            dark_calib = root / "dark_calibration.fits"
+            write_product(
+                dark_calib, DarkImage(np.full(signal.shape[1:], 7, dtype=np.float32))
+            )
             science_inputs = {
                 "SCIENCE_RAW": science_file,
-                "SCIENCE_DARK": dark_file,
+                "DARK_CALIB": dark_calib,
                 "PLANETES_FLAT": inputs["PLANETES_FLAT"],
                 "PLANETES_WAVE": inputs["PLANETES_WAVE"],
                 "PLANETES_P2VM": calibration / "planetes_p2vm.fits",
@@ -107,14 +118,16 @@ class ESOChainTests(unittest.TestCase):
                 timeout=60,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            actual = read_product(output / "planetes_reduced.fits", ReducedProduct)
-            flat = read_product(inputs["PLANETES_FLAT"], FlatProduct)
-            wave = read_product(inputs["PLANETES_WAVE"], WaveProduct)
-            p2vm = read_product(science_inputs["PLANETES_P2VM"], P2VMProduct)
-            expected = compute_reduce(
-                extract_target_spectra(science_file, flat, wave, dark=dark_file), p2vm
+            actual = read_product(output / "planetes_reduced.fits", ReducedObservables)
+            flat = read_product(inputs["PLANETES_FLAT"], FlatCalibration)
+            wave = read_product(inputs["PLANETES_WAVE"], WavelengthCalibration)
+            p2vm = read_product(science_inputs["PLANETES_P2VM"], P2VMCalibration)
+            expected = reduce_file(
+                science_file, read_product(dark_calib), flat, wave, p2vm
             )
             for field in fields(expected):
+                if field.name == "provenance":
+                    continue
                 before, after = (
                     getattr(expected, field.name),
                     getattr(actual, field.name),

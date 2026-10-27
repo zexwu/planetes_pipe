@@ -1,38 +1,40 @@
-"""PyCPL entry point for wavelength calibration with a traceable static line list."""
-
-from typing import Any
+"""PyCPL binding for the ordinary wave scientific task."""
 
 from cpl import ui
-
 from planetes import __version__
-from planetes.algorithms.wavelength import compute_wave
-from planetes.cube import iter_cube
-from planetes.io.products import read_product
-from planetes.io.reference import load_wavelength_lines, wavelength_reference_path
-from planetes.numerics import frame_mean
-from planetes.product import FlatProduct
-from planetes.eso.common import new_output, save_product, select_inputs
+from planetes.wavelength import calibrate_wavelength_file
+from planetes.models import (
+    DarkCalibration,
+    DarkImage,
+    FlatCalibration,
+    WavelengthReference,
+)
+from planetes.eso.common import (
+    parameter_list,
+    scientific_settings,
+    select_inputs,
+    save_product,
+)
+from planetes.wavelength import wavelength_reference_path
 
 
 class PlanetesWave(ui.PyRecipe):
-    """Build a wavelength map from a lamp cube, its dark, and extraction geometry."""
+    """Execute the same wave function available to Python callers."""
 
     _name = "planetes_wave"
     _version = __version__
     _author = "PLANETES contributors"
     _email = ""
-    _copyright = "PLANETES contributors; ESO interface under development"
-    _synopsis = "Calibrate the PLANETES detector wavelength map"
-    _description = "Inputs: WAVE_RAW, WAVE_DARK, PLANETES_FLAT; optional PLANETES_LINE_LIST overrides the packaged reference. Output: planetes_wave.fits."
+    _copyright = "PLANETES contributors"
+    _synopsis = "PLANETES wave calibration/reduction"
+    _description = "Explicit SOF roles and shared scientific defaults; schema-2 instrumental products."
 
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
-        self.parameters = ui.ParameterList()
+        self.parameters = parameter_list("wave", calibrate_wavelength_file, [])
 
-    def run(self, frameset: ui.FrameSet, settings: dict[str, Any]) -> ui.FrameSet:
-        """Read the lamp and static calibration, fit wavelengths, and register FITS."""
-        if settings:
-            raise ValueError(f"Unknown wave parameters: {', '.join(settings)}")
+    def run(self, frameset, settings):
+        options = scientific_settings(self, settings)
         frames = ui.FrameSet(list(frameset))
         if not any(frame.tag == "PLANETES_LINE_LIST" for frame in frames):
             frames.append(
@@ -40,15 +42,20 @@ class PlanetesWave(ui.PyRecipe):
                     file=str(wavelength_reference_path()), tag="PLANETES_LINE_LIST"
                 )
             )
-        inputs, used = select_inputs(
-            frames, ["WAVE_RAW", "WAVE_DARK", "PLANETES_FLAT", "PLANETES_LINE_LIST"]
+        paths, cal, used = select_inputs(
+            frames,
+            {
+                "WAVE_RAW": None,
+                "DARK_CALIB": (DarkCalibration, DarkImage),
+                "PLANETES_FLAT": FlatCalibration,
+                "PLANETES_LINE_LIST": WavelengthReference,
+            },
         )
-        output = new_output("planetes_wave.fits")
-        flat = read_product(inputs["PLANETES_FLAT"], FlatProduct)
-        image = frame_mean(iter_cube(inputs["WAVE_RAW"])) - frame_mean(
-            iter_cube(inputs["WAVE_DARK"])
+        product = calibrate_wavelength_file(
+            paths["WAVE_RAW"],
+            cal["DARK_CALIB"],
+            cal["PLANETES_FLAT"],
+            reference=cal["PLANETES_LINE_LIST"],
+            **options,
         )
-        product = compute_wave(
-            image, flat, load_wavelength_lines(inputs["PLANETES_LINE_LIST"])
-        )
-        return save_product(output, product, used, self)
+        return save_product("planetes_wave.fits", product, used, self)

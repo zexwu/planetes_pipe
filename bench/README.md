@@ -1,14 +1,11 @@
-# Experimental real-time benchmark
+# Single-frame benchmark
 
-These scripts explore single-frame P2VM reduction and timing. They are not part
-of the installed pipeline. Produce the three calibration FITS products first,
-then set the calibration directory and raw data paths near their use in
-`bench/rtreduce.py`. The benchmark reads `planetes_flat.fits`,
-`planetes_wave.fits`, and `planetes_p2vm.fits`; it does not load runtime YAML.
+`rtreduce.py` calls the installed `FrameReducer`; it contains no separate science
+implementation. Put the schema-2 `planetes_flat.fits`, `planetes_wave.fits` and
+`planetes_p2vm.fits` together in the configured calibration directory, and set
+the explicit raw science and dark paths in the script.
 
-```bash
-python bench/rtreduce.py
-```
-
-The benchmark's numerical operations and timing loop are unchanged. It is not
-an ESO recipe or a substitute for the full-cube science reduction.
+Run `python bench/rtreduce.py` with the scientific environment. It warms JIT and
+times 128 calls on a complete raw frame, including dark subtraction and flags.
+GD/phase diagnostics are disabled, matching the normal live display. The full
+file task remains `planetes.reduction.reduce_file`.

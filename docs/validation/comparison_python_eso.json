@@ -1,0 +1,225 @@
+{
+  "all_equal": true,
+  "fields": [
+    {
+      "product": "dark_main",
+      "field": "mean_adu",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_main",
+      "field": "temporal_rms_adu",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_main",
+      "field": "bad_pixel_flags",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_main",
+      "field": "n_frames",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_main",
+      "field": "scientific_fingerprint",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_wave",
+      "field": "mean_adu",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_wave",
+      "field": "temporal_rms_adu",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_wave",
+      "field": "bad_pixel_flags",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_wave",
+      "field": "n_frames",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_wave",
+      "field": "scientific_fingerprint",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_science",
+      "field": "mean_adu",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_science",
+      "field": "temporal_rms_adu",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_science",
+      "field": "bad_pixel_flags",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_science",
+      "field": "n_frames",
+      "bitwise_equal": true
+    },
+    {
+      "product": "dark_science",
+      "field": "scientific_fingerprint",
+      "bitwise_equal": true
+    },
+    {
+      "product": "flat",
+      "field": "profile_x_pixels",
+      "bitwise_equal": true
+    },
+    {
+      "product": "flat",
+      "field": "profile_y_pixels",
+      "bitwise_equal": true
+    },
+    {
+      "product": "flat",
+      "field": "flat_map_adu",
+      "bitwise_equal": true
+    },
+    {
+      "product": "flat",
+      "field": "trace_y_pixels",
+      "bitwise_equal": true
+    },
+    {
+      "product": "flat",
+      "field": "scientific_fingerprint",
+      "bitwise_equal": true
+    },
+    {
+      "product": "wave",
+      "field": "wavelength_map_um",
+      "bitwise_equal": true
+    },
+    {
+      "product": "wave",
+      "field": "scientific_fingerprint",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "p2vm",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "wavelength_um",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "baseline_regions",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "baseline_telescopes",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "transmission",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "coherence_amplitude",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "coherence_phase_rad",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "opd_um",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "group_delay_um",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "ellipse_phase_rad",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "ellipse_amplitude",
+      "bitwise_equal": true
+    },
+    {
+      "product": "p2vm",
+      "field": "scientific_fingerprint",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "photometric_flux_adu",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "coherent_flux_adu",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "visibility_amplitude",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "flags",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "wavelength_um",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "baseline_regions",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "baseline_telescopes",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "group_delay_um",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "differential_phase_deg",
+      "bitwise_equal": true
+    },
+    {
+      "product": "science",
+      "field": "scientific_fingerprint",
+      "bitwise_equal": true
+    }
+  ]
+}

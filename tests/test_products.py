@@ -9,19 +9,18 @@ from unittest.mock import patch
 import numpy as np
 from astropy.io import fits
 
-from planetes.algorithms.p2vm import compute_p2vm
-from planetes.algorithms.reduction import compute_reduce
-from planetes.io.products import append_product, read_product, write_product
-from planetes.io.reference import load_wavelength_lines
-from planetes.product import CalibrationSpectra, ReducedProduct
-from p2vm_fixture import calibration_arrays
+from planetes.p2vm import compute_p2vm
+from planetes.reduction import compute_reduce
+from planetes.fits import fill_dfs_product, read_product, write_product
+from planetes.wavelength import load_wavelength_reference
+from planetes.models import ReducedObservables
+from p2vm_fixture import calibration_spectra
 
 
 class ScienceProductTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        values = calibration_arrays(n_wave=15)
-        spectra = CalibrationSpectra(*values[:6])
+        spectra = calibration_spectra(n_wave=15)
         p2vm = compute_p2vm(spectra, phase_correction=False)
         science = spectra.phase_reference.copy()
         science[:, 0] = 0
@@ -35,7 +34,7 @@ class ScienceProductTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "science.fits"
             write_product(path, product)
-            loaded = read_product(path, ReducedProduct)
+            loaded = read_product(path, ReducedObservables)
             for field in fields(product):
                 before, after = (
                     getattr(product, field.name),
@@ -59,19 +58,62 @@ class ScienceProductTests(unittest.TestCase):
                 hdus["FLAGS"].data[0, 0, 0] = 2
                 hdus["FLAGS"].add_checksum()
             with self.assertRaisesRegex(ValueError, "boolean visibility flags"):
-                read_product(path, ReducedProduct)
+                read_product(path, ReducedObservables)
+
+    def test_scientific_edit_with_valid_checksums_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "science.fits"
+            write_product(path, self.product)
+            with fits.open(path, mode="update") as hdus:
+                hdus["VISIBILITY_AMPLITUDE"].data[0, 0, 0] = 42.0
+                hdus["VISIBILITY_AMPLITUDE"].add_checksum()
+            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
+                read_product(path)
+
+    def test_baseline_table_exposes_zero_based_instrument_mapping(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "science.fits"
+            write_product(path, self.product)
+            with fits.open(path) as hdus:
+                table = hdus["BASELINE_MAP"]
+                self.assertTrue(table.header["INDEX0"])
+                self.assertEqual(table.header["PLTABCD"], "A,C,B,D")
+                for row in table.data:
+                    baseline = int(row["BASELINE_INDEX"])
+                    self.assertEqual(
+                        list(row["OUTPUT_INDICES"]),
+                        self.product.baseline_regions[baseline],
+                    )
+                    self.assertEqual(
+                        tuple(row["TELESCOPE_INDICES"]),
+                        self.product.baseline_telescopes[baseline],
+                    )
+
+    def test_mapping_dictionary_order_cannot_change_baseline_identity(self):
+        product = replace(
+            self.product,
+            baseline_regions=dict(
+                reversed(list(self.product.baseline_regions.items()))
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "science.fits"
+            write_product(path, product)
+            actual = read_product(path)
+            self.assertEqual(actual.baseline_regions, product.baseline_regions)
+            self.assertEqual(actual.baseline_telescopes, product.baseline_telescopes)
 
     def test_append_cannot_modify_a_raw_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "raw.fits"
             fits.PrimaryHDU(np.ones((3, 4))).writeto(path)
             original = path.read_bytes()
-            with self.assertRaisesRegex(ValueError, "new empty CPL"):
-                append_product(path, self.product)
+            with self.assertRaisesRegex(ValueError, "new empty DFS"):
+                fill_dfs_product(path, self.product)
             self.assertEqual(path.read_bytes(), original)
 
     def test_static_reference_retains_original_values(self):
-        lines = load_wavelength_lines()
+        lines = load_wavelength_reference().wavelength_um
         self.assertEqual(len(lines), 30)
         self.assertAlmostEqual(lines[0], 0.965780)
         self.assertAlmostEqual(lines[-1], 1.409370)

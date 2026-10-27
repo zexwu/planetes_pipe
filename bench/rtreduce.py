@@ -1,48 +1,28 @@
-"""Standalone benchmark and plot for real-time PLANETES P2VM reduction."""
+"""Single-frame timing with the same scientific core used by the formal pipeline."""
 
 from pathlib import Path
+from time import perf_counter
 
-import matplotlib.pyplot as plt
-import numpy as np
-
-from rtp2vm import P2VMReducer
-
-from planetes.cube import iter_cube
-from planetes.numerics import frame_mean
+from planetes.dark import load_dark
+from planetes.fits import iter_raw_cube
+from planetes.reduction import FrameReducer
 
 
-def main() -> None:
-    """Benchmark and display visibility amplitudes for the fake science cube."""
-    project_dir = Path(__file__).resolve().parents[1]
-    reducer = P2VMReducer(project_dir / "reduced")
-
-    # Set explicit bench files and calibration directory here before benchmarking.
-    science = project_dir / "2026_02_05/sci2/sci.fits"
-    science_dark = project_dir / "2026_02_05/sci2/sci_dark.fits"
-    cube = np.concatenate(list(iter_cube(science)), axis=0)
-    dark = frame_mean(iter_cube(science_dark))
-    cube -= dark[None, ...]
-
-    import timeit
-
-    t = timeit.timeit(lambda: reducer.reduce(cube[0]), number=10000)
-    print(f"Time per DIT: {t / 10000 * 1e3:.3f} ms")
-
-    n_frame = len(cube)
-    visamps = np.zeros((n_frame, reducer.n_baselines, len(reducer.wl_grid)))
-    for i in range(n_frame):
-        visamps[i] = reducer.reduce(cube[i]).visamp
-
-    fig, axs = plt.subplots(2, 3, figsize=(8, 6), sharey=True, sharex=True)
-    axs = axs.flatten()
-    colors = plt.cm.viridis(np.linspace(0, 1, n_frame))
-    for bsl in range(reducer.n_baselines):
-        axs[bsl].set_prop_cycle(color=colors)
-        axs[bsl].plot(reducer.wl_grid, visamps[:, bsl, :].T, alpha=0.05, lw=0.3)
-        axs[bsl].set_ylabel("VISAMP")
-        axs[bsl].set_xlabel("Wavelength [um]")
-        axs[bsl].label_outer()
-    plt.show()
+def main():
+    project = Path(__file__).resolve().parents[1]
+    calibrations = project / "reduced/calibrations"
+    science = project / "2026_02_05/sci2/sci.fits"
+    dark = load_dark(project / "2026_02_05/sci2/sci_dark.fits")
+    reducer = FrameReducer.from_directory(calibrations)
+    raw = next(iter_raw_cube(science))[0]
+    reducer.reduce_frame(
+        raw, dark=dark
+    )  # Warm JIT before timing the actual frame workload.
+    start = perf_counter()
+    for _ in range(128):
+        result = reducer.reduce_frame(raw, dark=dark)
+    print(f"Mean processing time: {(perf_counter()-start)/128*1000:.3f} ms/frame")
+    print(f"Invalid visibility samples: {result.flags.sum()}/{result.flags.size}")
 
 
 if __name__ == "__main__":

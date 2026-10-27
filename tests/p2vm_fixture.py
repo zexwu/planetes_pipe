@@ -7,8 +7,15 @@ import numpy as np
 from astropy.io import fits
 
 from planetes.instrument import BASELINES, TELESCOPES
-from planetes.io.products import write_product
-from planetes.product import FlatProduct, WaveProduct
+from planetes.fits import write_product
+from planetes.models import (
+    FlatCalibration,
+    WavelengthCalibration,
+    DarkCalibration,
+    Provenance,
+    fingerprint,
+    CalibrationSpectra,
+)
 
 
 def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
@@ -42,15 +49,23 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
         phase_reference[output] += 400.0 * np.cos(
             reference_phase[None, :, :] + abcd_phase[:, None, None]
         )
-    flat = FlatProduct(
+    dark = DarkCalibration(
+        np.zeros((24, n_wave), dtype=np.float32),
+        np.zeros((24, n_wave), dtype=np.float32),
+        np.zeros((24, n_wave), dtype=np.int16),
+        n_frame,
+    )
+    flat = FlatCalibration(
         profile_x_pixels=np.tile(np.arange(n_wave), (24, 1)),
         profile_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1),
         flat_map_adu=np.ones((24, n_wave)),
-        dark_map_adu=np.zeros((24, n_wave)),
-        bad_pixel_flags=np.zeros((24, n_wave), dtype=np.int16),
         trace_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1).astype(float),
+        provenance=Provenance(dependencies={"dark": fingerprint(dark)}),
     )
-    wave = WaveProduct(wavelength_map_um=np.tile(wavelength, (24, 1)))
+    wave = WavelengthCalibration(
+        wavelength_map_um=np.tile(wavelength, (24, 1)),
+        provenance=Provenance(dependencies={"flat": fingerprint(flat)}),
+    )
     return (
         telescope,
         baseline,
@@ -71,7 +86,7 @@ def write_recipe_inputs(directory: Path) -> dict[str, Path]:
     header = fits.Header({"INSTRUME": "PLANETES", "ORIGIN": "PLANETES-SIMULATION"})
     for tag, product in [("PLANETES_FLAT", flat), ("PLANETES_WAVE", wave)]:
         path = directory / f"{tag.lower()}.fits"
-        write_product(path, product, header=header)
+        write_product(path, product)
         paths[tag] = path
     cubes = {
         f"TEL_FLAT_{name}": telescope[index] for index, name in enumerate(TELESCOPES)
@@ -80,7 +95,16 @@ def write_recipe_inputs(directory: Path) -> dict[str, Path]:
         {f"P2VM_RAW_{name}": baseline[index] for index, name in enumerate(BASELINES)}
     )
     cubes["PHASE_REFERENCE"] = reference
-    cubes["PHASE_DARK"] = np.zeros_like(reference)
+    dark = DarkCalibration(
+        np.zeros((24, 151), dtype=np.float32),
+        np.zeros((24, 151), dtype=np.float32),
+        np.zeros((24, 151), dtype=np.int16),
+        32,
+    )
+    for tag in ("DARK_CALIB", "PHASE_DARK_CALIB"):
+        path = directory / f"{tag.lower()}.fits"
+        write_product(path, dark)
+        paths[tag] = path
     for tag, spectra in cubes.items():
         path = directory / f"{tag.lower()}.fits"
         raw_header = header.copy()
@@ -94,3 +118,17 @@ def write_recipe_inputs(directory: Path) -> dict[str, Path]:
         )
         paths[tag] = path
     return paths
+
+
+def calibration_spectra(n_wave=15):
+    """Array-level fixture with explicit flat/wave dependencies."""
+    values = calibration_arrays(n_wave=n_wave)
+    return CalibrationSpectra(
+        *values[:6],
+        provenance=Provenance(
+            dependencies={
+                "flat": fingerprint(values[-2]),
+                "wave": fingerprint(values[-1]),
+            }
+        ),
+    )
