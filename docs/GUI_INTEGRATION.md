@@ -74,7 +74,7 @@ wrote 13 classified cubes and verified shutter/DL recovery and sources. No test
 connected to or operated hardware. The local GUI environment has no catkit2;
 actual bench deployment remains a separate hardware acceptance step.
 
-For 0.7.0, the actual GUI Python 3.12 environment reads format-4 calibration files
+For 0.8.0, the actual GUI Python 3.12 environment reads format-4 calibration files
 and reduces a recorded real frame to preview P2VMRed. The updated camera metadata
 helper and raw publication passed a fake-camera check. All four manifest hashes
 match the local consumers, and the acquisition patch reproduces the new helper
@@ -82,7 +82,7 @@ when applied to its original source.
 
 On another machine, verify the original hashes, back up all four files and run
 `git apply --check` for each patch from the devel directory before applying.
-Do not apply again to already updated files. Install the matching PLANETES 0.7.0 version
+Do not apply again to already updated files. Install the matching PLANETES 0.8.0 version
 without replacing existing camera/Qt dependencies. To restore, preserve later local
 edits and recover the four original files from:
 
@@ -99,8 +99,11 @@ Version 0.5 uses `FrameReducer.wavelength_m` and `extractor.wavelength_map_m`.
 The viewer consumes those metre arrays directly and labels its axes accordingly.
 Format-4 calibrations remain readable; newly saved products use format 5.
 
-The 0.7.0 product simplification preserves the viewer entry points. Acquisition
-uses `raw_header(metadata, shape)` before capture and `write_raw` for publication;
+The 0.8.0 product simplification preserves the viewer entry points. Acquisition
+uses `build_raw_header(metadata, shape)` before capture and `write_raw` for publication;
 the removed standalone raw validator is no longer imported. The portable patch
 and manifest match the updated local acquisition helper. Science products use
 `Dark` and `P2VMRed`; the GUI needs no CPL parameter names or SOF declarations.
+The viewer owns `reducer_dir` for its selector/status text; `FrameReducer` no longer
+stores a directory. The viewer reads `baseline_outputs`, and preview reduction
+uses the default `include_phase=False`.

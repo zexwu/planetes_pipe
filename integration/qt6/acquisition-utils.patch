@@ -2,8 +2,8 @@
 +++ b/scripts/utils.py
 @@ -7,16 +7,117 @@
  from astropy.io import fits
- 
- 
+
+
 -def save_to_fits(cube, filename, overwrite=True):
 -    """Write an image cube to a compressed FITS image extension."""
 +def utc_now():
@@ -23,7 +23,7 @@
 +    """Snapshot supported readbacks and explicitly sourced physical camera settings."""
 +    from planetes.instrument import DetectorSetup
 +    from planetes.io.raw import RawMetadata
-+    from planetes.io.raw import raw_header
++    from planetes.io.raw import build_raw_header
 +
 +    required = ("detector", "orientation", "binning_x", "binning_y")
 +    if any(camera_config.get(key) in (None, "", 0) for key in required):
@@ -70,7 +70,7 @@
 +            }
 +        },
 +    )
-+    raw_header(metadata, (1, setup.height, setup.width))
++    build_raw_header(metadata, (1, setup.height, setup.width))
 +    return metadata
 +
 +
@@ -123,6 +123,6 @@
 +    check_camera(bench.cam, metadata)
 +    metadata = replace(metadata, host_end_utc=utc_now())
 +    save_to_fits(cube, filename, metadata=metadata)
- 
- 
+
+
  def connect_bench():

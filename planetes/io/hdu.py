@@ -21,7 +21,7 @@ def _read_json(hdus, name):
     return json.loads(hdus[name].data.tobytes().decode("utf-8"))
 
 
-def _checksums(hdus):
+def _verify_checksums(hdus):
     for h in hdus:
         if h.verify_checksum() != 1 or h.verify_datasum() != 1:
             raise ValueError("Invalid or missing FITS checksum")

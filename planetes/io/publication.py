@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 @contextmanager
-def destinations(paths, *, verify):
+def publish_outputs(paths, *, verify):
     """Stage/verify all outputs, publish without overwrite, rollback only owned links."""
     paths = [Path(p).absolute() for p in paths]
     if len(set(paths)) != len(paths):

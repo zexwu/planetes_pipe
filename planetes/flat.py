@@ -14,7 +14,7 @@ from .dark import frame_mean
 from .instrument import N_OUTPUTS, TELESCOPES, check_setup
 from .io.raw import (
     check_raw_calibrations,
-    identify_raw,
+    identify_raw_exposures,
     iter_raw_cube,
     read_raw_metadata,
 )
@@ -24,23 +24,23 @@ from .products import (
     Flat,
 )
 
-PROFILE_WIDTH = 10.0
+APERTURE_WIDTH_PIXELS = 10.0
 
 
-def calibrate_flat_file(
+def make_flat(
     telescope_flats: Mapping[str, Path] | Iterable[Path],
     dark: Dark,
     bad: BadPixelMap,
     *,
-    profile_width: float = PROFILE_WIDTH,
+    aperture_width_pixels: float = APERTURE_WIDTH_PIXELS,
 ) -> Flat:
     """Read four telescope flats with their DARK/BAD; return response and geometry.
 
-    ``profile_width`` is the full extraction aperture in detector pixels.
+    ``aperture_width_pixels`` is the full extraction aperture in detector pixels.
     For incomplete bench headers, supply a {telescope: path} mapping.
     """
 
-    telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
+    telescope_flats = identify_raw_exposures(telescope_flats, "FLAT_RAW")
     maps = []
     setup = read_raw_metadata(telescope_flats[TELESCOPES[0]], category="FLAT_RAW").setup
     for name in TELESCOPES:
@@ -53,24 +53,22 @@ def calibrate_flat_file(
             role="flat sequence",
         )
         maps.append(frame_mean(iter_raw_cube(telescope_flats[name])) - dark.mean_adu)
-    result = compute_flat(dark, bad, maps, profile_width=profile_width)
+    result = build_flat(maps, bad, aperture_width_pixels=aperture_width_pixels)
     return replace(result, setup=setup)
 
 
-def compute_flat(
-    dark: Dark,
+def build_flat(
+    flat_images: list[NDArray],
     bad: BadPixelMap,
-    flat_maps: list[NDArray],
     *,
     n_outputs: int = N_OUTPUTS,
-    profile_width: float = PROFILE_WIDTH,
+    aperture_width_pixels: float = APERTURE_WIDTH_PIXELS,
 ) -> Flat:
-    """Compute flat maps and traces from pre-reduced detector images."""
-    if bad.bad_pixel_flags.shape != dark.mean_adu.shape:
-        raise ValueError("BAD and DARK detector shapes differ")
+    """Build the flat response and extraction traces from dark-subtracted images."""
+    flat_map = np.mean(flat_images, axis=0)
+    if bad.bad_pixel_flags.shape != flat_map.shape:
+        raise ValueError("BAD and FLAT detector shapes differ")
     bad_map = bad.bad_pixel_flags
-
-    flat_map = np.mean(flat_maps, axis=0)
 
     h, w = flat_map.shape
     h_half = h // n_outputs // 2
@@ -102,7 +100,6 @@ def compute_flat(
             ref_x=w // 2,
             ref_y=ref_y,
             range_y=h_half,
-            diagnostics=True,
         )
 
         ys_med = medfilt(ys, kernel_size=3)
@@ -111,7 +108,7 @@ def compute_flat(
         ys_smoothed = np.polyval(poly_coeffs, xs)
         Y, X = np.indices((h, w))
 
-        spatial_mask = np.abs(Y - ys_smoothed[X]) < profile_width / 2
+        spatial_mask = np.abs(Y - ys_smoothed[X]) < aperture_width_pixels / 2
 
         # Keep rectangular arrays for Numba; extractors skip bad-pixel sentinels.
         sparse_x = X[spatial_mask].copy()
@@ -138,9 +135,8 @@ def compute_flat(
         trace_y_pixels=np.array(ys_list),
         profile_sigma_pixels=np.asarray(sigmas),
         telescope_flux_adu=np.asarray(
-            [np.sum(image, dtype=np.float64) for image in flat_maps]
+            [np.sum(image, dtype=np.float64) for image in flat_images]
         ),
-        setup=dark.setup,
     )
     return product
 
@@ -215,7 +211,8 @@ def fit_gaussian(x, y, p0, max_iter=6):
     return np.array([a, x0, sigma, c]), x0_err
 
 
-def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y, *, diagnostics=False):
+def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
+    """Return trace centers, position errors and accepted Gaussian sigma per column."""
     ny, nx = image.shape
     y_centers = np.full(nx, np.nan)
     y_errs = np.full(nx, np.nan)
@@ -264,4 +261,4 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y, *, diagnostics=False)
     _scan(ref_x, nx, 1, p0)
     _scan(ref_x - 1, -1, -1, p0)
 
-    return (y_centers, y_errs, widths) if diagnostics else (y_centers, y_errs)
+    return y_centers, y_errs, widths

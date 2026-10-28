@@ -24,9 +24,9 @@ from ..products import (
     WavelengthReference,
 )
 from . import keywords as kw
-from .hdu import _checksums, _json_hdu, _native, _read_json
+from .hdu import _verify_checksums, _json_hdu, _native, _read_json
 from .keywords import CATEGORIES
-from .publication import destinations
+from .publication import publish_outputs
 
 
 def _image(name, value, unit=""):
@@ -60,11 +60,11 @@ def _table(name, columns):
     return afits.BinTableHDU.from_columns(columns, name=name)
 
 
-def _detector(product):
+def _detector_table(product):
     labels = [f"REG{i+1:02d}" for i in range(24)]
     if isinstance(product, (P2VM, P2VMRed)):
-        _check_baselines(product.baseline_regions, product.baseline_telescopes)
-        for baseline, outputs in product.baseline_regions.items():
+        _check_baselines(product.baseline_outputs, product.baseline_telescopes)
+        for baseline, outputs in product.baseline_outputs.items():
             for output, phase in zip(outputs, ABCD_ORDER, strict=True):
                 labels[output] = BASELINES[baseline] + "-" + phase
     return _table(kw.DETECTOR_DATA, [_column("REGNAME", np.asarray(labels))])
@@ -127,7 +127,7 @@ def encode_product(product, header=None, *, quality=None):
         hdus.append(image)
     elif isinstance(product, Flat):
         hdus += [
-            _detector(product),
+            _detector_table(product),
             _image(kw.FLAT_IMAGE, product.flat_map_adu, "adu"),
         ]
         columns = [
@@ -154,7 +154,7 @@ def encode_product(product, header=None, *, quality=None):
             hdus.append(_image(kw.FLAT_FLUX, product.telescope_flux_adu, "adu"))
     elif isinstance(product, Wave):
         hdus += [
-            _detector(product),
+            _detector_table(product),
             _table(
                 kw.WAVE_DATA,
                 [
@@ -186,7 +186,7 @@ def encode_product(product, header=None, *, quality=None):
         )
     else:
         hdus += [
-            _detector(product),
+            _detector_table(product),
             _table(
                 kw.WAVELENGTH,
                 [_column("WAVELENGTH", product.wavelength_m, "m")],
@@ -203,7 +203,7 @@ def encode_product(product, header=None, *, quality=None):
                 columns.append(_column("C_MATRIX", product.dc_term_adu, "adu"))
             hdus.append(_table(kw.P2VM_DATA, columns))
             for name, ext, unit in [
-                ("p2vm", kw.P2VM_INVERSE, ""),
+                ("matrix", kw.P2VM_INVERSE, ""),
                 ("opd_m", kw.OPD, "m"),
                 ("group_delay_m", kw.GROUP_DELAY, "m"),
                 ("ellipse_phase_rad", kw.ELLIPSE_PHASE, "rad"),
@@ -300,7 +300,7 @@ def read_product(path: Path, cls=None):
         actual = {v: k for k, v in CATEGORIES.items()}.get(h.get(kw.PRO_CATEGORY))
         if actual is None or (cls is not None and actual is not cls):
             raise ValueError("Unexpected product category")
-        _checksums(hdus)
+        _verify_checksums(hdus)
         meta = _read_json(hdus, kw.META_EXT)
         values = {}
 
@@ -374,7 +374,7 @@ def read_product(path: Path, cls=None):
         else:
             values["wavelength_m"] = column(kw.WAVELENGTH, "WAVELENGTH", "m")
             labels = list(hdus[kw.DETECTOR_DATA].data["REGNAME"])
-            values["baseline_regions"] = {
+            values["baseline_outputs"] = {
                 i: [labels.index(name + "-" + a) for a in ABCD_ORDER]
                 for i, name in enumerate(BASELINES)
             }
@@ -393,7 +393,7 @@ def read_product(path: Path, cls=None):
                 if "C_MATRIX" in hdus[kw.P2VM_DATA].columns.names:
                     values["dc_term_adu"] = column(kw.P2VM_DATA, "C_MATRIX", "adu")
                 for name, ext, unit in [
-                    ("p2vm", kw.P2VM_INVERSE, ""),
+                    ("matrix", kw.P2VM_INVERSE, ""),
                     ("opd_m", kw.OPD, "m"),
                     ("group_delay_m", kw.GROUP_DELAY, "m"),
                     ("ellipse_phase_rad", kw.ELLIPSE_PHASE, "rad"),
@@ -461,10 +461,10 @@ def read_product(path: Path, cls=None):
 
 
 def write_product(path: Path, product, *, include_qc: bool = True):
-    """Save a product with optional QC; preserve existing destinations."""
+    """Save a product with optional QC; preserve existing output files."""
     from ..qc import measure_quality
 
     quality = measure_quality(product) if include_qc else None
     encoded = encode_product(product, quality=quality)
-    with destinations([path], verify=read_product) as temporary:
+    with publish_outputs([path], verify=read_product) as temporary:
         encoded.writeto(temporary[0], checksum=True)

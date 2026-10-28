@@ -21,15 +21,15 @@ from .products import (
 BAD_PIXEL_THRESHOLD = 5.0
 
 
-def calibrate_dark_file(
+def make_dark_products(
     path: Path, *, bad_pixel_threshold: float = BAD_PIXEL_THRESHOLD
 ) -> tuple[Dark, BadPixelMap]:
     """Measure DARK mean/RMS and BAD flags from a full raw stack; saving is explicit."""
 
     metadata = read_raw_metadata(path, category="DARK_RAW")
-    dark = compute_dark(iter_raw_cube(path))
+    dark = measure_dark(iter_raw_cube(path))
     dark = replace(dark, setup=metadata.setup)
-    return dark, compute_badpix(dark, threshold=bad_pixel_threshold)
+    return dark, detect_bad_pixels(dark, threshold=bad_pixel_threshold)
 
 
 def frame_mean(
@@ -72,7 +72,7 @@ def frame_statistics(
     return mean.astype(np.float32), np.sqrt(variance).astype(np.float32), count
 
 
-def compute_badpix(dark: Dark, *, threshold: float = 5.0) -> BadPixelMap:
+def detect_bad_pixels(dark: Dark, *, threshold: float = 5.0) -> BadPixelMap:
     """Build a bad-pixel map from precomputed temporal mean and RMS images."""
     mean_img, std_img = dark.mean_adu, dark.temporal_rms_adu
     BAD_HOT, BAD_DEAD, BAD_NOISY = 1, 2, 4
@@ -93,7 +93,7 @@ def compute_badpix(dark: Dark, *, threshold: float = 5.0) -> BadPixelMap:
     return BadPixelMap(bpm)
 
 
-def compute_dark(chunks: Iterable[NDArray[np.float32]]) -> Dark:
+def measure_dark(chunks: Iterable[NDArray[np.float32]]) -> Dark:
     """Measure temporal mean and population RMS from a complete stack."""
     mean, rms, count = frame_statistics(chunks)
     if count < 2:
@@ -123,7 +123,7 @@ def load_dark(path: Path) -> DarkInput:
             raise ValueError("Dark subtraction expects ADU")
         if data.ndim == 3 and len(data) >= 2:
             metadata = read_raw_metadata(path, category="DARK_RAW")
-            result = compute_dark(iter_raw_cube(path))
+            result = measure_dark(iter_raw_cube(path))
             return replace(result, setup=metadata.setup)
         if data.ndim == 3 and len(data) == 1:
             data = data[0]

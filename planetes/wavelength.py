@@ -11,7 +11,7 @@ from scipy.signal import find_peaks
 
 from . import log
 from .dark import frame_mean
-from .extraction import extract_spec_sparse
+from .extraction import extract_sparse_spectra
 from .instrument import N_OUTPUTS
 from .io.fits import read_product
 from .io.raw import check_raw_calibrations, iter_raw_cube
@@ -27,7 +27,7 @@ SURFACE_DEGREE = 3
 RANSAC_ITERATIONS = 1_000_000
 
 
-def calibrate_wavelength_file(
+def make_wave(
     path: Path,
     dark: Dark,
     flat: Flat,
@@ -42,10 +42,10 @@ def calibrate_wavelength_file(
     if image.shape != dark.mean_adu.shape or image.shape != flat.flat_map_adu.shape:
         raise ValueError("Lamp/dark/flat detector shapes differ")
     image = image - dark.mean_adu
-    return compute_wavelength(image, flat, reference.wavelength_m)
+    return fit_wavelength_solution(image, flat, reference.wavelength_m)
 
 
-def compute_wavelength(
+def fit_wavelength_solution(
     wave_image_adu: NDArray,
     flat: Flat,
     reference_wavelength_m: NDArray,
@@ -58,7 +58,7 @@ def compute_wavelength(
     detector_x = np.arange(nx)
     y_trace = flat.trace_y_pixels
 
-    lamp_spectra = extract_spec_sparse(
+    lamp_spectra = extract_sparse_spectra(
         wave_image_adu[None, :, :], profile_y_pixels, profile_x_pixels
     )[:, 0, :]
 
@@ -79,7 +79,7 @@ def compute_wavelength(
     mean_peak_pixels, _ = find_peaks(
         mean_spectrum, height=peak_threshold(mean_spectrum), distance=5
     )
-    mean_line_matches, _ = match_lines(
+    mean_line_matches, _ = match_lines_ransac(
         reference_lines_m,
         mean_peak_pixels,
         tol=3,
@@ -113,7 +113,7 @@ def compute_wavelength(
 
         # match the observed peaks to the mean spectrum peaks
         # to filter out spurious detections
-        output_line_matches, _ = match_lines_grid(
+        output_line_matches, _ = match_peaks_grid(
             mean_peak_pixels,
             peak_pixels,
             tol=1,
@@ -200,13 +200,14 @@ def compute_wavelength(
     return wave_product
 
 
-def match_lines(
+def match_lines_ransac(
     theoretical_lines: Sequence[float],
     obs_peaks: Sequence[float],
     tol: float = 2.0,
     min_inliers: int = 5,
     n_iter: int = 10000,
 ) -> tuple[NDArray, tuple[float, ...]]:
+    """Match reference wavelengths to detected peak pixels with a quadratic RANSAC fit."""
     # 1. Setup Data
     obs = np.sort(np.asarray(obs_peaks, dtype=np.float64))
     mod = np.sort(np.asarray(theoretical_lines, dtype=np.float64))
@@ -246,9 +247,9 @@ def match_lines(
     return np.array(final_inliers), tuple(final_coeffs_refined)
 
 
-def match_lines_grid(
-    theoretical_lines: Sequence[float],
-    obs_peaks: Sequence[float],
+def match_peaks_grid(
+    reference_pixels: Sequence[float],
+    observed_pixels: Sequence[float],
     tol: float = 1,
     min_inliers: int = 6,
     offset_limit: float = 20,
@@ -256,9 +257,10 @@ def match_lines_grid(
     curve_limit: float = 1e-3,
     steps_per_unit: float = 2.0,  # Density of search. Higher = more robust but slower.
 ) -> tuple[NDArray, tuple[float, ...]]:
+    """Match two sets of spectral peak pixels with a quadratic grid search."""
     # 1. Prepare Data
-    obs = np.sort(np.ascontiguousarray(obs_peaks, dtype=np.float64))
-    mod = np.sort(np.ascontiguousarray(theoretical_lines, dtype=np.float64))
+    obs = np.sort(np.ascontiguousarray(observed_pixels, dtype=np.float64))
+    mod = np.sort(np.ascontiguousarray(reference_pixels, dtype=np.float64))
 
     # 2. Auto-Calculate Grid Steps
     # We need step sizes small enough so we don't "step over" a valid match.

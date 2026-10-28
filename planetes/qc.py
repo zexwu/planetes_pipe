@@ -135,12 +135,12 @@ def measure_quality(product):
         coh_std = []
         phase_std = []
         trans_mean = []
-        for b, regions in product.baseline_regions.items():
+        for b, outputs in product.baseline_outputs.items():
             t1, t2 = product.baseline_telescopes[b]
-            a = product.coherence_amplitude[regions, b, :]
-            phase = product.coherence_phase_rad[regions, b, :]
-            first = product.transmission[regions, t1, :]
-            second = product.transmission[regions, t2, :]
+            a = product.coherence_amplitude[outputs, b, :]
+            phase = product.coherence_phase_rad[outputs, b, :]
+            first = product.transmission[outputs, t1, :]
+            second = product.transmission[outputs, t2, :]
             coh_mean.extend(a.mean(axis=1))
             coh_std.extend(a.std(axis=1, ddof=1))
             phase_std.extend(phase.std(axis=1, ddof=1))
@@ -184,7 +184,7 @@ def measure_quality(product):
         put(
             "p2vm_phase_spectral_std_rad",
             np.mean(phase_std),
-            "[rad] Mean spectral sample stdev across detector regions",
+            "[rad] Mean spectral sample stdev across detector outputs",
         )
         for name, number in [("mean", tm.mean()), ("min", tm.min()), ("max", tm.max())]:
             put(
@@ -216,7 +216,7 @@ def diagnostics(product):
     if isinstance(product, P2VM):
         return {
             "p2vm_condition_max": float(
-                np.max(np.linalg.cond(np.moveaxis(product.p2vm, -1, 0)))
+                np.max(np.linalg.cond(np.moveaxis(product.matrix, -1, 0)))
             )
         }
     if isinstance(product, P2VMRed):

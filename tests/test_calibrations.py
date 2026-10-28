@@ -12,9 +12,8 @@ from p2vm_fixture import write_recipe_inputs
 from planetes.extraction import prepare_extraction
 from planetes.io.fits import read_product
 from planetes.p2vm import (
-    calibrate_p2vm_file,
-    extract_calibration_files,
-    wavelength_grid,
+    make_p2vm,
+    extract_p2vm_spectra,
 )
 from planetes.products import DarkImage
 
@@ -27,7 +26,7 @@ class CalibrationTests(unittest.TestCase):
             flat, wave = read_product(paths["FLAT"]), read_product(paths["WAVE"])
             dark = read_product(paths["DARK"])
             options = dict(wavelength_channels=15, phase_correction=False)
-            expected = calibrate_p2vm_file(
+            expected = make_p2vm(
                 flat,
                 wave,
                 dark,
@@ -45,7 +44,7 @@ class CalibrationTests(unittest.TestCase):
                     result[identity] = target
                 return result
 
-            actual = calibrate_p2vm_file(
+            actual = make_p2vm(
                 flat,
                 wave,
                 dark,
@@ -55,8 +54,8 @@ class CalibrationTests(unittest.TestCase):
                 ),
                 **options,
             )
-            np.testing.assert_array_equal(actual.p2vm, expected.p2vm)
-            self.assertEqual(actual.baseline_regions, expected.baseline_regions)
+            np.testing.assert_array_equal(actual.matrix, expected.matrix)
+            self.assertEqual(actual.baseline_outputs, expected.baseline_outputs)
             self.assertEqual(actual.baseline_telescopes, expected.baseline_telescopes)
 
     def test_phase_dark_is_independent_from_main_dark(self):
@@ -75,19 +74,21 @@ class CalibrationTests(unittest.TestCase):
             phase = replace(
                 main, mean_adu=np.full(main.mean_adu.shape, 7, dtype=np.float32)
             )
-            spectra = extract_calibration_files(
+            spectra = extract_p2vm_spectra(
                 flat,
                 wave,
                 main,
                 telescope_flats=inputs["FLAT_RAW"],
                 baseline_cubes=inputs["P2VM_RAW"],
-                wavelength_m=wavelength_grid(),
+                wavelength_m=np.linspace(1.15e-6, 1.30e-6, 151),
                 phase_reference=reference,
                 phase_dark=phase,
             )
             raw = np.array(fits.getdata(reference), dtype=np.float32)
             corrected = raw - 7
-            prepared = prepare_extraction(flat, wave, wavelength_grid())
+            prepared = prepare_extraction(
+                flat, wave, np.linspace(1.15e-6, 1.30e-6, 151)
+            )
             expected = prepared.extract(
                 corrected, DarkImage(np.zeros_like(phase.mean_adu))
             )

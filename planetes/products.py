@@ -73,9 +73,9 @@ class WavelengthReference:
 class P2VM:
     """Pixel-to-visibility matrix and retained calibration scan diagnostics."""
 
-    p2vm: Array  # (data channel, output, wavelength)
+    matrix: Array  # (data channel, output, wavelength)
     wavelength_m: Array  # (wavelength,)
-    baseline_regions: dict[int, list[int]]
+    baseline_outputs: dict[int, list[int]]
     baseline_telescopes: dict[int, tuple[int, int]]
     transmission: Array  # (output, telescope, wavelength)
     coherence_amplitude: Array  # (output, baseline, wavelength)
@@ -101,19 +101,19 @@ class P2VMRed:
     visibility_amplitude: Array  # (frame, baseline, wavelength)
     flags: Array  # bool (frame, baseline, wavelength)
     wavelength_m: Array
-    baseline_regions: dict[int, list[int]]
+    baseline_outputs: dict[int, list[int]]
     baseline_telescopes: dict[int, tuple[int, int]]
     group_delay_m: Array | None = None  # (frame, baseline)
     differential_phase_deg: Array | None = None  # (frame, baseline, wavelength)
 
 
 @dataclass(slots=True)
-class CalibrationSpectra:
+class P2VMSpectra:
     """In-memory P2VM fit inputs, not a FITS product."""
 
     telescope_spectra: Array  # (telescope, output, frame, wavelength)
     baseline_spectra: Array  # (baseline, output, frame, wavelength)
     phase_reference: Array  # (output, frame, wavelength)
-    baseline_regions: dict[int, list[int]]
+    baseline_outputs: dict[int, list[int]]
     baseline_telescopes: dict[int, tuple[int, int]]
     wavelength_m: Array

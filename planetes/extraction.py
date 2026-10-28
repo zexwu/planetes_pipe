@@ -18,7 +18,7 @@ from .products import (
 
 
 @njit(parallel=True, fastmath=True, cache=True)
-def extract_spec_sparse(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
+def extract_sparse_spectra(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
     """
     Extract spectra from a cube using sparse pixel indices per output channel.
 
@@ -80,7 +80,7 @@ def resample_spectra(spec: NDArray, wave_map: NDArray, wl_grid: NDArray) -> NDAr
     return out
 
 
-def _snapshot(values):
+def _readonly_copy(values):
     result = np.array(values, copy=True)
     result.flags.writeable = False
     return result
@@ -107,7 +107,7 @@ class SpectralExtractor:
             or dark.mean_adu.shape != self.detector_shape
         ):
             raise ValueError("Raw cube, dark and extraction detector geometry differ")
-        spec = extract_spec_sparse(
+        spec = extract_sparse_spectra(
             cube - dark.mean_adu, self.profile_y_pixels, self.profile_x_pixels
         )
         aligned = resample_spectra(
@@ -146,9 +146,12 @@ def prepare_extraction(
             raise ValueError(
                 f"Output {output}: target {wavelength_m[0]:.9g}..{wavelength_m[-1]:.9g} m outside calibration {row[0]:.9g}..{row[-1]:.9g} m"
             )
-    xs, ys = _snapshot(flat.profile_x_pixels), _snapshot(flat.profile_y_pixels)
-    wave_map, grid = _snapshot(wave.wavelength_map_m), _snapshot(wavelength_m)
-    spec_flat_detector = extract_spec_sparse(flat.flat_map_adu[None, :, :], ys, xs)
+    xs, ys = (
+        _readonly_copy(flat.profile_x_pixels),
+        _readonly_copy(flat.profile_y_pixels),
+    )
+    wave_map, grid = _readonly_copy(wave.wavelength_map_m), _readonly_copy(wavelength_m)
+    spec_flat_detector = extract_sparse_spectra(flat.flat_map_adu[None, :, :], ys, xs)
     spec_flat_detector = np.clip(spec_flat_detector, a_min=1e-8, a_max=None)
     spec_flat = 1 / resample_spectra(1 / spec_flat_detector, wave_map, grid)
     return SpectralExtractor(
@@ -158,12 +161,14 @@ def prepare_extraction(
         flat.setup,
         wave_map,
         grid,
-        _snapshot(spec_flat_detector),
-        _snapshot(spec_flat),
+        _readonly_copy(spec_flat_detector),
+        _readonly_copy(spec_flat),
     )
 
 
-def extract_file(path: Path, extractor: SpectralExtractor, dark: Dark) -> NDArray:
+def extract_spectra_from_file(
+    path: Path, extractor: SpectralExtractor, dark: Dark
+) -> NDArray:
     """Read and extract a whole file, retaining all frames and the 16-frame chunking."""
 
     return np.concatenate(

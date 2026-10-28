@@ -10,11 +10,11 @@ from planetes.products import (
 )
 from planetes.recipes.dfs import (
     save_product,
-    select_inputs,
+    load_recipe_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
 from planetes.wavelength import (
-    calibrate_wavelength_file,
+    make_wave,
     wavelength_reference_path,
 )
 
@@ -34,7 +34,7 @@ class PlanetesWave(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = make_parameters(PARAMETERS, calibrate_wavelength_file)
+        self.parameters = make_parameters(PARAMETERS, make_wave)
 
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
@@ -43,7 +43,7 @@ class PlanetesWave(ui.PyRecipe):
             frames.append(
                 ui.Frame(file=str(wavelength_reference_path()), tag="LINE_LIST")
             )
-        paths, cal, used = select_inputs(
+        paths, cal, used = load_recipe_inputs(
             frames,
             {
                 "WAVELAMP_RAW": None,
@@ -52,7 +52,7 @@ class PlanetesWave(ui.PyRecipe):
                 "LINE_LIST": WavelengthReference,
             },
         )
-        product = calibrate_wavelength_file(
+        product = make_wave(
             paths["WAVELAMP_RAW"],
             cal["DARK"],
             cal["FLAT"],

@@ -11,8 +11,8 @@ from astropy.time import Time
 from ..instrument import BASELINES, TELESCOPES, DetectorSetup
 from ..products import Dark
 from . import keywords as kw
-from .hdu import _checksums, _json_hdu, _read_json
-from .publication import destinations
+from .hdu import _verify_checksums, _json_hdu, _read_json
+from .publication import publish_outputs
 
 CHUNK_FRAMES = 16
 
@@ -31,7 +31,7 @@ class RawMetadata:
     original: dict = field(default_factory=dict)
 
 
-def raw_header(metadata: RawMetadata, shape):
+def build_raw_header(metadata: RawMetadata, shape):
     """ESO ICD exposure/window fields; private shutter provenance stays explicit."""
     if metadata.category not in kw.RAW_TYPES or len(shape) != 3 or min(shape) < 1:
         raise ValueError("Expected a supported raw category and nonempty 3-D cube")
@@ -114,7 +114,7 @@ def raw_header(metadata: RawMetadata, shape):
     return h
 
 
-def _detector_cube(hdus, hdu: int | str | None = None):
+def _detector_hdu(hdus, hdu: int | str | None = None):
     """Select the named/unique image cube; reject ambiguous data and known unit errors."""
     if hdu is not None:
         image = hdus[hdu]
@@ -212,7 +212,7 @@ def read_raw_metadata(
         h = hdus[0].header
         if kw.PRO_CATEGORY in h:
             raise ValueError(f"Expected raw FITS, found pipeline product: {path}")
-        image = _detector_cube(hdus, hdu)
+        image = _detector_hdu(hdus, hdu)
         shape = tuple(image.shape)
         if kw.FORMAT_KEY not in h and kw.META_EXT not in hdus:
             raw = parse_raw_header(h, shape, category=category)
@@ -238,7 +238,7 @@ def read_raw_metadata(
         raw = RawMetadata(**info)
         if category is not None and raw.category != category:
             raise ValueError(f"Expected raw category {category}, got {raw.category}")
-        expected = raw_header(raw, shape)
+        expected = build_raw_header(raw, shape)
         for key in expected:
             if h.get(key) != expected[key]:
                 raise ValueError(f"Raw header and metadata disagree: {key}")
@@ -249,7 +249,7 @@ def read_raw_metadata(
         return raw
 
 
-def identify_raw(
+def identify_raw_exposures(
     paths: Mapping[str, Path] | Iterable[Path], category: str
 ) -> dict[str, Path]:
     """Use explicit physical identities or shutter readback, never filenames or order."""
@@ -293,7 +293,7 @@ def identify_raw(
 def iter_raw_cube(path: Path, *, hdu: int | str | None = None):
     """Stream a named/unique detector cube as float32, retaining 16-frame arithmetic."""
     with afits.open(path, memmap=True) as hdus:
-        data = _detector_cube(hdus, hdu).data
+        data = _detector_hdu(hdus, hdu).data
         for start in range(0, len(data), CHUNK_FRAMES):
             yield np.asarray(data[start : start + CHUNK_FRAMES], dtype=np.float32)
 
@@ -301,7 +301,7 @@ def iter_raw_cube(path: Path, *, hdu: int | str | None = None):
 def write_raw(path: Path, cube, metadata: RawMetadata):
     """Write original raw values/dtype without overwriting or operating hardware."""
     cube = np.asarray(cube)
-    header = raw_header(metadata, cube.shape)
+    header = build_raw_header(metadata, cube.shape)
     if cube.dtype.kind not in "uif" or any(
         not np.isfinite(cube[start : start + CHUNK_FRAMES]).all()
         for start in range(0, len(cube), CHUNK_FRAMES)
@@ -309,7 +309,7 @@ def write_raw(path: Path, cube, metadata: RawMetadata):
         raise ValueError("Expected finite real raw detector values")
     image = afits.ImageHDU(cube, name=kw.RAW_IMAGE)
     image.header["BUNIT"] = "adu"
-    with destinations([path], verify=verify_raw) as temporary:
+    with publish_outputs([path], verify=verify_raw) as temporary:
         afits.HDUList(
             [
                 afits.PrimaryHDU(header=header),
@@ -336,4 +336,4 @@ def verify_raw(path):
     """Check classified metadata and every HDU checksum at publication."""
     read_raw_metadata(path)
     with afits.open(path, checksum=True) as hdus:
-        _checksums(hdus)
+        _verify_checksums(hdus)

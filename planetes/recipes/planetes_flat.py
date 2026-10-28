@@ -3,16 +3,16 @@
 from cpl import ui
 
 from planetes import __version__
-from planetes.flat import calibrate_flat_file
+from planetes.flat import make_flat
 from planetes.products import BadPixelMap, Dark
 from planetes.recipes.dfs import (
     save_product,
-    select_inputs,
+    load_recipe_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
-    "profile_width": (
+    "aperture_width_pixels": (
         "planetes.calib.profile-width",
         "profile-width",
         "Full extraction aperture in detector pixels",
@@ -33,16 +33,14 @@ class PlanetesFlat(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = make_parameters(PARAMETERS, calibrate_flat_file)
+        self.parameters = make_parameters(PARAMETERS, make_flat)
 
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
-        paths, cal, used = select_inputs(
+        paths, cal, used = load_recipe_inputs(
             frameset,
             {"DARK": Dark, "BAD": BadPixelMap, "FLAT_RAW": None},
             multiple={"FLAT_RAW": 4},
         )
-        product = calibrate_flat_file(
-            paths["FLAT_RAW"], cal["DARK"], cal["BAD"], **options
-        )
+        product = make_flat(paths["FLAT_RAW"], cal["DARK"], cal["BAD"], **options)
         return save_product("planetes_flat.fits", product, used, self, include_qc=True)

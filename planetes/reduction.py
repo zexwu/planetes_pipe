@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from . import log
-from .extraction import SpectralExtractor, extract_file, prepare_extraction
+from .extraction import SpectralExtractor, extract_spectra_from_file, prepare_extraction
 from .instrument import (
     IMAG_SLICE,
     N_BASELINES,
@@ -30,7 +30,7 @@ from .products import (
 )
 
 
-def reduce_file(
+def reduce_science(
     path: Path,
     dark: Dark,
     flat: Flat,
@@ -48,7 +48,7 @@ def reduce_file(
 
     check_raw_calibrations(path, dark, flat, category="SINGLE_SCI_RAW")
     reducer = FrameReducer(flat, wave, p2vm)
-    spectra = extract_file(path, reducer.extractor, dark)
+    spectra = extract_spectra_from_file(path, reducer.extractor, dark)
     return reduce_spectra(
         spectra,
         p2vm,
@@ -63,45 +63,45 @@ def reduce_spectra(
     *,
     gd_search_min_m: float = -100e-6,
     gd_search_max_m: float = 100e-6,
-    diagnostics: bool = True,
+    include_phase: bool = True,
 ) -> P2VMRed:
-    """Apply P2VM and calculate the retained instrumental visibility observables."""
-    _check_baselines(p2vm.baseline_regions, p2vm.baseline_telescopes)
+    """Apply P2VM; include_phase adds group delay and differential phase."""
+    _check_baselines(p2vm.baseline_outputs, p2vm.baseline_telescopes)
     if (
         p2vm.wavelength_m.ndim != 1
-        or p2vm.p2vm.shape != (N_DATA, N_OUTPUTS, len(p2vm.wavelength_m))
+        or p2vm.matrix.shape != (N_DATA, N_OUTPUTS, len(p2vm.wavelength_m))
         or spectra.ndim != 3
         or spectra.shape[0] != N_OUTPUTS
         or spectra.shape[-1] != len(p2vm.wavelength_m)
     ):
         raise ValueError("Science spectra and P2VM output/wavelength dimensions differ")
     log.info("Applying P2VM to extract visibility for science spectra...")
-    reconstructed_data = np.einsum("box,ofx->fbx", p2vm.p2vm, spectra)
+    reconstructed_data = np.einsum("box,ofx->fbx", p2vm.matrix, spectra)
     photometric_flux_adu = reconstructed_data[:, :N_TELESCOPES, :]
     coherent_flux_adu = (
         reconstructed_data[:, REAL_SLICE, :] + 1j * reconstructed_data[:, IMAG_SLICE, :]
     )
-    visibility_amplitude, flags = normalize_visibility(
+    visibility_amplitude, flags = normalize_coherent_flux(
         coherent_flux_adu,
         photometric_flux_adu,
         p2vm.baseline_telescopes,
     )
 
-    if not diagnostics:
+    if not include_phase:
         return P2VMRed(
             photometric_flux_adu,
             coherent_flux_adu,
             visibility_amplitude,
             flags,
             p2vm.wavelength_m,
-            p2vm.baseline_regions,
+            p2vm.baseline_outputs,
             p2vm.baseline_telescopes,
         )
 
     group_delay_m = np.zeros((len(coherent_flux_adu), N_BASELINES))
     log.info("Computing group delay for science spectra...")
     for baseline in range(N_BASELINES):
-        group_delay_m[:, baseline] = compute_gdelay(
+        group_delay_m[:, baseline] = estimate_group_delay(
             coherent_flux_adu[:, baseline],
             p2vm.wavelength_m,
             search_range=(gd_search_min_m, gd_search_max_m),
@@ -123,7 +123,7 @@ def reduce_spectra(
         wavelength_m=p2vm.wavelength_m,
         group_delay_m=group_delay_m,
         differential_phase_deg=differential_phase_deg,
-        baseline_regions=p2vm.baseline_regions,
+        baseline_outputs=p2vm.baseline_outputs,
         baseline_telescopes=p2vm.baseline_telescopes,
     )
     log.info("Reduction for science spectra completed.")
@@ -132,7 +132,7 @@ def reduce_spectra(
     return product
 
 
-def normalize_visibility(
+def normalize_coherent_flux(
     coherent_flux: NDArray,
     flux: NDArray,
     baseline_telescopes: Mapping[int, tuple[int, int]],
@@ -156,7 +156,7 @@ def normalize_visibility(
     return visamp, flag
 
 
-def compute_gdelay(
+def estimate_group_delay(
     visdata: NDArray,
     wavelength: NDArray,
     search_range: tuple[float, float] = (-30e-6, 30e-6),
@@ -198,7 +198,6 @@ class FrameReducer:
     flat: Flat
     wave: Wave
     p2vm: P2VM
-    calibration_dir: Path | None = None
     extractor: SpectralExtractor = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -219,17 +218,17 @@ class FrameReducer:
         raw: NDArray,
         *,
         dark: DarkInput,
-        diagnostics: bool = False,
+        include_phase: bool = False,
         gd_search_min_m: float = -100e-6,
         gd_search_max_m: float = 100e-6,
     ) -> P2VMRed:
-        """Reduce one RAW frame; caller must not subtract its selected dark beforehand."""
+        """Reduce one raw frame, subtracting dark once; phase outputs are optional."""
         cube = np.asarray(raw, dtype=np.float32)[None, :, :]
         spectra = self.extractor.extract(cube, dark)
         return reduce_spectra(
             spectra,
             self.p2vm,
-            diagnostics=diagnostics,
+            include_phase=include_phase,
             gd_search_min_m=gd_search_min_m,
             gd_search_max_m=gd_search_max_m,
         )
@@ -242,5 +241,4 @@ def load_reducer(directory: Path) -> FrameReducer:
         read_product(directory / "planetes_flat.fits"),
         read_product(directory / "planetes_wave.fits"),
         read_product(directory / "planetes_p2vm.fits"),
-        directory,
     )

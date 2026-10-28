@@ -3,7 +3,7 @@
 from cpl import ui
 
 from planetes import __version__
-from planetes.p2vm import calibrate_p2vm_file
+from planetes.p2vm import make_p2vm
 from planetes.products import (
     Dark,
     Flat,
@@ -11,7 +11,7 @@ from planetes.products import (
 )
 from planetes.recipes.dfs import (
     save_product,
-    select_inputs,
+    load_recipe_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
 
@@ -62,7 +62,7 @@ class PlanetesP2VM(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = make_parameters(PARAMETERS, calibrate_p2vm_file)
+        self.parameters = make_parameters(PARAMETERS, make_p2vm)
 
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
@@ -73,13 +73,13 @@ class PlanetesP2VM(ui.PyRecipe):
             "FLAT_RAW": None,
             "P2VM_RAW": None,
         }
-        paths, cal, used = select_inputs(
+        paths, cal, used = load_recipe_inputs(
             frameset,
             roles,
             {"PHASE_REFERENCE": None, "PHASE_DARK_CALIB": Dark},
             multiple={"FLAT_RAW": 4, "P2VM_RAW": 6},
         )
-        product = calibrate_p2vm_file(
+        product = make_p2vm(
             cal["FLAT"],
             cal["WAVE"],
             cal["DARK"],

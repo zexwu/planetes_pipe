@@ -11,10 +11,10 @@ from planetes.products import (
 )
 from planetes.recipes.dfs import (
     save_product,
-    select_inputs,
+    load_recipe_inputs,
 )
 from planetes.recipes.parameters import make_parameters, read_parameters
-from planetes.reduction import reduce_file
+from planetes.reduction import reduce_science
 
 PARAMETERS = {
     "gd_search_min_m": (
@@ -43,11 +43,11 @@ class PlanetesReduce(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = make_parameters(PARAMETERS, reduce_file)
+        self.parameters = make_parameters(PARAMETERS, reduce_science)
 
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
-        paths, cal, used = select_inputs(
+        paths, cal, used = load_recipe_inputs(
             frameset,
             {
                 "SINGLE_SCI_RAW": None,
@@ -57,7 +57,7 @@ class PlanetesReduce(ui.PyRecipe):
                 "P2VM": P2VM,
             },
         )
-        product = reduce_file(
+        product = reduce_science(
             paths["SINGLE_SCI_RAW"],
             cal["DARK"],
             cal["FLAT"],

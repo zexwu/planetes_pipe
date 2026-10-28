@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.7.0
+# PLANETES pipeline 0.8.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
@@ -82,30 +82,30 @@ matching DARK in that call when available.
 
 ```python
 from pathlib import Path
-from planetes.dark import calibrate_dark_file
-from planetes.flat import calibrate_flat_file
-from planetes.wavelength import calibrate_wavelength_file
-from planetes.p2vm import calibrate_p2vm_file
-from planetes.reduction import reduce_file
+from planetes.dark import make_dark_products
+from planetes.flat import make_flat
+from planetes.wavelength import make_wave
+from planetes.p2vm import make_p2vm
+from planetes.reduction import reduce_science
 from planetes.io.fits import write_product
 
 raw = Path('/absolute/raw')
-main_dark, bad = calibrate_dark_file(raw / 'dark.fits')
-wave_dark, _ = calibrate_dark_file(raw / 'wave_dark.fits')
-science_dark, _ = calibrate_dark_file(raw / 'sci_dark.fits')
+main_dark, bad = make_dark_products(raw / 'dark.fits')
+wave_dark, _ = make_dark_products(raw / 'wave_dark.fits')
+science_dark, _ = make_dark_products(raw / 'sci_dark.fits')
 telescopes = {n: raw / f'tel{n}.fits' for n in ('4', '3', '2', '1')}
 baselines = {n: raw / f'bsl{n}.fits' for n in ('43', '42', '41', '32', '31', '21')}
-flat = calibrate_flat_file(telescopes, main_dark, bad)
-wave = calibrate_wavelength_file(raw / 'wave.fits', wave_dark, flat)
-p2vm = calibrate_p2vm_file(
+flat = make_flat(telescopes, main_dark, bad)
+wave = make_wave(raw / 'wave.fits', wave_dark, flat)
+p2vm = make_p2vm(
     flat, wave, main_dark, telescope_flats=telescopes, baseline_cubes=baselines,
 )
-result = reduce_file(raw / 'sci.fits', science_dark, flat, wave, p2vm)
-write_product(Path('/absolute/new-output/planetes_reduced.fits'), result)
+p2vmred = reduce_science(raw / 'sci.fits', science_dark, flat, wave, p2vm)
+write_product(Path('/absolute/new-output/planetes_reduced.fits'), p2vmred)
 ```
 
 For an instrumental phase reference, explicitly pass its raw path as
-`phase_reference` and its selected DARK as `phase_dark` to `calibrate_p2vm_file`.
+`phase_reference` and its selected DARK as `phase_dark` to `make_p2vm`.
 
 Unversioned bench FITS may store their cube in the primary or an image extension
 and omit unfinished acquisition keywords. Known exposure, ROI and shutter
@@ -135,7 +135,7 @@ observables = reducer.reduce_frame(raw_frame_adu, dark=science_dark)
 
 This returns a `P2VMRed` with a length-one frame axis, instrumental fluxes,
 visibility amplitude and invalid flags. GD and differential phase are `None` unless
-`diagnostics=True`; both are required when saving P2VMRED. Science and live
+`include_phase=True`; both are required when saving P2VMRED. Science and live
 extraction use the saved P2VM grid. Invalid physical mappings, detector dimensions
 and wavelength coverage fail at the calculation/extraction boundary.
 
@@ -145,9 +145,10 @@ are documented in [GUI integration](docs/GUI_INTEGRATION.md).
 ## Organization
 
 Each scientific step owns its file entry point, parameters, array calculation and
-local helper functions. Reading a step starts with `calibrate_*_file()` or
-`reduce_file()` at the top of that file; `compute_*()` / `reduce_spectra()` below
-it can also be called directly with arrays. Saving stays explicit.
+local helper functions. Read a workflow through `make_dark_products`, `make_flat`,
+`make_wave`, `make_p2vm` and `reduce_science`. Array operations are named for their
+science: `measure_dark`, `detect_bad_pixels`, `build_flat`,
+`fit_wavelength_solution`, `fit_p2vm` and `reduce_spectra`. Saving stays explicit.
 
 | Location | Responsibility |
 | --- | --- |
@@ -194,7 +195,7 @@ Exact comparisons use the same numerical environment and matching Numba cache
 states: the old algorithm itself has a small cold/warm difference. Cache and
 fastmath settings are retained.
 
-Version 0.7.0 uses plain `Dark`, `Flat`, `Wave`, `P2VM` and `P2VMRed`
+Version 0.7 introduced plain `Dark`, `Flat`, `Wave`, `P2VM` and `P2VMRed`
 dataclasses. Replace previous `*Calibration`, `VisibilityObservables` and
 `ReducedObservables` imports directly; there are no legacy aliases. Array
 computations keep their existing units and definitions. General validators,
@@ -202,7 +203,14 @@ SHA-256 product fingerprints, parent dependency graphs and `Provenance` are
 removed. Python callers select their calibration files explicitly; ESO DFS
 records the actual recipe inputs and parameters.
 
-New products use FITS format **5**; format **4** remains readable. Full structured
+Version 0.8.0 adopts the workflow/array API above, `P2VM.matrix`,
+`baseline_outputs` and the internal `P2VMSpectra` type. Use
+`aperture_width_pixels` for the full extraction aperture; `include_phase=False`
+skips group delay and differential phase in live previews. `trace_spectrum` always
+returns centers, position errors and Gaussian sigma. The existing CPL parameter
+name/alias `planetes.calib.profile-width` / `--profile-width` remains unchanged.
+
+Products stay at FITS format **5**; format **4** remains readable. Full structured
 raw files stay at format **3**. Product data layout and units remain documented in
 [the product contract](docs/PRODUCT_CONTRACT.md); optional measurements retain
 [the QC definitions](docs/QC_PARAMETERS.md).

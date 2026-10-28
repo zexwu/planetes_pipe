@@ -15,7 +15,7 @@ from planetes.io.raw import (
     read_raw_header,
     read_raw_metadata,
 )
-from planetes.p2vm import compute_p2vm
+from planetes.p2vm import fit_p2vm
 from planetes.products import P2VMRed
 from planetes.reduction import reduce_spectra
 
@@ -24,7 +24,7 @@ class ScienceProductTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         spectra = calibration_spectra(n_wave=15)
-        p2vm = compute_p2vm(spectra, phase_correction=False)
+        p2vm = fit_p2vm(spectra, phase_correction=False)
         science = spectra.phase_reference.copy()
         science[:, 0] = 0
         cls.product = reduce_spectra(science, p2vm)
@@ -61,7 +61,7 @@ class CalibrationFitsTests(unittest.TestCase):
         arrays = calibration_arrays(n_wave=15)
         cls.spectra = calibration_spectra(n_wave=15)
         cls.flat, cls.wave = arrays[-2:]
-        cls.p2vm = compute_p2vm(cls.spectra, phase_correction=False)
+        cls.p2vm = fit_p2vm(cls.spectra, phase_correction=False)
 
     def test_fits_round_trip_preserves_all_arrays_and_mappings(self):
         for product in [self.flat, self.wave, self.p2vm]:

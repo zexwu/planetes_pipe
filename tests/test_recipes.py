@@ -21,7 +21,7 @@ from planetes.products import (
     P2VMRed,
     Wave,
 )
-from planetes.reduction import reduce_file
+from planetes.reduction import reduce_science
 
 
 @unittest.skipUnless(
@@ -102,7 +102,7 @@ class ESOChainTests(unittest.TestCase):
             flat = read_product(inputs["FLAT"], Flat)
             wave = read_product(inputs["WAVE"], Wave)
             p2vm = read_product(science_inputs["P2VM"], P2VM)
-            expected = reduce_file(
+            expected = reduce_science(
                 science_file,
                 read_product(dark_calib),
                 flat,

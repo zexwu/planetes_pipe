@@ -1,4 +1,4 @@
-# PLANETES science products and FITS interface (v0.7.0)
+# PLANETES science products and FITS interface (v0.8.0)
 
 ## Design
 
@@ -28,13 +28,13 @@ Official references:
 | `BadPixelMap` | `bad_pixel_flags` `(y,x)` | Bit flags: hot 1, dead 2, noisy 4 |
 | `Flat` | sparse `profile_x_pixels`/`profile_y_pixels`, `flat_map_adu`, `trace_y_pixels`; optional sigma/flux/setup | FLAT and extraction geometry |
 | `Wave` | `wavelength_map_m` `(output,x)`; optional fit residuals | WAVE solution |
-| `P2VM` | `p2vm` `(16,24,wavelength)` plus wavelength, output/baseline identity, transmission and fit diagnostics | P2VM response/inverse |
+| `P2VM` | `matrix` `(16,24,wavelength)` plus wavelength, output/baseline identity, transmission and fit diagnostics | P2VM response/inverse |
 | `P2VMRed` | per-frame `photometric_flux_adu`, complex `coherent_flux_adu`, `visibility_amplitude`, `flags`; optional GD and differential phase | Science intermediate, **not VIS** |
 | `WavelengthReference` | laboratory `wavelength_m`, origins | Static line list |
-| `CalibrationSpectra` | extracted calibration scans and explicit instrument identity | Internal P2VM fit input, not a file product |
+| `P2VMSpectra` | extracted calibration scans and explicit instrument identity | Internal P2VM fit input, not a file product |
 
 `P2VMRed.group_delay_m` and `.differential_phase_deg` are `None` in the
-fast live preview. Formal file reductions compute them; only complete
+fast live preview (`include_phase=False`). Formal file reductions compute them; only complete
 `P2VMRed` objects can be saved to FITS.
 
 `DarkInput = Dark | DarkImage` is a type alias for subtraction, **not** a
@@ -57,7 +57,11 @@ shutters; no additional temporary SOF tags are introduced.
 
 ## FITS products
 
-New reduced FITS files use `HIERARCH PLANETES FORMAT = 5`. The reader also
+Python field renames (`matrix`, `baseline_outputs`) do not change FITS extension
+or column names. `FrameReducer` contains calculation state only; GUI callers keep
+the selected calibration directory themselves.
+
+Reduced FITS files use `HIERARCH PLANETES FORMAT = 5`. The reader also
 accepts previous format-4 files, ignoring their old private SHA-256 field
 and provenance JSON entries. Full structured raw files remain **format 3**.
 
@@ -120,7 +124,7 @@ Repeated SOF counts are declared by the flat/P2VM recipes, not by the shared loa
 | Python keyword | Canonical CPL name | Default |
 | --- | --- | --- |
 | bad_pixel_threshold | planetes.calib.bad-dark-threshold | 5.0 |
-| profile_width | planetes.calib.profile-width | 10.0 pixel full aperture |
+| aperture_width_pixels | planetes.calib.profile-width | 10.0 pixel full aperture |
 | phase_correction | planetes.calib.phase-correction | true |
 | wavelength_min_m / max_m / channels | planetes.calib.wavelength-min-m / wavelength-max-m / wavelength-channels | 1.15e-6 / 1.30e-6 m / 151 |
 | gd_search_min_m / max_m (P2VM) | planetes.calib.gd-search-min-m / gd-search-max-m | -30e-6 / +30e-6 m |
@@ -137,3 +141,20 @@ are documented project roles where no strictly equivalent GRAVITY input exists.
 A phase DARK without reference fails; a disabled reference is excluded from DFS
 used inputs. Repeated FLAT_RAW/P2VM_RAW tags remain unchanged; duplicate physical
 shutter combinations or incomplete sets fail.
+
+## Step APIs
+
+Raw-file workflows are `make_dark_products`, `make_flat`, `make_wave`,
+`make_p2vm` and `reduce_science`. They return products and leave saving explicit.
+Array-level functions are `measure_dark`, `detect_bad_pixels`,
+`build_flat(flat_images, bad)`, `fit_wavelength_solution`, `fit_p2vm` and
+`reduce_spectra`. `flat_images` are already dark-subtracted; `build_flat` does
+not receive or subtract a DARK. `make_flat` carries the selected raw detector setup.
+
+`aperture_width_pixels` is the full extraction aperture (default 10 pixels),
+separate from Gaussian sigma. Its existing CPL name/alias remains
+`planetes.calib.profile-width` / `profile-width`. `trace_spectrum` always returns
+`(centers, position_errors, gaussian_sigma)`. `include_phase` controls GD and
+differential phase together: True for complete file reduction, False by default
+for FrameReducer preview. The deleted wavelength-grid helper is replaced by
+`np.linspace` at the call site; the fit retains its central-band sampling check.

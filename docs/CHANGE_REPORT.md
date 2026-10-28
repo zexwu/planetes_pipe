@@ -1,58 +1,80 @@
-# PLANETES 0.7.0：产品层与科学核心简化
+# PLANETES 0.8.0：明确的科学步骤与 Python API
 
-基于 `675d715`，移植用户提供的 v0.7.0 简化方案，同时保留当前 main 已验证的
-P2VM 物理拆分、台架 raw 支持和12项开发测试。
+基于 `ecce961`，统一当前 package 的函数、字段与参数名称，并清理与职责不符的
+依赖。原有科学公式、默认值、FITS format 5/4兼容性、raw format 3、SOF类别、
+五个PyCPL recipe名和现有CPL参数/CLI别名保持。
 
-## 修改
+## 文件入口与数组计算
 
-| 位置 | 当前职责与修改 |
+| Raw files → products | Arrays → scientific result |
 | --- | --- |
-| products.py | 401 → 119行；Dark / Flat / Wave / P2VM / P2VMRed 是普通数据类；DarkImage 独立 |
-| 科学步骤 | 删除通用校验调用、指纹、父关系和Provenance；P2VM已有物理helper保留，WAVE局部名称更明确 |
-| instrument.py / 数值入口 | 私有的固定物理映射检查；关键维度检查；伪逆前用NumPy数值秩拒绝缺少独立通道的V2PM |
-| io/raw.py | 移除公共raw validator；已知采集检查放入raw header组装/解析，保留ADU、cube选择、快门映射修复 |
-| io/fits.py | format 5写出、format 4兼容读取；保留units/checksum/身份/不覆盖写入；移除私有产品hash与来源图 |
-| recipes/ | 只选择输入、调用科学步骤、请求可选QC并登记/签名DFS；来源与参数由CPL记录 |
-| Qt6 acquisition | 本机scripts/utils.py及portable patch同步使用raw_header；更新manifest哈希 |
+| make_dark_products | measure_dark / detect_bad_pixels |
+| make_flat | build_flat |
+| make_wave | fit_wavelength_solution |
+| make_p2vm | fit_p2vm |
+| reduce_science | reduce_spectra |
 
-产品类没有旧名称别名。`P2VMRed`表示未平均的逐帧中间信号；实时预览的
-GD和差分相位为None，正式保存需要完整诊断。输出仍是仪器级ADU、可见度、
-GD与差分相位，未新增平均VIS/OIFITS阶段。
+入口仍在对应的dark.py、flat.py、wavelength.py、p2vm.py、reduction.py中。
+保存由调用者或recipe明确执行，没有新增Pipeline/Task对象、wrapper或兼容别名。
 
-QC保留当前发布默认True，可通过include_qc=False跳过；测量与FITS编码分开。
-启用时的QC定义和数值保持，缺失原因保存在FITS metadata中。
+## 实际简化
+
+- `build_flat(flat_images, bad)`只接收已减暗图像与BAD；不再接收未用于减暗的Dark。
+  文件入口make_flat负责选择并携带raw detector setup。
+- `trace_spectrum`固定返回centers、position errors和Gaussian sigma三个数组。
+- `aperture_width_pixels`明确表示提取孔径全宽，默认10 pixel；与Gaussian sigma分开。
+  对外CPL名称仍是planetes.calib.profile-width，CLI仍是--profile-width。
+- `include_phase`控制GD和差分相位；完整处理默认True，FrameReducer预览默认False。
+- `P2VM.matrix`替代同名数值字段；baseline_outputs统一表示24输出的基线映射；
+  P2VM拟合用的内部类改叫P2VMSpectra。FITS扩展和列名不变。
+- 删除wavelength_grid封装，直接构造np.linspace；保留拟合对中央波段采样的物理要求。
+- 删除FrameReducer.calibration_dir，目录由GUI持有。审阅中“目录未使用”的判断不准确：
+  当前GUI在初始化和切换时确实读取它，因此这两个调用点与main入口一起改动。
+
+## 其他名称
+
+P2VM内使用fit_abcd_ellipse、extract_p2vm_spectra、estimate_group_delay、
+_estimate_transmission、build_v2pm、_normalize_response_inplace和_apply_phase_reference。
+_invert_v2pm已准确描述逐波长伪逆，保留该名称。
+
+提取层使用extract_sparse_spectra、extract_spectra_from_file和_readonly_copy；
+波长匹配区分match_lines_ransac与match_peaks_grid。I/O和recipe helper也明确说明
+返回对象或操作：_detector_hdu、_detector_table、build_raw_header、_verify_checksums、
+load_recipe_inputs、populate_dfs_product。绘图入口为save_reduction_plots。
+
+发布context manager叫publish_outputs，继续逐文件无覆盖发布及失败回滚；
+不将它描述为多文件整体原子事务。QC名称、指标、数值和可选发布行为保持。
 
 ## 流程图
 
-![架构](architecture.png)
+![当前架构](architecture.png)
 
-![标定和科学数据流](dataflow.png)
+![标定与科学处理](dataflow.png)
 
-更紧凑的流程与迁移说明见[简化说明](SIMPLIFICATION.md)。
+可直接运行的调用顺序见[README](../README.md)和[examples/reduce.py](../examples/reduce.py)。
 
 ## 验证
 
 | 检查 | 结果 |
 | --- | --- |
-| 保留的开发测试 | 12项通过，包括FITS读写、物理映射/维度和真实PyEsoRex调用 |
-| 完整真实数据 | 15份既有标准化raw，新旧版本各跑冷/热两轮DARK/BAD→FLAT→WAVE→P2VM→science |
-| 科学数组 | 每轮37个，共74个dtype、shape和字节一致 |
-| 文件语义 | 20份产品的物理映射、detector setup、DFS参数、实际使用文件和QC值一致 |
-| 相位参照与预览 | 启用/禁用/缺失 × 15/17通道；含有/无诊断的P2VMRed，138个数组逐字节一致 |
-| 旧文件迁移 | 10份format-4产品读取并转存format 5，全部数组、几何和setup一致；不再写旧hash |
-| 物理边界 | 非ADU、多cube歧义、无DPR TYPE的FLAT映射、秩亏V2PM均按预期处理 |
-| Qt6消费者 | 实际GUI Python 3.12读取format 4并处理真实单帧；fake camera元数据及raw发布成功；portable patch与manifest一致，未连接硬件 |
+| 保留的开发测试 | 12项通过，没有新增测试模块或增加测试数量 |
+| 完整真实数据 | 15份既有raw，新旧各跑冷/热两轮全部五个recipe |
+| 科学数组 | 两轮共74个数组的dtype、shape、字节一致；比较时只统一matrix字段的名称 |
+| 产品语义 | 20份产品的物理映射、detector setup、DFS参数、实际输入和QC值一致 |
+| 相位参照与预览 | 六种情形共138个P2VM/P2VMRed数组逐字节一致 |
+| 孔径参数 | 非默认3.5 pixel全宽通过原--profile-width调用，新旧FLAT数组一致 |
+| GUI | Python 3.12真实Qt窗口初始化、显示路径、切换标定目录和真实单帧处理通过；可读format 4 |
+| 可迁移补丁 | 四份Qt6补丁均可应用到原始文件，结果与本机文件及manifest哈希一致 |
 
-对照使用同一数值环境和分别匹配的冷/热缓存。源码整理保持既有数值结果；
-实际台架测量准确度和最终ESO数据字典仍由后续实验/接口确认。
+这些是对命名与接口整理的数值对照；不改变原有科学方法或替代台架准确度实验。
 
-修改前源码、Qt6 helper备份与一次性脚本：
+修改前源码、GUI消费者备份及一次性对照脚本：
 
-`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261028_104015_minimal_products/`
+`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261028_110344_step_names/`
 
-日志、真实数据输出及比较结果：
+日志、数据输出、GUI快照及比较结果：
 
-`reduced/minimal_products/20261028_104015/`
+`reduced/step_names/20261028_110344/`
 
-[上一版接口整理与测试精简记录](https://github.com/zexwu/planetes_pipe/blob/675d7150bd9eb0f31861fedb2486bf8441eeda95/docs/CHANGE_REPORT.md)
-保留历史说明。
+[上一版产品简化记录](https://github.com/zexwu/planetes_pipe/blob/ecce9613842a20ad1bc6ca06a500c613f9375ec1/docs/CHANGE_REPORT.md)
+保留0.7的删除机制和文件兼容说明。

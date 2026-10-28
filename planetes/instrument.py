@@ -18,7 +18,8 @@ IMAG_SLICE = slice(REAL_SLICE.stop, N_DATA)
 
 
 def _check_baselines(
-    regions: dict[int, list[int]], telescopes: dict[int, tuple[int, int]]
+    baseline_outputs: dict[int, list[int]],
+    baseline_telescopes: dict[int, tuple[int, int]],
 ) -> None:
     """Require the six physical pairs and one ABCD assignment for every output."""
     expected = {
@@ -26,10 +27,10 @@ def _check_baselines(
         for i, pair in enumerate(BASELINES)
     }
     if (
-        telescopes != expected
-        or set(regions) != set(expected)
-        or any(len(outputs) != len(ABCD_ORDER) for outputs in regions.values())
-        or sorted(output for outputs in regions.values() for output in outputs)
+        baseline_telescopes != expected
+        or set(baseline_outputs) != set(expected)
+        or any(len(outputs) != len(ABCD_ORDER) for outputs in baseline_outputs.values())
+        or sorted(output for outputs in baseline_outputs.values() for output in outputs)
         != list(range(N_OUTPUTS))
     ):
         raise ValueError("Incompatible physical telescope/baseline output mapping")

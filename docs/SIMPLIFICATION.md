@@ -1,6 +1,7 @@
-# PLANETES 0.7.0：简单科学产品
+# PLANETES 0.8.0：简单科学产品与明确的步骤 API
 
-`products.py` 从401行缩减到119行，只保留数据类和字段说明。
+0.7已将`products.py`从401行缩减到119行；0.8保持这些普通数据类，
+统一步骤、字段和参数名称。
 每个物理步骤仍在自己的文件中定义输入、参数、计算与局部 helper。
 
 | 原名称 | 当前名称 | 内容 |
@@ -57,11 +58,30 @@ flowchart LR
 
 保留当前 main 的台架输入支持：Python 显式望远镜/基线映射、不完整 header，
 非 ADU 拒绝、多 cube 歧义拒绝或显式低层 hdu 选择。SOF 类别保持不变。
-Qt6 采集 helper 与 portable patch 已改用 `raw_header()`，不再导入旧校验函数。
+Qt6采集helper使用`build_raw_header()`。GUI自己持有目录路径，不再从
+FrameReducer读取目录；overlay使用`baseline_outputs`。portable patches同步更新。
 
 QC 仍由发布入口的 `include_qc` 选择，保留当前 Python/recipe 默认 True；
 传 False 可跳过测量和附加。encoder 只编码传入结果，产品数据类不管理 QC。
 启用 QC 时，不可用原因放在 FITS 的最小 metadata 中。
+
+## 两个可直接阅读的层次
+
+| Raw files → products | Arrays → scientific result |
+| --- | --- |
+| make_dark_products | measure_dark / detect_bad_pixels |
+| make_flat | build_flat |
+| make_wave | fit_wavelength_solution |
+| make_p2vm | fit_p2vm |
+| reduce_science | reduce_spectra |
+
+`P2VM.matrix`保存逆矩阵，`baseline_outputs`保存输出映射；
+内部光谱类叫`P2VMSpectra`。`aperture_width_pixels`表示提取全宽，
+`include_phase`控制GD/差分相位。`trace_spectrum`固定返回三个数组。
+
+删除`wavelength_grid`、`FrameReducer.calibration_dir`；`build_flat`直接接收
+已减暗图像与BAD，不再依赖Dark。`_invert_v2pm`名称已经准确，继续保留。
+发布函数叫`publish_outputs`，不把多文件发布描述成整体原子事务。
 
 ## 验证
 

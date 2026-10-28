@@ -9,7 +9,7 @@ from planetes.instrument import BASELINES, TELESCOPES, DetectorSetup
 from planetes.io.fits import write_product
 from planetes.io.raw import RawMetadata, write_raw
 from planetes.products import (
-    CalibrationSpectra,
+    P2VMSpectra,
     Dark,
     Flat,
     Wave,
@@ -143,4 +143,4 @@ def write_recipe_inputs(directory: Path):
 def calibration_spectra(n_wave=15):
     """Array-level spectra with explicit telescope and baseline mappings."""
     values = calibration_arrays(n_wave=n_wave)
-    return CalibrationSpectra(*values[:6])
+    return P2VMSpectra(*values[:6])

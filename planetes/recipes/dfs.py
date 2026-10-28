@@ -11,7 +11,7 @@ from planetes.io.fits import (
     read_product,
 )
 from planetes.io.keywords import CATEGORIES, PRO_CATEGORY
-from planetes.io.publication import destinations
+from planetes.io.publication import publish_outputs
 from planetes.qc import measure_quality
 from planetes.products import (
     P2VM,
@@ -35,7 +35,7 @@ def cpl_frame_type(cls):
     )
 
 
-def select_inputs(frameset, required, optional=None, *, multiple=None):
+def load_recipe_inputs(frameset, required, optional=None, *, multiple=None):
     """Load recipe-declared SOF roles; repeated roles return lists of paths."""
     optional = {} if optional is None else optional
     multiple = {} if multiple is None else multiple
@@ -79,7 +79,7 @@ def select_inputs(frameset, required, optional=None, *, multiple=None):
 def save_products(outputs, used, recipe, *, include_qc: bool = True):
     """Sign all outputs before publication; rollback only newly owned links on failure."""
     prepared = [(Path(output), product) for output, product in outputs]
-    with destinations([p for p, _ in prepared], verify=read_product) as temporary:
+    with publish_outputs([p for p, _ in prepared], verify=read_product) as temporary:
         products = ui.FrameSet()
         for (output, product), path in zip(prepared, temporary, strict=True):
             properties = core.PropertyList()
@@ -96,7 +96,7 @@ def save_products(outputs, used, recipe, *, include_qc: bool = True):
                 str(path),
             )
             quality = measure_quality(product) if include_qc else None
-            fill_dfs_product(path, product, quality=quality)
+            populate_dfs_product(path, product, quality=quality)
             products.append(
                 ui.Frame(
                     file=str(path),
@@ -126,7 +126,7 @@ def save_product(output, product, used, recipe, *, include_qc: bool = True):
     return save_products([(output, product)], used, recipe, include_qc=include_qc)
 
 
-def fill_dfs_product(path: Path, product, *, quality=None):
+def populate_dfs_product(path: Path, product, *, quality=None):
     """Fill only a freshly created DFS stub with the shared payload encoding."""
     with afits.open(path) as hdus:
         if (

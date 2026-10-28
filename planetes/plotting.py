@@ -11,7 +11,7 @@ from .instrument import BASELINES, N_BASELINES, N_TELESCOPES, TELESCOPES
 from .products import P2VMRed
 
 
-def genfig(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
+def _make_figure_grid(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
     """Create a labelled grid of diagnostic axes."""
     options = {"sharex": True, "sharey": True, **kwargs}
     fig, axes = plt.subplots(rows, columns, **options)
@@ -23,7 +23,7 @@ def genfig(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
     return fig, axes
 
 
-def plot_reduced(
+def save_reduction_plots(
     reduced: P2VMRed,
     output: Path,
     *,
@@ -53,7 +53,7 @@ def plot_reduced(
             plt.close(fig)
 
         def plot_flux() -> None:
-            fig, axes = genfig(
+            fig, axes = _make_figure_grid(
                 N_TELESCOPES // 2, 2, xlabel="#Frame", ylabel="Flux [adu]"
             )
             for telescope in range(N_TELESCOPES):
@@ -72,7 +72,7 @@ def plot_reduced(
             save(fig)
 
         def plot_coherent_flux() -> None:
-            fig, axes = genfig(
+            fig, axes = _make_figure_grid(
                 2,
                 N_BASELINES // 2,
                 xlabel="#Frame",
@@ -97,7 +97,7 @@ def plot_reduced(
             save(fig)
 
         def plot_visibility() -> None:
-            fig, axes = genfig(
+            fig, axes = _make_figure_grid(
                 2, N_BASELINES // 2, xlabel="Wavelength Index", ylabel="VISAMP"
             )
             plotted = np.ma.array(visibility_amplitude, mask=flags)
@@ -111,7 +111,7 @@ def plot_reduced(
             save(fig)
 
         def plot_phase() -> None:
-            fig, axes = genfig(
+            fig, axes = _make_figure_grid(
                 2,
                 N_BASELINES // 2,
                 xlabel="#Frame",
@@ -126,7 +126,7 @@ def plot_reduced(
             save(fig)
 
         def plot_group_delay() -> None:
-            fig, axes = genfig(
+            fig, axes = _make_figure_grid(
                 2,
                 N_BASELINES // 2,
                 xlabel="#Frame",
@@ -141,7 +141,7 @@ def plot_reduced(
 
         def plot_spectral_phase() -> None:
             for frame in frame_samples:
-                fig, axes = genfig(
+                fig, axes = _make_figure_grid(
                     2,
                     N_BASELINES // 2,
                     xlabel="Wavelength Index",
@@ -158,7 +158,7 @@ def plot_reduced(
 
         def plot_phase_vs_group_delay() -> None:
             for wavelength in wave_samples:
-                fig, axes = genfig(
+                fig, axes = _make_figure_grid(
                     2,
                     N_BASELINES // 2,
                     xlabel="Group Delay [m]",

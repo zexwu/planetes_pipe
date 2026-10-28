@@ -1,4 +1,4 @@
-# Scientific methods in PLANETES 0.7.0
+# Scientific methods in PLANETES 0.8.0
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
@@ -26,12 +26,12 @@ peaks, trace a Gaussian centroid column by column, then smooth with the retained
 median filter and cubic fit. Gaussian iteration counts and arithmetic are unchanged.
 
 Accept pixels under the original strict inequality
-`abs(y - trace_y) < profile_width / 2`, excluding the explicitly selected BAD map. Sparse X/Y arrays
+`abs(y - trace_y) < aperture_width_pixels / 2`, excluding the explicitly selected BAD map. Sparse X/Y arrays
 retain the original accumulation order. Paired (-1,-1) entries represent invalid
 pixels and padding when different outputs have different sample counts. The
 flat product contains response, geometry and retained Gaussian fit sigmas;
 DARK statistics and BAD flags are separate products. Fit sigmas are descriptive
-QC; the extraction aperture remains profile_width.
+QC; the extraction aperture remains aperture_width_pixels.
 
 ## Wavelength solution (`wavelength.py`)
 
@@ -61,18 +61,18 @@ are checked before extraction. Calibration files are selected explicitly by the 
 
 Photometric telescope flats identify illuminated outputs; modulation in baseline
 cubes identifies four outputs per baseline. Their intersections must agree.
-The resulting CalibrationSpectra stays in memory, without a preprocessing file.
+The resulting P2VMSpectra stays in memory, without a preprocessing file.
 The main dark applies to telescope and baseline cubes. A phase reference has
 its independently selected dark, or uses the main dark when none is supplied.
 
 ## P2VM (`p2vm.py`)
 
-`compute_p2vm` follows baseline ellipse/OPD/response fitting, telescope transmission,
+`fit_p2vm` follows baseline ellipse/OPD/response fitting, telescope transmission,
 response normalization, V2PM inversion, and optional phase-reference correction.
 The calculation blocks are named helpers in the same file. The normalization and
 per-wavelength inversion order are retained.
 
-`fit_ellipse_linear` returns normalized ellipse radius. Its persisted diagnostic
+`fit_abcd_ellipse` returns normalized ellipse radius. Its persisted diagnostic
 field remains `ellipse_amplitude` for compatibility. In the phase-reference helper,
 `telescope_phase_rad` expresses the original reference-channel phase in radians;
 it is not a separately measured path length.
@@ -122,7 +122,7 @@ cards are converted only when writing the header.
 
 The 0.5.0 migration to metre arithmetic introduced floating-point rounding
 differences documented in the historical report linked from
-[CHANGE_REPORT](CHANGE_REPORT.md). Version 0.7.0 retains the numerical definitions
+[CHANGE_REPORT](CHANGE_REPORT.md). Version 0.8.0 retains the numerical definitions
 and per-wavelength pseudoinverse. Physically invalid mappings and rank-deficient
 V2PM matrices fail locally; rank uses NumPy's default numerical criterion.
 

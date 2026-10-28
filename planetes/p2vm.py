@@ -7,7 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from . import log
-from .extraction import extract_file, prepare_extraction
+from .extraction import extract_spectra_from_file, prepare_extraction
 from .instrument import (
     BASELINES,
     IMAG_SLICE,
@@ -19,18 +19,18 @@ from .instrument import (
     TELESCOPES,
     _check_baselines,
 )
-from .io.raw import check_raw_calibrations, identify_raw
+from .io.raw import check_raw_calibrations, identify_raw_exposures
 from .products import (
-    CalibrationSpectra,
+    P2VMSpectra,
     Dark,
     Flat,
     P2VM,
     Wave,
 )
-from .reduction import compute_gdelay
+from .reduction import estimate_group_delay
 
 
-def calibrate_p2vm_file(
+def make_p2vm(
     flat: Flat,
     wave: Wave,
     main_dark: Dark,
@@ -54,8 +54,8 @@ def calibrate_p2vm_file(
 
     if phase_dark is not None and phase_reference is None:
         raise ValueError("phase_dark requires phase_reference")
-    grid = wavelength_grid(wavelength_min_m, wavelength_max_m, wavelength_channels)
-    spectra = extract_calibration_files(
+    grid = np.linspace(wavelength_min_m, wavelength_max_m, wavelength_channels)
+    spectra = extract_p2vm_spectra(
         flat,
         wave,
         main_dark,
@@ -65,7 +65,7 @@ def calibrate_p2vm_file(
         phase_reference=phase_reference if phase_correction else None,
         phase_dark=phase_dark if phase_correction else None,
     )
-    return compute_p2vm(
+    return fit_p2vm(
         spectra,
         phase_correction=phase_correction,
         gd_search_min_m=gd_search_min_m,
@@ -73,8 +73,8 @@ def calibrate_p2vm_file(
     )
 
 
-def compute_p2vm(
-    spectra: CalibrationSpectra,
+def fit_p2vm(
+    spectra: P2VMSpectra,
     *,
     phase_correction: bool = True,
     gd_search_min_m: float = -30e-6,
@@ -85,7 +85,7 @@ def compute_p2vm(
 
     search_range = (gd_search_min_m, gd_search_max_m)
     wavelength_m = spectra.wavelength_m
-    _check_baselines(spectra.baseline_regions, spectra.baseline_telescopes)
+    _check_baselines(spectra.baseline_outputs, spectra.baseline_telescopes)
     if (
         wavelength_m.ndim != 1
         or spectra.telescope_spectra.ndim != 4
@@ -117,11 +117,11 @@ def compute_p2vm(
     for baseline in range(N_BASELINES):
         log.info(f"Processing baseline {baseline + 1}/{N_BASELINES}...")
         baseline_spectra = spectra.baseline_spectra[baseline]
-        outputs = spectra.baseline_regions[baseline]
+        outputs = spectra.baseline_outputs[baseline]
         # Keep explicit envelope weights for the planned weighted ellipse fit.
         envelope_weights = np.ones((n_frames, n_wavelengths), dtype=float)
         log.debug("    Fitting ellipses for phase extraction...")
-        ellipse_phase_rad, ellipse_radius = fit_ellipse_linear(
+        ellipse_phase_rad, ellipse_radius = fit_abcd_ellipse(
             baseline_spectra[outputs], envelope_weights
         )
         ellipse_phases.append(ellipse_phase_rad)
@@ -138,18 +138,16 @@ def compute_p2vm(
             baseline_spectra, opd_m[baseline], wavelength_m
         )
 
-    transmission = _fit_photometric_transmission(spectra.telescope_spectra)
-    _normalize_response(
+    transmission = _estimate_transmission(spectra.telescope_spectra)
+    _normalize_response_inplace(
         transmission,
         coherence_amplitude,
         coherence_phase_rad,
         dc_term_adu,
-        spectra.baseline_regions,
+        spectra.baseline_outputs,
         spectra.baseline_telescopes,
     )
-    v2pm_matrix = build_v2pm_matrix(
-        transmission, coherence_amplitude, coherence_phase_rad
-    )
+    v2pm_matrix = build_v2pm(transmission, coherence_amplitude, coherence_phase_rad)
     p2vm = _invert_v2pm(v2pm_matrix)
 
     has_phase_reference = spectra.phase_reference.shape[1] > 0
@@ -162,10 +160,10 @@ def compute_p2vm(
         )
         baseline_by_output = {
             output: baseline
-            for baseline, outputs in spectra.baseline_regions.items()
+            for baseline, outputs in spectra.baseline_outputs.items()
             for output in outputs
         }
-        coherence_phase_rad = _correct_phase_reference(
+        coherence_phase_rad = _apply_phase_reference(
             coherence_phase_rad,
             reference_coherent_flux_adu,
             wavelength_m,
@@ -173,17 +171,15 @@ def compute_p2vm(
             baseline_by_output,
             search_range=search_range,
         )
-        v2pm_matrix = build_v2pm_matrix(
-            transmission, coherence_amplitude, coherence_phase_rad
-        )
+        v2pm_matrix = build_v2pm(transmission, coherence_amplitude, coherence_phase_rad)
         p2vm = _invert_v2pm(v2pm_matrix)
     elif phase_correction:
         log.info("Skipping phase correction: no phase-reference cube was provided.")
 
     product = P2VM(
-        p2vm=p2vm,
+        matrix=p2vm,
         wavelength_m=wavelength_m,
-        baseline_regions=spectra.baseline_regions,
+        baseline_outputs=spectra.baseline_outputs,
         baseline_telescopes=spectra.baseline_telescopes,
         transmission=transmission,
         coherence_amplitude=coherence_amplitude,
@@ -212,7 +208,7 @@ def _estimate_scan_opd(
     opd_m = np.mean(
         (ellipse_phase_rad * wavelength_m)[:, start:end] / 2 / np.pi, axis=1
     )
-    group_delay_m = compute_gdelay(
+    group_delay_m = estimate_group_delay(
         ellipse_phasor[:, start:end], wavelength_m[start:end], search_range=search_range
     )
     _, opd_zero_m = np.polyfit(group_delay_m, opd_m, 1)
@@ -255,7 +251,7 @@ def _fit_interferometric_response(
     return coherence_amplitude, coherence_phase_rad, dc_term_adu, fit_rms_adu
 
 
-def _fit_photometric_transmission(telescope_spectra: NDArray) -> NDArray:
+def _estimate_transmission(telescope_spectra: NDArray) -> NDArray:
     """Normalize each telescope's median spectrum by its total over outputs/wavelengths."""
     transmission = np.zeros((N_OUTPUTS, N_TELESCOPES, telescope_spectra.shape[-1]))
     for telescope in range(N_TELESCOPES):
@@ -265,19 +261,19 @@ def _fit_photometric_transmission(telescope_spectra: NDArray) -> NDArray:
     return transmission
 
 
-def _normalize_response(
+def _normalize_response_inplace(
     transmission: NDArray,
     coherence_amplitude: NDArray,
     coherence_phase_rad: NDArray,
     dc_term_adu: NDArray,
-    baseline_regions: Mapping[int, list[int]],
+    baseline_outputs: Mapping[int, list[int]],
     baseline_telescopes: Mapping[int, tuple[int, int]],
 ) -> None:
     """Normalize phase, transmission and ADU coherence to dimensionless response in-place."""
     log.info("P2VM Normalization...")
     log.info("    Phase normalization (A=0)...")
     for baseline in range(N_BASELINES):
-        outputs = baseline_regions[baseline]
+        outputs = baseline_outputs[baseline]
         reference_phase_rad = coherence_phase_rad[outputs[0]]
         coherence_phase_rad[outputs] -= reference_phase_rad[None, :, :]
 
@@ -318,7 +314,7 @@ def _invert_v2pm(v2pm_matrix: NDArray) -> NDArray:
     return p2vm
 
 
-def build_v2pm_matrix(
+def build_v2pm(
     transmission: NDArray,
     coherence_amplitude: NDArray,
     coherence_phase_rad: NDArray,
@@ -332,7 +328,7 @@ def build_v2pm_matrix(
     return matrix
 
 
-def _correct_phase_reference(
+def _apply_phase_reference(
     phase: NDArray,
     visdata: NDArray,
     wavelength: NDArray,
@@ -347,7 +343,7 @@ def _correct_phase_reference(
     reference_channel = len(wavelength) // 2
 
     for telescope in range(1, N_TELESCOPES):
-        group_delay = compute_gdelay(
+        group_delay = estimate_group_delay(
             visdata[:, telescope - 1, :], wavelength, search_range=search_range
         )
         phasor = np.exp(-1j * 2 * np.pi * group_delay[:, None] / wavelength)
@@ -377,7 +373,7 @@ def _correct_phase_reference(
         ).sum(axis=0)
 
     telescope_phasor = np.ones((N_TELESCOPES, len(wavelength)), dtype=complex)
-    group_delay = compute_gdelay(
+    group_delay = estimate_group_delay(
         integrated_coherent_flux, wavelength, search_range=search_range
     )
     for telescope in range(N_TELESCOPES - 1):
@@ -401,7 +397,7 @@ def _correct_phase_reference(
     return phase
 
 
-def fit_ellipse_linear(spec: NDArray, envs: NDArray) -> tuple[NDArray, NDArray]:
+def fit_abcd_ellipse(spec: NDArray, envs: NDArray) -> tuple[NDArray, NDArray]:
     """
     Estimate unwrapped phase and normalized ellipse radius from A,C,B,D outputs.
 
@@ -469,7 +465,7 @@ def fit_ellipse_linear(spec: NDArray, envs: NDArray) -> tuple[NDArray, NDArray]:
     return ellipse_phase_rad, ellipse_radius
 
 
-def extract_calibration_files(
+def extract_p2vm_spectra(
     flat: Flat,
     wave: Wave,
     main_dark: Dark,
@@ -479,15 +475,15 @@ def extract_calibration_files(
     wavelength_m: NDArray,
     phase_reference: Path | None = None,
     phase_dark: Dark | None = None,
-) -> CalibrationSpectra:
+) -> P2VMSpectra:
     """Extract calibration files and infer the retained physical output mapping."""
 
     if not isinstance(main_dark, Dark) or (
         phase_dark is not None and not isinstance(phase_dark, Dark)
     ):
         raise ValueError("Formal file tasks require complete DARK calibrations")
-    telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
-    baseline_cubes = identify_raw(baseline_cubes, "P2VM_RAW")
+    telescope_flats = identify_raw_exposures(telescope_flats, "FLAT_RAW")
+    baseline_cubes = identify_raw_exposures(baseline_cubes, "P2VM_RAW")
     if phase_dark is not None and phase_reference is None:
         raise ValueError("phase_dark requires phase_reference")
     extractor = prepare_extraction(flat, wave, wavelength_m)
@@ -498,11 +494,14 @@ def extract_calibration_files(
         for path in paths.values():
             check_raw_calibrations(path, main_dark, flat, category=category)
     baseline_spectra = np.asarray(
-        [extract_file(baseline_cubes[name], extractor, main_dark) for name in BASELINES]
+        [
+            extract_spectra_from_file(baseline_cubes[name], extractor, main_dark)
+            for name in BASELINES
+        ]
     )
     telescope_spectra = np.asarray(
         [
-            extract_file(telescope_flats[name], extractor, main_dark)
+            extract_spectra_from_file(telescope_flats[name], extractor, main_dark)
             for name in TELESCOPES
         ]
     )
@@ -514,7 +513,7 @@ def extract_calibration_files(
         check_raw_calibrations(
             phase_reference, selected_dark, flat, category="SINGLE_SCI_RAW"
         )
-        phase_reference_spectra = extract_file(
+        phase_reference_spectra = extract_spectra_from_file(
             phase_reference, extractor, selected_dark
         )
     outputs_by_telescope = {}
@@ -529,7 +528,7 @@ def extract_calibration_files(
         active = np.argsort(std_flux)[-4:]
         outputs_by_modulation[baseline] = np.sort(active).tolist()
 
-    baseline_regions = {}
+    baseline_outputs = {}
     baseline_telescopes = {}
     for telescope_1 in range(N_TELESCOPES):
         for telescope_2 in range(N_TELESCOPES):
@@ -543,29 +542,18 @@ def extract_calibration_files(
             from_modulation = set(outputs_by_modulation[baseline])
             if from_telescopes != from_modulation:
                 raise ValueError(
-                    f"Region mapping mismatch for baseline {baseline_name}: "
+                    f"Output mapping mismatch for baseline {baseline_name}: "
                     f"{sorted(from_telescopes)} from flats, "
                     f"{sorted(from_modulation)} from modulation"
                 )
-            baseline_regions[baseline] = sorted(outputs_by_modulation[baseline])
+            baseline_outputs[baseline] = sorted(outputs_by_modulation[baseline])
             baseline_telescopes[baseline] = (telescope_1, telescope_2)
 
-    return CalibrationSpectra(
+    return P2VMSpectra(
         telescope_spectra,
         baseline_spectra,
         phase_reference_spectra,
-        baseline_regions,
+        baseline_outputs,
         baseline_telescopes,
         extractor.wavelength_m,
     )
-
-
-def wavelength_grid(
-    low: float = 1.15e-6, high: float = 1.30e-6, channels: int = 151
-) -> NDArray:
-    """Construct the explicit P2VM grid, with enough central-band GD samples."""
-    if low >= high:
-        raise ValueError("Wavelength grid: minimum must be below maximum")
-    if (3 * channels) // 4 - channels // 4 < 2:
-        raise ValueError("P2VM requires at least two central-band wavelength samples")
-    return np.linspace(low, high, channels)

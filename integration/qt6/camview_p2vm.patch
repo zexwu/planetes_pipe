@@ -20,7 +20,33 @@
  from planetes.instrument import BASELINES, ABCD_ORDER
 
 
-@@ -282,6 +284,7 @@
+@@ -202,6 +204,8 @@
+     reducer
+         Loaded ``FrameReducer`` containing flat, wave, and P2VM calibration
+         products.  It is called once per displayed frame when P2VM is enabled.
++    reducer_dir
++        Calibration directory owned by the viewer for selection and display.
+     source_label
+         Short string displayed in the P2VM status label to remind the operator
+         whether the viewer is using fake playback or the real bench.
+@@ -240,6 +244,7 @@
+         reducer: FrameReducer,
+         *,
+         source_label: str,
++        reducer_dir: Path,
+         reducer_dark_path: Path | None = None,
+         history_length: int = 500,
+         parent=None,
+@@ -262,7 +267,7 @@
+         self.latest_mean_vis = None
+         self.visibility_dirty = False
+         self.p2vm_overlay_items = []
+-        self.reducer_dir = reducer.calibration_dir
++        self.reducer_dir = Path(reducer_dir).expanduser().resolve()
+         self.reducer_dark_path = reducer_dark_path
+         self.reducer_dark_follows_capture = reducer_dark_path is None
+         self.reducer_dark_data = None
+@@ -282,6 +287,7 @@
 
          camera_widget = self.takeCentralWidget()
          self._add_p2vm_camera_controls(camera_widget)
@@ -28,7 +54,7 @@
          self.tabs = QtWidgets.QTabWidget()
          self.camera_tab_index = self.tabs.addTab(camera_widget, "Camera")
          self.visibility_tab_index = self.tabs.addTab(
-@@ -295,6 +298,94 @@
+@@ -295,6 +301,94 @@
 
          self._add_calibration_overlays()
          self.p2vm_ready = True
@@ -123,7 +149,7 @@
 
      def _add_p2vm_camera_controls(self, camera_widget: QtWidgets.QWidget) -> None:
          """Add unified dark-source and overlay controls below the Camera tab.
-@@ -403,14 +494,14 @@
+@@ -403,14 +497,14 @@
          self.visibility_curves = []
          self.visibility_value_labels = []
          colors = _plot_colors(self.reducer.n_baselines)
@@ -141,7 +167,7 @@
              plot.setLabel("left", "VISAMP")
              plot.setTitle(f"Baseline {BASELINE_NAMES[bsl]}")
              plot.showGrid(x=True, y=True, alpha=0.25)
-@@ -600,7 +691,7 @@
+@@ -600,7 +694,7 @@
      def _load_reducer_dir(self, path: Path) -> None:
          """Load a new reducer and refresh all calibration-dependent UI state."""
          try:
@@ -150,7 +176,16 @@
          except Exception as exc:
              self.p2vm_ready = False
              self._clear_current_visibility()
-@@ -643,8 +734,8 @@
+@@ -616,7 +710,7 @@
+
+         self.p2vm_ready = True
+         self.reducer = reducer
+-        self.reducer_dir = reducer.calibration_dir
++        self.reducer_dir = Path(path).expanduser().resolve()
+         self.reducer_dir_edit.setText(str(self.reducer_dir))
+         self.reducer_dir_status.setText(f"loaded: {self.reducer_dir.name}")
+         self._reset_visibility_axes()
+@@ -643,8 +737,8 @@
 
      def _reset_visibility_axes(self) -> None:
          """Update wavelength-axis limits after loading a new P2VM directory."""
@@ -161,7 +196,7 @@
          wl_span = wl_max - wl_min
          for plot in self.visibility_plots:
              plot.getViewBox().setRange(
-@@ -814,7 +905,7 @@
+@@ -814,7 +908,7 @@
              return
 
          for bsl, curve in enumerate(self.visibility_curves):
@@ -170,7 +205,26 @@
 
          for bsl, value_label in enumerate(self.visibility_value_labels):
              plot = self.visibility_plots[bsl]
-@@ -992,9 +1083,9 @@
+@@ -949,14 +1043,14 @@
+         """Draw calibration overlays on the inherited Camera tab.
+
+         ABCD extraction regions are drawn as border-only detector-coordinate
+-        rectangles using ``profile_xs`` and ``profile_ys`` from ``planetes_flat.fits``.
++        rectangles using ``profile_x_pixels`` and ``profile_y_pixels`` from ``planetes_flat.fits``.
+         Labels identify each region as ``B<baseline> <A/B/C/D>`` according to
+-        ``bsl_to_reg`` from ``planetes_p2vm.fits``.  Finite dashed vertical wavelength
+-        markers are derived from the mean detector ``wave_map`` in ``planetes_wave.fits``.
++        ``baseline_outputs`` from ``planetes_p2vm.fits``.  Finite dashed vertical wavelength
++        markers are derived from the mean detector ``wavelength_map_m`` in ``planetes_wave.fits``.
+         """
+         colors = _plot_colors(self.reducer.n_baselines)
+         reg_labels = {}
+-        for bsl, regs in self.reducer.p2vm.baseline_regions.items():
++        for bsl, regs in self.reducer.p2vm.baseline_outputs.items():
+             for idx, reg in enumerate(regs):
+                 reg_labels[int(reg)] = (bsl, ABCD_NAMES[idx])
+
+@@ -992,9 +1086,9 @@
              self.p2vm_overlay_items.append(text)
 
          height = float(self.reducer.extractor.detector_shape[0])
@@ -182,7 +236,7 @@
          ):
              x = int(np.nanargmin(np.abs(mean_wave - wave)))
              pen = pg.mkPen(
-@@ -1005,7 +1096,7 @@
+@@ -1005,7 +1099,7 @@
              self.p2vm_overlay_items.append(line)
 
              text = pg.TextItem(
@@ -191,7 +245,7 @@
                  color=(230, 230, 230),
                  anchor=(0.5, 0),
              )
-@@ -1129,7 +1220,7 @@
+@@ -1129,7 +1223,7 @@
      app = QtWidgets.QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
      _set_dark_palette(app)
 
@@ -200,3 +254,11 @@
      cam, source_label = _make_camera(config)
 
      if config.source == "bench":
+@@ -1140,6 +1234,7 @@
+         cam,
+         reducer,
+         source_label=source_label,
++        reducer_dir=config.reduced_dir,
+         reducer_dark_path=reducer_dark_path,
+     )
+     refresh_ms = (
