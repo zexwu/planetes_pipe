@@ -4,10 +4,7 @@ from cpl import ui
 
 from planetes import __version__
 from planetes.dark import make_dark_products
-from planetes.recipes.dfs import (
-    save_products,
-    load_recipe_inputs,
-)
+from planetes.recipes.dfs import save_products, load_recipe_inputs
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
@@ -22,13 +19,18 @@ PARAMETERS = {
 class PlanetesDark(ui.PyRecipe):
     """Execute the same dark function available to Python callers."""
 
-    _name = "planetes_dark"
-    _version = __version__
-    _author = "PLANETES contributors"
-    _email = ""
+    # fmt: off
+    _name      = "planetes_dark"
+    _version   = __version__
+    _author    = "PLANETES contributors"
+    _email     = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "Measure detector dark statistics and bad pixels"
-    _description = "Measure the temporal mean and RMS of a DARK_RAW stack and return DARK and BAD products."
+    _synopsis  = "Measure detector dark statistics and bad pixels"
+    # fmt: on
+    _description = (
+        "Measure the temporal mean and RMS of a DARK_RAW stack and return DARK "
+        "and BAD products."
+    )
 
     def __init__(self):
         super().__init__()

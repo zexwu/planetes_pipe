@@ -71,3 +71,36 @@ channels，共906次拟合：`std_x/std_y <= 1e-9`均为0次，两个非正二�
 
 [0.10.0精度修改报告](https://github.com/zexwu/planetes_pipe/blob/08904a20ce7a3d4942b4af8c418765172aeff14e/docs/CHANGE_REPORT.md)
 保留计算精度、标定存盘量化和最终写出舍入的原始证据，不与本轮重构混淆。
+
+## 补充：统一代码风格与局部命名
+
+基于 `f30e9c0` 通读整个 package，将风格约定写入
+[CODE_STYLE.md](CODE_STYLE.md)，并在 `pyproject.toml` 固定 Ruff：4空格、88列、
+双引号；短调用按行宽自动收紧。常量、FITS field/extension/unit 表和各recipe
+元信息按组对齐，声明表局部保留`fmt: off/on`。
+
+科学计算与plotting使用同一组局部名字，例如：
+
+| 原局部名 | 当前局部名 |
+| --- | --- |
+| `coherence_amplitude` | `amplitude` |
+| `photometric_flux_adu` | `flux_adu` |
+| `coherent_flux_adu` | `coherent_adu` |
+| `visibility_amplitude` | `visamp` |
+| `group_delay_m` | `gd_m` |
+| `line_wavelength_samples_m` | `line_wave_m` |
+| `surface_coefficients` | `coeffs` |
+
+产品字段与公开参数保持原名，入口和返回处明确局部变量对应哪个字段。
+距离与角度仍带单位后缀。复数相位信号叫`phasor`，取角度后才叫`phase_deg`。
+
+验证：32个Python模块仅有明确的作用域内名称替换及排版变化，运算语法结构、
+公开接口、字段和常量值保持；项目依赖不变。现有12项测试通过，没有增加测试。
+再次运行15份raw的完整recipe链与六种P2VM内存配置：31个产品数组、63个存盘前
+对照数组均逐字节一致，QC、物理映射、setup、参数与实际输入一致。
+
+本轮完整源码备份及一次性对照脚本：
+
+`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261028_173801_code_style/`
+
+独立结果和对照：`reduced/code_style/20261028_173801/`。

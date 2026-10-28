@@ -10,10 +10,7 @@ from p2vm_fixture import write_recipe_inputs
 
 from planetes.extraction import prepare_extraction
 from planetes.io.fits import read_product
-from planetes.p2vm import (
-    make_p2vm,
-    extract_p2vm_spectra,
-)
+from planetes.p2vm import make_p2vm, extract_p2vm_spectra
 from planetes.products import Dark
 
 
@@ -66,10 +63,7 @@ class CalibrationTests(unittest.TestCase):
             with fits.open(reference, mode="update") as hdus:
                 hdus[1].data += 7
                 hdus[1].add_checksum()
-            flat, wave = (
-                read_product(inputs["FLAT"]),
-                read_product(inputs["WAVE"]),
-            )
+            flat, wave = (read_product(inputs["FLAT"]), read_product(inputs["WAVE"]))
             main = read_product(inputs["DARK"])
             phase = Dark(
                 np.full(main.mean_adu.shape, 7, dtype=np.float32), setup=main.setup

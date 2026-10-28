@@ -10,11 +10,7 @@ from numpy.typing import NDArray
 from .instrument import DetectorSetup
 from .io.raw import iter_raw_cube
 from .io.hdu import STORAGE_RTOL
-from .products import (
-    Dark,
-    Flat,
-    Wave,
-)
+from .products import Dark, Flat, Wave
 
 
 @njit(parallel=True, fastmath=True, cache=True)
@@ -111,9 +107,7 @@ class SpectralExtractor:
             cube - dark.mean_adu, self.profile_y_pixels, self.profile_x_pixels
         )
         aligned = resample_spectra(
-            spec / self.detector_flat_spectra,
-            self.wavelength_map_m,
-            self.wavelength_m,
+            spec / self.detector_flat_spectra, self.wavelength_map_m, self.wavelength_m
         )
         aligned *= self.resampled_flat_spectra
         return aligned
@@ -154,19 +148,22 @@ def prepare_extraction(
         _readonly_copy(flat.profile_x_pixels),
         _readonly_copy(flat.profile_y_pixels),
     )
-    wave_map, grid = _readonly_copy(wave.wavelength_map_m), _readonly_copy(wavelength_m)
-    spec_flat_detector = extract_sparse_spectra(flat.flat_map_adu[None, :, :], ys, xs)
-    spec_flat_detector = np.clip(spec_flat_detector, a_min=1e-8, a_max=None)
-    spec_flat = 1 / resample_spectra(1 / spec_flat_detector, wave_map, grid)
+    wave_map_m, grid_m = (
+        _readonly_copy(wave.wavelength_map_m),
+        _readonly_copy(wavelength_m),
+    )
+    detector_flat = extract_sparse_spectra(flat.flat_map_adu[None, :, :], ys, xs)
+    detector_flat = np.clip(detector_flat, a_min=1e-8, a_max=None)
+    grid_flat = 1 / resample_spectra(1 / detector_flat, wave_map_m, grid_m)
     return SpectralExtractor(
         xs,
         ys,
         flat.flat_map_adu.shape,
         flat.setup,
-        wave_map,
-        grid,
-        _readonly_copy(spec_flat_detector),
-        _readonly_copy(spec_flat),
+        wave_map_m,
+        grid_m,
+        _readonly_copy(detector_flat),
+        _readonly_copy(grid_flat),
     )
 
 

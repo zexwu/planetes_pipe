@@ -4,15 +4,8 @@ from cpl import ui
 
 from planetes import __version__
 from planetes.p2vm import make_p2vm
-from planetes.products import (
-    Dark,
-    Flat,
-    Wave,
-)
-from planetes.recipes.dfs import (
-    save_product,
-    load_recipe_inputs,
-)
+from planetes.products import Dark, Flat, Wave
+from planetes.recipes.dfs import save_product, load_recipe_inputs
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
@@ -57,13 +50,19 @@ PARAMETERS = {
 class PlanetesP2VM(ui.PyRecipe):
     """Execute the same p2vm function available to Python callers."""
 
-    _name = "planetes_p2vm"
-    _version = __version__
-    _author = "PLANETES contributors"
-    _email = ""
+    # fmt: off
+    _name      = "planetes_p2vm"
+    _version   = __version__
+    _author    = "PLANETES contributors"
+    _email     = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "Calibrate the instrumental pixel-to-visibility response"
-    _description = "Use telescope and baseline sequences with explicit calibrations to fit the full 24-output response and inverse. An optional instrumental phase reference has its own selected DARK."
+    _synopsis  = "Calibrate the instrumental pixel-to-visibility response"
+    # fmt: on
+    _description = (
+        "Use telescope and baseline sequences with explicit calibrations to fit "
+        "the full 24-output response and inverse. An optional instrumental phase "
+        "reference has its own selected DARK."
+    )
 
     def __init__(self):
         super().__init__()

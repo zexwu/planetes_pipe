@@ -12,10 +12,7 @@ from p2vm_fixture import calibration_arrays, calibration_spectra
 from planetes.dark import detect_bad_pixels, load_dark, measure_dark
 from planetes.io.fits import read_product, write_product
 from planetes.io.raw import iter_raw_cube as iter_cube
-from planetes.io.raw import (
-    read_raw_header,
-    read_raw_metadata,
-)
+from planetes.io.raw import read_raw_header, read_raw_metadata
 from planetes.p2vm import fit_p2vm
 from planetes.products import P2VMRed
 from planetes.qc import measure_quality

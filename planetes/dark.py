@@ -12,10 +12,7 @@ from .io import keywords as kw
 from .io.fits import read_product
 from .io.hdu import as_compute_array
 from .io.raw import iter_raw_cube, read_raw_metadata
-from .products import (
-    Bad,
-    Dark,
-)
+from .products import Bad, Dark
 
 BAD_PIXEL_THRESHOLD = 5.0
 

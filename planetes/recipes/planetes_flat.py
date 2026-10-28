@@ -5,10 +5,7 @@ from cpl import ui
 from planetes import __version__
 from planetes.flat import make_flat
 from planetes.products import Bad, Dark
-from planetes.recipes.dfs import (
-    save_product,
-    load_recipe_inputs,
-)
+from planetes.recipes.dfs import save_product, load_recipe_inputs
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
@@ -23,13 +20,18 @@ PARAMETERS = {
 class PlanetesFlat(ui.PyRecipe):
     """Execute the same flat function available to Python callers."""
 
-    _name = "planetes_flat"
-    _version = __version__
-    _author = "PLANETES contributors"
-    _email = ""
+    # fmt: off
+    _name      = "planetes_flat"
+    _version   = __version__
+    _author    = "PLANETES contributors"
+    _email     = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "Calibrate spectral traces and extraction geometry"
-    _description = "Use four FLAT_RAW shutter configurations with DARK and BAD to measure response and extraction geometry."
+    _synopsis  = "Calibrate spectral traces and extraction geometry"
+    # fmt: on
+    _description = (
+        "Use four FLAT_RAW shutter configurations with DARK and BAD to measure "
+        "response and extraction geometry."
+    )
 
     def __init__(self):
         super().__init__()

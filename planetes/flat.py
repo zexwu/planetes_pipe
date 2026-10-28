@@ -12,16 +12,8 @@ from scipy.signal import find_peaks, medfilt
 from . import log
 from .dark import frame_mean
 from .instrument import N_OUTPUTS, TELESCOPES, check_setup
-from .io.raw import (
-    check_raw_calibrations,
-    identify_raw_exposures,
-    iter_raw_cube,
-)
-from .products import (
-    Bad,
-    Dark,
-    Flat,
-)
+from .io.raw import check_raw_calibrations, identify_raw_exposures, iter_raw_cube
+from .products import Bad, Dark, Flat
 
 APERTURE_WIDTH_PIXELS = 10.0
 
@@ -46,12 +38,7 @@ def make_flat(
         path, raw = telescope_flats[name]
         check_raw_calibrations(raw, dark)
 
-        check_setup(
-            raw.setup,
-            setup,
-            exposure=False,
-            role="flat sequence",
-        )
+        check_setup(raw.setup, setup, exposure=False, role="flat sequence")
         maps.append(frame_mean(iter_raw_cube(path)) - dark.mean_adu)
     result = build_flat(maps, bad, aperture_width_pixels=aperture_width_pixels)
     return replace(result, setup=setup)
@@ -73,9 +60,9 @@ def build_flat(
     h, w = flat_map.shape
     h_half = h // n_outputs // 2
 
-    spatial_profile = flat_map.sum(axis=1)
-    thresh = np.percentile(spatial_profile, 75)
-    ref_ys, props = find_peaks(spatial_profile, distance=h_half, height=thresh)
+    profile = flat_map.sum(axis=1)
+    thresh = np.percentile(profile, 75)
+    ref_ys, props = find_peaks(profile, distance=h_half, height=thresh)
     log.debug(f"Found {len(ref_ys)} Peaks with THRESH {thresh:.0f}...")
     if len(ref_ys) < n_outputs:
         raise ValueError(
@@ -85,54 +72,50 @@ def build_flat(
     top_indices = np.argsort(props["peak_heights"])[-n_outputs:]
     ref_ys = np.sort(ref_ys[top_indices])
 
-    ys_list = []
+    traces = []
     sigmas = []
-    profile_xs = []
-    profile_ys = []
+    sparse_xs = []
+    sparse_ys = []
 
     log.info("Building sparse extraction profiles...")
     for i, ref_y in enumerate(ref_ys):
         log.debug(f"    Tracing spectrum {i+1}/{n_outputs} at Y={ref_y}...")
         xs = np.arange(w)
-        ys, ys_err, fitted_sigma = trace_spectrum(
-            flat_map,
-            bad_map,
-            ref_x=w // 2,
-            ref_y=ref_y,
-            range_y=h_half,
+        ys, ys_err, sigma = trace_spectrum(
+            flat_map, bad_map, ref_x=w // 2, ref_y=ref_y, range_y=h_half
         )
 
         ys_med = medfilt(ys, kernel_size=3)
         good = (ys_err < 0.5) & (np.arange(w) < w - 50) & (np.arange(w) > 50)
-        poly_coeffs = np.polyfit(xs[good], ys_med[good], deg=3)
-        ys_smoothed = np.polyval(poly_coeffs, xs)
+        coeffs = np.polyfit(xs[good], ys_med[good], deg=3)
+        trace_y = np.polyval(coeffs, xs)
         Y, X = np.indices((h, w))
 
-        spatial_mask = np.abs(Y - ys_smoothed[X]) < aperture_width_pixels / 2
+        aperture = np.abs(Y - trace_y[X]) < aperture_width_pixels / 2
 
         # Keep rectangular arrays for Numba; extractors skip bad-pixel sentinels.
-        sparse_x = X[spatial_mask].copy()
-        sparse_y = Y[spatial_mask].copy()
+        sparse_x = X[aperture].copy()
+        sparse_y = Y[aperture].copy()
         invalid = bad_map[sparse_y, sparse_x] > 0
         sparse_x[invalid] = -1
         sparse_y[invalid] = -1
-        profile_xs.append(sparse_x)
-        profile_ys.append(sparse_y)
+        sparse_xs.append(sparse_x)
+        sparse_ys.append(sparse_y)
 
-        ys_list.append(ys_smoothed)
-        sigmas.append(fitted_sigma)
+        traces.append(trace_y)
+        sigmas.append(sigma)
 
-    width = max(map(len, profile_xs))
+    width = max(map(len, sparse_xs))
     padded_x = np.full((n_outputs, width), -1, dtype=np.int64)
     padded_y = np.full_like(padded_x, -1)
-    for i, (sx, sy) in enumerate(zip(profile_xs, profile_ys)):
+    for i, (sx, sy) in enumerate(zip(sparse_xs, sparse_ys)):
         padded_x[i, : len(sx)] = sx
         padded_y[i, : len(sy)] = sy
     product = Flat(
         profile_x_pixels=padded_x,
         profile_y_pixels=padded_y,
         flat_map_adu=flat_map,
-        trace_y_pixels=np.array(ys_list),
+        trace_y_pixels=np.array(traces),
         profile_sigma_pixels=np.asarray(sigmas),
         telescope_flux_adu=np.asarray([np.sum(image) for image in flat_images]),
     )
@@ -251,9 +234,7 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
         return popt
 
     col = image[:, ref_x]
-    p0 = np.array(
-        [col.max() - np.median(col), ref_y, 3, np.median(col)],
-    )
+    p0 = np.array([col.max() - np.median(col), ref_y, 3, np.median(col)])
 
     _scan(ref_x, nx, 1, p0)
     _scan(ref_x - 1, -1, -1, p0)

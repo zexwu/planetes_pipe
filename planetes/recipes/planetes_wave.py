@@ -3,20 +3,10 @@
 from cpl import ui
 
 from planetes import __version__
-from planetes.products import (
-    Dark,
-    Flat,
-    WavelengthReference,
-)
-from planetes.recipes.dfs import (
-    save_product,
-    load_recipe_inputs,
-)
+from planetes.products import Dark, Flat, WavelengthReference
+from planetes.recipes.dfs import save_product, load_recipe_inputs
 from planetes.recipes.parameters import make_parameters, read_parameters
-from planetes.wavelength import (
-    make_wave,
-    wavelength_reference_path,
-)
+from planetes.wavelength import make_wave, wavelength_reference_path
 
 PARAMETERS = {}
 
@@ -24,13 +14,18 @@ PARAMETERS = {}
 class PlanetesWave(ui.PyRecipe):
     """Execute the same wave function available to Python callers."""
 
-    _name = "planetes_wave"
-    _version = __version__
-    _author = "PLANETES contributors"
-    _email = ""
+    # fmt: off
+    _name      = "planetes_wave"
+    _version   = __version__
+    _author    = "PLANETES contributors"
+    _email     = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "Fit the detector wavelength calibration"
-    _description = "Use WAVELAMP_RAW, its DARK, FLAT geometry and LINE_LIST to fit wavelengths in metres."
+    _synopsis  = "Fit the detector wavelength calibration"
+    # fmt: on
+    _description = (
+        "Use WAVELAMP_RAW, its DARK, FLAT geometry and LINE_LIST to fit "
+        "wavelengths in metres."
+    )
 
     def __init__(self):
         super().__init__()

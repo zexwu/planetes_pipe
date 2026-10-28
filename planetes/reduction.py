@@ -21,13 +21,7 @@ from .instrument import (
 from .io.fits import read_product
 from .io.hdu import as_compute_array
 from .io.raw import check_raw_calibrations, read_raw_metadata
-from .products import (
-    Dark,
-    Flat,
-    P2VM,
-    P2VMRed,
-    Wave,
-)
+from .products import Dark, Flat, P2VM, P2VMRed, Wave
 
 
 def reduce_science(
@@ -51,10 +45,7 @@ def reduce_science(
     reducer = FrameReducer(flat, wave, p2vm)
     spectra = extract_spectra_from_file(path, reducer.extractor, dark)
     return reduce_spectra(
-        spectra,
-        p2vm,
-        gd_search_min_m=gd_search_min_m,
-        gd_search_max_m=gd_search_max_m,
+        spectra, p2vm, gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m
     )
 
 
@@ -77,51 +68,46 @@ def reduce_spectra(
     ):
         raise ValueError("Science spectra and P2VM output/wavelength dimensions differ")
     log.info("Applying P2VM to extract visibility for science spectra...")
-    reconstructed_data = np.einsum("box,ofx->fbx", p2vm.matrix, spectra)
-    photometric_flux_adu = reconstructed_data[:, :N_TELESCOPES, :]
-    coherent_flux_adu = (
-        reconstructed_data[:, REAL_SLICE, :] + 1j * reconstructed_data[:, IMAG_SLICE, :]
-    )
-    visibility_amplitude, flags = normalize_coherent_flux(
-        coherent_flux_adu,
-        photometric_flux_adu,
-    )
+    channels = np.einsum("box,ofx->fbx", p2vm.matrix, spectra)
+    flux_adu = channels[:, :N_TELESCOPES, :]
+    coherent_adu = channels[:, REAL_SLICE, :] + 1j * channels[:, IMAG_SLICE, :]
+    visamp, flags = normalize_coherent_flux(coherent_adu, flux_adu)
 
     if not include_phase:
         return P2VMRed(
-            photometric_flux_adu,
-            coherent_flux_adu,
-            visibility_amplitude,
+            flux_adu,
+            coherent_adu,
+            visamp,
             flags,
             p2vm.wavelength_m,
             p2vm.baseline_outputs,
         )
 
-    group_delay_m = np.zeros((len(coherent_flux_adu), N_BASELINES))
+    gd_m = np.zeros((len(coherent_adu), N_BASELINES))
     log.info("Computing group delay for science spectra...")
     for baseline in range(N_BASELINES):
-        group_delay_m[:, baseline] = estimate_group_delay(
-            coherent_flux_adu[:, baseline],
+        gd_m[:, baseline] = estimate_group_delay(
+            coherent_adu[:, baseline],
             p2vm.wavelength_m,
             search_range=(gd_search_min_m, gd_search_max_m),
         )
 
-    differential_phase_deg = coherent_flux_adu * np.exp(
-        -2j * np.pi * group_delay_m[:, :, None] / p2vm.wavelength_m[None, :]
+    phasor = coherent_adu * np.exp(
+        -2j * np.pi * gd_m[:, :, None] / p2vm.wavelength_m[None, :]
     )
-    differential_phase_deg *= differential_phase_deg.mean(axis=2)[:, :, None].conj()
-    differential_phase_deg = np.angle(differential_phase_deg, deg=True)
-    differential_phase_deg -= differential_phase_deg.mean(axis=2)[:, :, None]
-    differential_phase_deg = (differential_phase_deg + 180) % 360 - 180
+    phasor *= phasor.mean(axis=2)[:, :, None].conj()
+    phase_deg = np.angle(phasor, deg=True)
+    phase_deg -= phase_deg.mean(axis=2)[:, :, None]
+    phase_deg = (phase_deg + 180) % 360 - 180
 
     product = P2VMRed(
-        photometric_flux_adu=photometric_flux_adu,
-        coherent_flux_adu=coherent_flux_adu,
-        visibility_amplitude=visibility_amplitude,
+        photometric_flux_adu=flux_adu,
+        coherent_flux_adu=coherent_adu,
+        visibility_amplitude=visamp,
         flags=flags,
         wavelength_m=p2vm.wavelength_m,
-        group_delay_m=group_delay_m,
-        differential_phase_deg=differential_phase_deg,
+        group_delay_m=gd_m,
+        differential_phase_deg=phase_deg,
         baseline_outputs=p2vm.baseline_outputs,
     )
     log.info("Reduction for science spectra completed.")
@@ -131,8 +117,7 @@ def reduce_spectra(
 
 
 def normalize_coherent_flux(
-    coherent_flux: NDArray,
-    flux: NDArray,
+    coherent_flux: NDArray, flux: NDArray
 ) -> tuple[NDArray, NDArray]:
     """Normalize the six fixed baselines and flag non-positive/non-finite denominators."""
     visamp = np.full(coherent_flux.shape, np.nan)

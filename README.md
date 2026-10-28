@@ -210,6 +210,7 @@ pixel indices are zero-based; the FITS boundary writes the GRAVITY one-based
 coordinates. GRAVITY's existing `... UM SC` QC cards are emitted alongside their
 metre equivalents at the file boundary.
 
+[Code style](docs/CODE_STYLE.md) defines local scientific names and table alignment.
 [Simplification notes](docs/SIMPLIFICATION.md) explain the product interfaces.
 [Change report and diagrams](docs/CHANGE_REPORT.md) record the migration and
 full-data evidence. [Scientific methods](docs/SCIENTIFIC_METHODS.md) describe retained numerical

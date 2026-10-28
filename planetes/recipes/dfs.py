@@ -6,31 +6,17 @@ from astropy.io import fits as afits
 from cpl import core, dfs, ui
 
 from planetes import __version__
-from planetes.io.fits import (
-    encode_product,
-    read_product,
-)
+from planetes.io.fits import encode_product, read_product
 from planetes.io.keywords import CATEGORIES, PRO_CATEGORY
 from planetes.io.publication import publish_outputs
 from planetes.qc import measure_quality
-from planetes.products import (
-    P2VM,
-    P2VMRed,
-    Wave,
-    WavelengthReference,
-)
+from planetes.products import P2VM, P2VMRed, Wave, WavelengthReference
 
 
 def cpl_frame_type(cls):
     return (
         ui.Frame.FrameType.TABLE
-        if cls
-        in (
-            WavelengthReference,
-            Wave,
-            P2VM,
-            P2VMRed,
-        )
+        if cls in (WavelengthReference, Wave, P2VM, P2VMRed)
         else ui.Frame.FrameType.IMAGE
     )
 

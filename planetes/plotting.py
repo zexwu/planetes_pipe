@@ -34,19 +34,19 @@ def save_reduction_plots(
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite existing diagnostic: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
-    photometric_flux_adu = reduced.photometric_flux_adu
-    coherent_flux_adu = reduced.coherent_flux_adu
-    visibility_amplitude = reduced.visibility_amplitude
+    flux_adu = reduced.photometric_flux_adu
+    coherent_adu = reduced.coherent_flux_adu
+    visamp = reduced.visibility_amplitude
     flags = reduced.flags
-    differential_phase_deg = reduced.differential_phase_deg
-    group_delay_m = reduced.group_delay_m
+    phase_deg = reduced.differential_phase_deg
+    gd_m = reduced.group_delay_m
 
     log.info(f"--- Step: PLOTTING {object_label} ---")
 
     with PdfPages(output) as pdf:
-        mean_flux = photometric_flux_adu.mean(axis=-1)
-        frame_samples = np.arange(0, differential_phase_deg.shape[0], 10)
-        wave_samples = np.arange(0, differential_phase_deg.shape[-1], 10)
+        mean_flux = flux_adu.mean(axis=-1)
+        frame_samples = np.arange(0, phase_deg.shape[0], 10)
+        wave_samples = np.arange(0, phase_deg.shape[-1], 10)
 
         def save(fig) -> None:
             pdf.savefig(fig)
@@ -73,15 +73,12 @@ def save_reduction_plots(
 
         def plot_coherent_flux() -> None:
             fig, axes = _make_figure_grid(
-                2,
-                N_BASELINES // 2,
-                xlabel="#Frame",
-                ylabel="abs(coherent flux) [adu]",
+                2, N_BASELINES // 2, xlabel="#Frame", ylabel="abs(coherent flux) [adu]"
             )
-            mean_coherent_flux = abs(coherent_flux_adu.mean(axis=-1))
+            mean_coherent = abs(coherent_adu.mean(axis=-1))
             for baseline in range(N_BASELINES):
-                mean = mean_coherent_flux[:, baseline].mean()
-                axes[baseline].plot(mean_coherent_flux[:, baseline] - mean)
+                mean = mean_coherent[:, baseline].mean()
+                axes[baseline].plot(mean_coherent[:, baseline] - mean)
                 axes[baseline].set_title(f"Baseline {BASELINES[baseline]}")
                 axes[baseline].text(
                     0.5,
@@ -100,7 +97,7 @@ def save_reduction_plots(
             fig, axes = _make_figure_grid(
                 2, N_BASELINES // 2, xlabel="Wavelength Index", ylabel="VISAMP"
             )
-            plotted = np.ma.array(visibility_amplitude, mask=flags)
+            plotted = np.ma.array(visamp, mask=flags)
             colors = plt.cm.viridis(np.linspace(0, 1, len(plotted)))
             for baseline in range(N_BASELINES):
                 axes[baseline].set_prop_cycle(color=colors)
@@ -112,12 +109,9 @@ def save_reduction_plots(
 
         def plot_phase() -> None:
             fig, axes = _make_figure_grid(
-                2,
-                N_BASELINES // 2,
-                xlabel="#Frame",
-                ylabel="arg(coherent flux) [deg]",
+                2, N_BASELINES // 2, xlabel="#Frame", ylabel="arg(coherent flux) [deg]"
             )
-            mean_phase = np.angle(coherent_flux_adu.mean(axis=-1), deg=True)
+            mean_phase = np.angle(coherent_adu.mean(axis=-1), deg=True)
             mean_phase = np.unwrap(mean_phase, period=360, axis=0)
             for baseline in range(N_BASELINES):
                 axes[baseline].plot(mean_phase[:, baseline])
@@ -134,7 +128,7 @@ def save_reduction_plots(
                 sharey=False,
             )
             for baseline in range(N_BASELINES):
-                axes[baseline].plot(group_delay_m[:, baseline])
+                axes[baseline].plot(gd_m[:, baseline])
                 axes[baseline].set_title(f"Baseline {BASELINES[baseline]}")
             fig.suptitle(f"{object_label}\nGroup Delay per baseline")
             save(fig)
@@ -148,7 +142,7 @@ def save_reduction_plots(
                     ylabel="Differential Phase [deg]",
                 )
                 for baseline in range(N_BASELINES):
-                    axes[baseline].plot(differential_phase_deg[frame, baseline])
+                    axes[baseline].plot(phase_deg[frame, baseline])
                     axes[baseline].set_title(f"Baseline {BASELINES[baseline]}")
                     axes[baseline].set_ylim(-10, 10)
                 fig.suptitle(
@@ -167,8 +161,8 @@ def save_reduction_plots(
                 )
                 for baseline in range(N_BASELINES):
                     axes[baseline].scatter(
-                        group_delay_m[:, baseline],
-                        differential_phase_deg[:, baseline, wavelength],
+                        gd_m[:, baseline],
+                        phase_deg[:, baseline, wavelength],
                         s=5,
                         alpha=0.7,
                     )

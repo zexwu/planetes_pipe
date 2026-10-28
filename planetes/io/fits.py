@@ -15,15 +15,7 @@ from ..instrument import (
     DetectorSetup,
     _check_baselines,
 )
-from ..products import (
-    Bad,
-    Dark,
-    Flat,
-    P2VM,
-    P2VMRed,
-    Wave,
-    WavelengthReference,
-)
+from ..products import Bad, Dark, Flat, P2VM, P2VMRed, Wave, WavelengthReference
 from . import keywords as kw
 from .hdu import _verify_checksums, _json_hdu, _native, _read_json, _storage_array
 from .keywords import CATEGORIES
@@ -31,9 +23,9 @@ from .publication import publish_outputs
 
 
 def _image(name, value, unit=""):
-    h = afits.ImageHDU(_storage_array(value), name=name)
-    h.header["BUNIT"] = unit
-    return h
+    hdu = afits.ImageHDU(_storage_array(value), name=name)
+    hdu.header["BUNIT"] = unit
+    return hdu
 
 
 def _column(name, values, unit="", dim=None):
@@ -77,30 +69,30 @@ def encode_product(product, header=None, *, quality=None):
         raise TypeError(
             "Only complete DARK/BAD/calibration/science objects can be saved"
         )
-    h = afits.Header() if header is None else header.copy()
-    for key in list(h):
+    hdr = afits.Header() if header is None else header.copy()
+    for key in list(hdr):
         if key.startswith("ESO DPR ") or key == "PLANETES CONTENT SHA256":
-            del h[key]
-    h["INSTRUME"] = "PLANETES"
-    h["HIERARCH " + kw.FORMAT_KEY] = kw.PRODUCT_FORMAT
-    h["HIERARCH ESO PRO CATG"] = CATEGORIES[type(product)]
-    h["HIERARCH ESO PRO TYPE"] = (
+            del hdr[key]
+    hdr["INSTRUME"] = "PLANETES"
+    hdr["HIERARCH " + kw.FORMAT_KEY] = kw.PRODUCT_FORMAT
+    hdr["HIERARCH ESO PRO CATG"] = CATEGORIES[type(product)]
+    hdr["HIERARCH ESO PRO TYPE"] = (
         "STATIC" if isinstance(product, WavelengthReference) else "REDUCED"
     )
-    h["HIERARCH ESO PRO SCIENCE"] = isinstance(product, P2VMRed)
+    hdr["HIERARCH ESO PRO SCIENCE"] = isinstance(product, P2VMRed)
     setup = getattr(product, "setup", None)
     if setup is not None:
         for name, key in kw.ROI_KEYS.items():
             v = getattr(setup, name)
             if v is not None:
-                h["HIERARCH " + key] = v + (1 if name.startswith("origin_") else 0)
+                hdr["HIERARCH " + key] = v + (1 if name.startswith("origin_") else 0)
         if setup.exposure_s is not None:
             key = (
                 kw.DIT
                 if setup.exposure_source in ("readback", "legacy-property")
                 else kw.UIT
             )
-            h["HIERARCH " + key] = (setup.exposure_s, "[s] Source in PLANETES_META")
+            hdr["HIERARCH " + key] = (setup.exposure_s, "[s] Source in PLANETES_META")
 
     def one_based_pixels(values):
         return (
@@ -109,7 +101,7 @@ def encode_product(product, header=None, *, quality=None):
             else values + 1
         )
 
-    hdus = [afits.PrimaryHDU(header=h)]
+    hdus = [afits.PrimaryHDU(header=hdr)]
     if isinstance(product, Dark):
         if (
             product.temporal_rms_adu is None
@@ -190,10 +182,7 @@ def encode_product(product, header=None, *, quality=None):
     else:
         hdus += [
             _detector_table(product),
-            _table(
-                kw.WAVELENGTH,
-                [_column("WAVELENGTH", product.wavelength_m, "m")],
-            ),
+            _table(kw.WAVELENGTH, [_column("WAVELENGTH", product.wavelength_m, "m")]),
         ]
         if isinstance(product, P2VM):
             columns = [
@@ -205,16 +194,18 @@ def encode_product(product, header=None, *, quality=None):
             if product.dc_term_adu is not None:
                 columns.append(_column("C_MATRIX", product.dc_term_adu, "adu"))
             hdus.append(_table(kw.P2VM_DATA, columns))
+            # fmt: off
             for name, ext, unit in [
-                ("matrix", kw.P2VM_INVERSE, ""),
-                ("opd_m", kw.OPD, "m"),
-                ("group_delay_m", kw.GROUP_DELAY, "m"),
-                ("ellipse_phase_rad", kw.ELLIPSE_PHASE, "rad"),
+                ("matrix",            kw.P2VM_INVERSE,      ""),
+                ("opd_m",             kw.OPD,               "m"),
+                ("group_delay_m",     kw.GROUP_DELAY,       "m"),
+                ("ellipse_phase_rad", kw.ELLIPSE_PHASE,     "rad"),
                 ("ellipse_amplitude", kw.ELLIPSE_AMPLITUDE, ""),
-                ("fit_rms_adu", kw.P2VM_FIT_RMS, "adu"),
+                ("fit_rms_adu",       kw.P2VM_FIT_RMS,      "adu"),
             ]:
                 if getattr(product, name) is not None:
                     hdus.append(_image(ext, getattr(product, name), unit))
+            # fmt: on
         else:
             if product.group_delay_m is None or product.differential_phase_deg is None:
                 raise ValueError("Saved P2VMRED requires GD and differential phase")
@@ -286,13 +277,13 @@ def encode_product(product, header=None, *, quality=None):
 def read_product(path: Path, cls=None):
     """Read a PLANETES FITS product, retaining physical units and identities."""
     with afits.open(path, checksum=True) as hdus:
-        h = hdus[0].header
+        hdr = hdus[0].header
         if (
-            h.get(kw.FORMAT_KEY) not in (4, 5, kw.PRODUCT_FORMAT)
-            or h.get("INSTRUME") != "PLANETES"
+            hdr.get(kw.FORMAT_KEY) not in (4, 5, kw.PRODUCT_FORMAT)
+            or hdr.get("INSTRUME") != "PLANETES"
         ):
             raise ValueError("Unsupported PLANETES product format")
-        actual = {v: k for k, v in CATEGORIES.items()}.get(h.get(kw.PRO_CATEGORY))
+        actual = {v: k for k, v in CATEGORIES.items()}.get(hdr.get(kw.PRO_CATEGORY))
         if actual is None or (cls is not None and actual is not cls):
             raise ValueError("Unexpected product category")
         _verify_checksums(hdus)
@@ -326,7 +317,7 @@ def read_product(path: Path, cls=None):
             values.update(
                 mean_adu=image(kw.RAW_IMAGE, "adu"),
                 temporal_rms_adu=image(kw.DARK_RMS, "adu"),
-                n_frames=h["NFRAMES"],
+                n_frames=hdr["NFRAMES"],
             )
         elif actual is Bad:
             if hdus[kw.RAW_IMAGE].header.get(kw.BAD_BITS) != "hot=1,dead=2,noisy=4":
@@ -383,16 +374,18 @@ def read_product(path: Path, cls=None):
                 )
                 if "C_MATRIX" in hdus[kw.P2VM_DATA].columns.names:
                     values["dc_term_adu"] = column(kw.P2VM_DATA, "C_MATRIX", "adu")
+                # fmt: off
                 for name, ext, unit in [
-                    ("matrix", kw.P2VM_INVERSE, ""),
-                    ("opd_m", kw.OPD, "m"),
-                    ("group_delay_m", kw.GROUP_DELAY, "m"),
-                    ("ellipse_phase_rad", kw.ELLIPSE_PHASE, "rad"),
+                    ("matrix",            kw.P2VM_INVERSE,      ""),
+                    ("opd_m",             kw.OPD,               "m"),
+                    ("group_delay_m",     kw.GROUP_DELAY,       "m"),
+                    ("ellipse_phase_rad", kw.ELLIPSE_PHASE,     "rad"),
                     ("ellipse_amplitude", kw.ELLIPSE_AMPLITUDE, ""),
-                    ("fit_rms_adu", kw.P2VM_FIT_RMS, "adu"),
+                    ("fit_rms_adu",       kw.P2VM_FIT_RMS,      "adu"),
                 ]:
                     if ext in hdus:
                         values[name] = image(ext, unit)
+                # fmt: on
             else:
                 nw = len(values["wavelength_m"])
                 nf = len(hdus[kw.SCIENCE_FLUX].data) // 4
@@ -439,14 +432,14 @@ def read_product(path: Path, cls=None):
                 expected = (
                     None if v is None else v + (1 if name.startswith("origin_") else 0)
                 )
-                if h.get(key) != expected:
+                if hdr.get(key) != expected:
                     raise ValueError(f"Product setup and header disagree: {key}")
             key = (
                 kw.DIT
                 if setup.exposure_source in ("readback", "legacy-property")
                 else kw.UIT
             )
-            if h.get(key) != setup.exposure_s:
+            if hdr.get(key) != setup.exposure_s:
                 raise ValueError("Product exposure and header disagree")
         return actual(**values)
 

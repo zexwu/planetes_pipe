@@ -3,16 +3,8 @@
 from cpl import ui
 
 from planetes import __version__
-from planetes.products import (
-    Dark,
-    Flat,
-    P2VM,
-    Wave,
-)
-from planetes.recipes.dfs import (
-    save_product,
-    load_recipe_inputs,
-)
+from planetes.products import Dark, Flat, P2VM, Wave
+from planetes.recipes.dfs import save_product, load_recipe_inputs
 from planetes.recipes.parameters import make_parameters, read_parameters
 from planetes.reduction import reduce_science
 
@@ -33,13 +25,19 @@ PARAMETERS = {
 class PlanetesReduce(ui.PyRecipe):
     """Execute the same reduce function available to Python callers."""
 
-    _name = "planetes_reduce"
-    _version = __version__
-    _author = "PLANETES contributors"
-    _email = ""
+    # fmt: off
+    _name      = "planetes_reduce"
+    _version   = __version__
+    _author    = "PLANETES contributors"
+    _email     = ""
     _copyright = "PLANETES contributors"
-    _synopsis = "Extract per-frame instrumental interferometric observables"
-    _description = "Use explicit DARK, FLAT, WAVE and P2VM calibrations to extract every SINGLE_SCI_RAW frame. Return instrumental fluxes, visibility amplitude, GD and differential phase."
+    _synopsis  = "Extract per-frame instrumental interferometric observables"
+    # fmt: on
+    _description = (
+        "Use explicit DARK, FLAT, WAVE and P2VM calibrations to extract every "
+        "SINGLE_SCI_RAW frame. Return instrumental fluxes, visibility amplitude, "
+        "GD and differential phase."
+    )
 
     def __init__(self):
         super().__init__()

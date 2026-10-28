@@ -74,41 +74,41 @@ def build_raw_header(metadata: CaptureMetadata, shape):
         not np.isfinite(setup.exposure_s) or setup.exposure_s <= 0
     ):
         raise ValueError("Exposure must be positive finite seconds")
-    h = afits.Header()
-    h["INSTRUME"] = "PLANETES"
+    hdr = afits.Header()
+    hdr["INSTRUME"] = "PLANETES"
     for key, value in (
         (kw.DPR_CATEGORY, raw_type["dpr_category"]),
         (kw.DPR_TYPE, raw_type["dpr_type"]),
         (kw.DPR_TECHNIQUE, raw_type["dpr_technique"]),
     ):
-        h["HIERARCH " + key] = value
-    h["HIERARCH " + kw.FORMAT_KEY] = kw.RAW_FORMAT
-    h["HIERARCH " + kw.NDIT] = shape[0]
+        hdr["HIERARCH " + key] = value
+    hdr["HIERARCH " + kw.FORMAT_KEY] = kw.RAW_FORMAT
+    hdr["HIERARCH " + kw.NDIT] = shape[0]
     for key, value in zip(kw.SHUTTER_KEYS, metadata.shutters, strict=True):
-        h["HIERARCH " + key] = value
+        hdr["HIERARCH " + key] = value
     for name, key in kw.ROI_KEYS.items():
         value = getattr(metadata.setup, name)
         if value is not None:
-            h["HIERARCH " + key] = value + (1 if name.startswith("origin_") else 0)
+            hdr["HIERARCH " + key] = value + (1 if name.startswith("origin_") else 0)
     if metadata.setup.exposure_s is not None:
         key = (
             kw.DIT
             if metadata.setup.exposure_source in ("readback", "legacy-property")
             else kw.UIT
         )
-        h["HIERARCH " + key] = (
+        hdr["HIERARCH " + key] = (
             metadata.setup.exposure_s,
             "[s] Per-integration exposure; source in PLANETES_META",
         )
         if key == kw.DIT:
-            h["EXPTIME"] = (
+            hdr["EXPTIME"] = (
                 metadata.setup.exposure_s * shape[0],
                 "[s] Sum of unaveraged integration times",
             )
     if metadata.exposure_start_utc is not None:
-        h["DATE-OBS"] = metadata.exposure_start_utc
-        h["MJD-OBS"] = float(Time(metadata.exposure_start_utc, scale="utc").mjd)
-    return h
+        hdr["DATE-OBS"] = metadata.exposure_start_utc
+        hdr["MJD-OBS"] = float(Time(metadata.exposure_start_utc, scale="utc").mjd)
+    return hdr
 
 
 def write_raw(path: Path, cube, metadata: CaptureMetadata):

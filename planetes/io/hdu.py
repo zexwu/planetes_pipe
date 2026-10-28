@@ -11,10 +11,9 @@ STORAGE_RTOL = np.finfo(np.float32).eps / 2
 
 def _native(values):
     """Load floating FITS data at computation precision; preserve integer/flag types."""
-    dtype = {
-        "f": np.float64,
-        "c": np.complex128,
-    }.get(values.dtype.kind, values.dtype.newbyteorder("="))
+    dtype = {"f": np.float64, "c": np.complex128}.get(
+        values.dtype.kind, values.dtype.newbyteorder("=")
+    )
     return np.array(values, dtype=dtype, copy=True)
 
 

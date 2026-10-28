@@ -4,18 +4,22 @@ from dataclasses import dataclass
 
 import numpy as np
 
+# fmt: off
 TELESCOPES = ("4", "3", "2", "1")
-BASELINES = ("43", "42", "41", "32", "31", "21")
+BASELINES  = ("43", "42", "41", "32", "31", "21")
+# fmt: on
 # Telescope-axis indices, in the fixed physical baseline order above.
 BASELINE_PAIRS = tuple(
     (TELESCOPES.index(pair[0]), TELESCOPES.index(pair[1])) for pair in BASELINES
 )
 ABCD_ORDER = ("A", "C", "B", "D")
 
+# fmt: off
 N_TELESCOPES = len(TELESCOPES)
-N_BASELINES = len(BASELINES)
-N_OUTPUTS = N_BASELINES * len(ABCD_ORDER)
-N_DATA = N_TELESCOPES + 2 * N_BASELINES
+N_BASELINES  = len(BASELINES)
+N_OUTPUTS    = N_BASELINES * len(ABCD_ORDER)
+N_DATA       = N_TELESCOPES + 2 * N_BASELINES
+# fmt: on
 
 REAL_SLICE = slice(N_TELESCOPES, N_TELESCOPES + N_BASELINES)
 IMAG_SLICE = slice(REAL_SLICE.stop, N_DATA)

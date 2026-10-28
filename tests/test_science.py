@@ -78,15 +78,11 @@ class ScienceTests(unittest.TestCase):
         self.assertIsNotNone(diagnostic.opd_m)
         self.assertEqual(p2vm.matrix.tobytes(), diagnostic.matrix.tobytes())
         matrix = build_v2pm(
-            p2vm.transmission,
-            p2vm.coherence_amplitude,
-            p2vm.coherence_phase_rad,
+            p2vm.transmission, p2vm.coherence_amplitude, p2vm.coherence_phase_rad
         )
         for wave in range(len(p2vm.wavelength_m)):
             np.testing.assert_allclose(
-                p2vm.matrix[:, :, wave] @ matrix[:, :, wave],
-                np.eye(N_DATA),
-                atol=1e-12,
+                p2vm.matrix[:, :, wave] @ matrix[:, :, wave], np.eye(N_DATA), atol=1e-12
             )
         outputs = {**p2vm.baseline_outputs, 0: p2vm.baseline_outputs[1]}
         with self.assertRaisesRegex(ValueError, "mapping"):

@@ -80,8 +80,8 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
         raise ValueError("Recorded shutter states must be boolean")
     known_open = sum(value is True for value in shutter_values)
     unknown = shutter_values.count(None)
-    expected_open_shutters = kw.RAW_TYPES[category]["open_shutters"]
-    if not known_open <= expected_open_shutters <= known_open + unknown:
+    expected_open = kw.RAW_TYPES[category]["open_shutters"]
+    if not known_open <= expected_open <= known_open + unknown:
         raise ValueError("Raw category and recorded shutter states conflict")
 
     roi = {name: header.get(key) for name, key in kw.ROI_KEYS.items()}
@@ -170,8 +170,8 @@ def read_raw_metadata(
             for first, second in zip(raw.shutters, shutters, strict=True)
         )
         active = sum(state is True for state in shutters)
-        expected_open_shutters = kw.RAW_TYPES[raw.category]["open_shutters"]
-        if not active <= expected_open_shutters <= active + shutters.count(None):
+        expected_open = kw.RAW_TYPES[raw.category]["open_shutters"]
+        if not active <= expected_open <= active + shutters.count(None):
             raise ValueError("Raw category and recorded shutter states conflict")
         return RawMetadata(raw.category, shutters, DetectorSetup(**values))
 

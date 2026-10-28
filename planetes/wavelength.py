@@ -15,24 +15,17 @@ from .extraction import extract_sparse_spectra
 from .instrument import N_OUTPUTS
 from .io.fits import read_product
 from .io.raw import check_raw_calibrations, iter_raw_cube, read_raw_metadata
-from .products import (
-    Dark,
-    Flat,
-    Wave,
-    WavelengthReference,
-)
+from .products import Dark, Flat, Wave, WavelengthReference
 
-DETECTION_SIGMA = 3.0
-SURFACE_DEGREE = 3
+# fmt: off
+DETECTION_SIGMA   = 3.0
+SURFACE_DEGREE    = 3
 RANSAC_ITERATIONS = 1_000_000
+# fmt: on
 
 
 def make_wave(
-    path: Path,
-    dark: Dark,
-    flat: Flat,
-    *,
-    reference: WavelengthReference | None = None,
+    path: Path, dark: Dark, flat: Flat, *, reference: WavelengthReference | None = None
 ) -> Wave:
     """Read the lamp with its DARK and FLAT geometry; return wavelengths in metres."""
 
@@ -47,28 +40,24 @@ def make_wave(
 
 
 def fit_wavelength_solution(
-    wave_image_adu: NDArray,
-    flat: Flat,
-    reference_wavelength_m: NDArray,
+    wave_image_adu: NDArray, flat: Flat, reference_wavelength_m: NDArray
 ) -> Wave:
     """Fit the retained wavelength solution from a dark-subtracted lamp image."""
 
-    profile_x_pixels = flat.profile_x_pixels
-    profile_y_pixels = flat.profile_y_pixels
+    xs = flat.profile_x_pixels
+    ys = flat.profile_y_pixels
     _, nx = flat.flat_map_adu.shape
     detector_x = np.arange(nx)
     y_trace = flat.trace_y_pixels
 
-    lamp_spectra = extract_sparse_spectra(
-        wave_image_adu[None, :, :], profile_y_pixels, profile_x_pixels
-    )[:, 0, :]
+    lamp_spectra = extract_sparse_spectra(wave_image_adu[None, :, :], ys, xs)[:, 0, :]
 
     # Match lamp peaks to the known wavelength reference.
-    reference_lines_m = reference_wavelength_m
+    lines_m = reference_wavelength_m
 
-    line_x_samples = []  # To store x-centroids for all lines
-    line_y_samples = []  # To store y-centroids for all lines
-    line_wavelength_samples_m = []  # To store wavelengths for all matched lines
+    line_x = []  # To store x-centroids for all lines
+    line_y = []  # To store y-centroids for all lines
+    line_wave_m = []  # To store wavelengths for all matched lines
     mean_spectrum = lamp_spectra[-4:].mean(axis=0)
 
     # Gaussian-equivalent MAD threshold above the median.
@@ -77,22 +66,19 @@ def fit_wavelength_solution(
         mad = np.median(abs(_spec - med))
         return med + DETECTION_SIGMA * mad * 1.4826
 
-    mean_peak_pixels, _ = find_peaks(
+    mean_peaks, _ = find_peaks(
         mean_spectrum, height=peak_threshold(mean_spectrum), distance=5
     )
-    mean_line_matches, _ = match_lines_ransac(
-        reference_lines_m,
-        mean_peak_pixels,
-        tol=3,
-        n_iter=RANSAC_ITERATIONS,
+    mean_matches, _ = match_lines_ransac(
+        lines_m, mean_peaks, tol=3, n_iter=RANSAC_ITERATIONS
     )
     log.info(
         "Matched mean spectrum peaks to known lines: "
-        f"{len(mean_peak_pixels)} peaks -> {len(mean_line_matches)} matches."
+        f"{len(mean_peaks)} peaks -> {len(mean_matches)} matches."
     )
 
-    for output_index in range(N_OUTPUTS):
-        spec = lamp_spectra[output_index]
+    for output in range(N_OUTPUTS):
+        spec = lamp_spectra[output]
 
         # Find peaks in the spectrum of individual region;
         peak_pixels, _ = find_peaks(spec, height=peak_threshold(spec), distance=5)
@@ -114,8 +100,8 @@ def fit_wavelength_solution(
 
         # match the observed peaks to the mean spectrum peaks
         # to filter out spurious detections
-        output_line_matches, _ = match_peaks_grid(
-            mean_peak_pixels,
+        matches, _ = match_peaks_grid(
+            mean_peaks,
             peak_pixels,
             tol=1,
             offset_limit=15,
@@ -124,28 +110,28 @@ def fit_wavelength_solution(
             steps_per_unit=5,
         )
 
-        both = list(set(output_line_matches[:, 0]) & set(mean_line_matches[:, 1]))
+        both = list(set(matches[:, 0]) & set(mean_matches[:, 1]))
         log.info(
-            f"OUTPUT {output_index:02d}: {len(peak_pixels)} peaks ∩ {len(reference_lines_m)} "
+            f"OUTPUT {output:02d}: {len(peak_pixels)} peaks ∩ {len(lines_m)} "
             f"known lines -> {len(both)} matched."
         )
 
-        # reference_indices: indices of the matched lines in the known line list
+        # line_indices: indices of the matched lines in the known line list
         # peak_indices: indices of the matched peaks in the observed spectrum
-        reference_indices = np.where(np.isin(mean_line_matches[:, 1], both))[0]
-        peak_indices = np.where(np.isin(output_line_matches[:, 0], both))[0]
-        reference_indices = mean_line_matches[reference_indices, 0]
-        peak_indices = output_line_matches[peak_indices, 1]
+        line_indices = np.where(np.isin(mean_matches[:, 1], both))[0]
+        peak_indices = np.where(np.isin(matches[:, 0], both))[0]
+        line_indices = mean_matches[line_indices, 0]
+        peak_indices = matches[peak_indices, 1]
 
         refined_x = peak_pixels[peak_indices]
-        line_x_samples.append(refined_x)
-        line_y_samples.append(np.interp(refined_x, detector_x, y_trace[output_index]))
-        line_wavelength_samples_m.append(reference_lines_m[reference_indices])
+        line_x.append(refined_x)
+        line_y.append(np.interp(refined_x, detector_x, y_trace[output]))
+        line_wave_m.append(lines_m[line_indices])
 
     # Fit lambda(x, y) to the matched detector coordinates.
-    fit_x_pixels = np.concatenate(line_x_samples)
-    fit_y_pixels = np.concatenate(line_y_samples)
-    fit_wavelength_m = np.concatenate(line_wavelength_samples_m)
+    fit_x = np.concatenate(line_x)
+    fit_y = np.concatenate(line_y)
+    fit_wave_m = np.concatenate(line_wave_m)
 
     # Monomials use total degree <= SURFACE_DEGREE.
     def surface_basis(x, y, max_deg: int = 3) -> NDArray:
@@ -159,23 +145,19 @@ def fit_wavelength_solution(
     # Fit the wl = f(x, y), using a 3rd order polynomial
     deg = SURFACE_DEGREE
     log.info("Fitting 2D wavelength solution...")
-    design_matrix = surface_design_matrix(fit_x_pixels, fit_y_pixels, max_deg=deg)
+    design = surface_design_matrix(fit_x, fit_y, max_deg=deg)
     terms = [f"x{d-i}y{i}" for d in range(deg + 1) for i in range(d + 1)]
     log.debug("Kernel used for wavelength_map_m fit: ")
     log.debug(", ".join(terms))
-    surface_coefficients, _, _, _ = np.linalg.lstsq(
-        design_matrix, fit_wavelength_m, rcond=None
-    )
-    residuals = fit_wavelength_m - design_matrix @ surface_coefficients
+    coeffs, _, _, _ = np.linalg.lstsq(design, fit_wave_m, rcond=None)
+    residuals = fit_wave_m - design @ coeffs
     std = np.std(residuals)
     log.info(f"Initial std dev of residuals: {std * 1e9:.2f} nm")
     for iteration in range(3):
         log.info(f"Performing outlier rejection [{iteration + 1}/3]")
         reject = abs(residuals) > 3 * std
-        surface_coefficients = np.linalg.lstsq(
-            design_matrix[~reject], fit_wavelength_m[~reject], rcond=None
-        )[0]
-        residuals = fit_wavelength_m - design_matrix @ surface_coefficients
+        coeffs = np.linalg.lstsq(design[~reject], fit_wave_m[~reject], rcond=None)[0]
+        residuals = fit_wave_m - design @ coeffs
         std = np.std(residuals[~reject])
         log.info(
             f"    Std dev of residuals: {std * 1e9:.2f} nm "
@@ -183,22 +165,20 @@ def fit_wavelength_solution(
         )
 
     # Evaluate the fitted 2-D polynomial on every detector trace.
-    detector_x_pixels = np.repeat(np.arange(nx)[None, :], N_OUTPUTS, axis=0)
-    detector_y_pixels = y_trace
-    full_design_matrix = surface_basis(
-        detector_x_pixels, detector_y_pixels, max_deg=deg
-    )
-    wavelength_map_m = np.einsum("i,iyx->yx", surface_coefficients, full_design_matrix)
+    trace_x = np.repeat(np.arange(nx)[None, :], N_OUTPUTS, axis=0)
+    trace_y = y_trace
+    basis = surface_basis(trace_x, trace_y, max_deg=deg)
+    wave_map_m = np.einsum("i,iyx->yx", coeffs, basis)
 
-    wave_product = Wave(
-        wavelength_map_m=wavelength_map_m,
+    wave = Wave(
+        wavelength_map_m=wave_map_m,
         fit_residual_m=residuals[~reject].copy(),
-        fit_x_pixels=fit_x_pixels[~reject].copy(),
-        fit_y_pixels=fit_y_pixels[~reject].copy(),
+        fit_x_pixels=fit_x[~reject].copy(),
+        fit_y_pixels=fit_y[~reject].copy(),
     )
     log.info("Computed full wavelength map")
     log.info("--- Step: WAVE [DONE] ---")
-    return wave_product
+    return wave
 
 
 def match_lines_ransac(
@@ -243,9 +223,9 @@ def match_lines_ransac(
     final_mi = [x[0] for x in final_inliers]
     final_oi = [x[1] for x in final_inliers]
 
-    final_coeffs_refined = np.polyfit(mod[final_mi], obs[final_oi], 2)
+    coeffs = np.polyfit(mod[final_mi], obs[final_oi], 2)
 
-    return np.array(final_inliers), tuple(final_coeffs_refined)
+    return np.array(final_inliers), tuple(coeffs)
 
 
 def match_peaks_grid(
@@ -272,10 +252,10 @@ def match_peaks_grid(
     c_grid = np.arange(-offset_limit, offset_limit + c_step, c_step)
 
     # Slope (b) steps:
-    # A change in slope d_b shifts the last pixel by d_b * max_wave.
-    # We want d_b * max_wave ~ 0.5 * tol  =>  d_b = 0.5 * tol / max_wave
-    max_wave = np.max(np.abs(mod)) if len(mod) > 0 else 1000.0
-    b_step = (tol / 2.0) / max_wave
+    # A change in slope d_b shifts the last pixel by d_b * pixel_span.
+    # We want d_b * pixel_span ~ 0.5 * tol  =>  d_b = 0.5 * tol / pixel_span
+    pixel_span = np.max(np.abs(mod)) if len(mod) > 0 else 1000.0
+    b_step = (tol / 2.0) / pixel_span
     b_grid = np.arange(slope_bounds[0], slope_bounds[1] + b_step, b_step)
 
     # Curvature (a) steps:

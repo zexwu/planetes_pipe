@@ -8,12 +8,7 @@ import numpy as np
 from planetes.instrument import BASELINES, TELESCOPES, DetectorSetup
 from planetes.io.fits import write_product
 from planetes.io.acquisition import CaptureMetadata, write_raw
-from planetes.products import (
-    P2VMSpectra,
-    Dark,
-    Flat,
-    Wave,
-)
+from planetes.products import P2VMSpectra, Dark, Flat, Wave
 
 
 def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
@@ -54,9 +49,7 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
         trace_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1).astype(float),
         setup=setup(n_wave),
     )
-    wave = Wave(
-        wavelength_map_m=np.tile(wavelength, (24, 1)),
-    )
+    wave = Wave(wavelength_map_m=np.tile(wavelength, (24, 1)))
     return (
         telescope,
         baseline,
