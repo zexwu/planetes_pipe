@@ -14,12 +14,33 @@ from planetes.instrument import (
     N_TELESCOPES,
     REAL_SLICE,
 )
-from planetes.p2vm import build_v2pm_matrix, compute_p2vm
+from planetes.p2vm import build_v2pm_matrix, compute_p2vm, fit_ellipse_linear
 from planetes.reduction import normalize_visibility
 from planetes.wavelength import match_lines_grid
 
 
 class ScienceTests(unittest.TestCase):
+    def test_ellipse_radius_is_normalized_independently_of_fringe_contrast(self):
+        phase_rad = np.linspace(0, 2 * np.pi, 64, endpoint=False)[:, None]
+        phase_rad = phase_rad + np.array([0.0, 0.25, 0.5])
+        abcd_phase_rad = np.array([0.0, np.pi, np.pi / 2, 3 * np.pi / 2])
+        expected_phasor = np.exp(-1j * (phase_rad - phase_rad[0]))
+        for contrast_adu in (50.0, 400.0):
+            spectra = 1000 + contrast_adu * np.cos(
+                phase_rad[None, :, :] + abcd_phase_rad[:, None, None]
+            )
+            ellipse_phase_rad, ellipse_radius = fit_ellipse_linear(
+                spectra, np.ones_like(phase_rad)
+            )
+            np.testing.assert_allclose(ellipse_radius, 1.0, rtol=0, atol=1e-12)
+            # The retained A,C,B,D differences give phase decreasing with input OPD.
+            np.testing.assert_allclose(
+                np.exp(1j * (ellipse_phase_rad - ellipse_phase_rad[0])),
+                expected_phasor,
+                rtol=0,
+                atol=1e-12,
+            )
+
     def test_v2pm_terms_expand_to_cartesian_matrix(self) -> None:
         transmission = np.arange(N_OUTPUTS * N_TELESCOPES * 2, dtype=float).reshape(
             N_OUTPUTS, N_TELESCOPES, 2

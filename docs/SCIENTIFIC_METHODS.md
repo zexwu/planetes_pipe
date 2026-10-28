@@ -67,6 +67,16 @@ its independently selected dark, or records reuse of the main dark.
 
 ## P2VM (`p2vm.py`)
 
+`compute_p2vm` follows baseline ellipse/OPD/response fitting, telescope transmission,
+response normalization, V2PM inversion, and optional phase-reference correction.
+The calculation blocks are named helpers in the same file. The normalization and
+per-wavelength inversion order are retained.
+
+`fit_ellipse_linear` returns normalized ellipse radius. Its persisted diagnostic
+field remains `ellipse_amplitude` for compatibility. In the phase-reference helper,
+`telescope_phase_rad` expresses the original reference-channel phase in radians;
+it is not a separately measured path length.
+
 For each baseline, use its A,C,B,D detector outputs. Ellipse fitting operates on
 `X=C-A`, `Y=D-B` at each wavelength to estimate phase and radius. The middle
 half of the band supplies OPD phase slope and coherent-sum group delay. Fit
