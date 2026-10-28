@@ -1,4 +1,4 @@
-# Scientific methods in PLANETES 0.10.0
+# Scientific methods in PLANETES 0.11.0
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
@@ -73,37 +73,73 @@ its independently selected dark, or uses the main dark when none is supplied.
 
 ## P2VM (`p2vm.py`)
 
-`fit_p2vm` follows baseline ellipse/OPD/response fitting, telescope transmission,
-response normalization, V2PM inversion, and optional phase-reference correction.
-The calculation blocks are named helpers in the same file. The normalization and
-per-wavelength inversion order are retained. Fixed telescope pairs are defined
-once in `instrument.BASELINE_PAIRS`, while detector output mapping is inferred
-from the calibration data. `keep_diagnostics=True` retains scan OPD/GD, ellipse
-phase/radius, fitted DC and residual RMS; the default discards these diagnostics
-after computing the same response and inverse.
+[P2VM flow diagram](p2vm_flow.png) shows the calculation and file boundaries.
+`fit_p2vm` reads as five stages: scan response fitting, photometric transmission,
+response normalization, V2PM inversion, and optional instrumental phase reference.
+Array shape/identity checks sit at the array entry boundary. File reading and
+output identification remain in `make_p2vm` / `extract_p2vm_spectra`, below the
+scientific functions. All use the fixed pairs in `instrument.BASELINE_PAIRS`.
 
-`fit_abcd_ellipse` returns normalized ellipse radius. Its persisted diagnostic
-field remains `ellipse_amplitude` for compatibility. In the phase-reference helper,
-`telescope_phase_rad` expresses the original reference-channel phase in radians;
-it is not a separately measured path length.
+The scan routine explicitly follows ellipse -> OPD/GD -> response fitting for each
+baseline. Its optional diagnostic dictionary supplies the six existing product
+fields; no new product class or validation framework is involved.
+`keep_diagnostics=True` retains OPD/GD, ellipse phase/radius, DC and residual RMS.
+It changes only retention, not fitting. The persisted radius field keeps its
+existing name `ellipse_amplitude`.
 
-For each baseline, use its A,C,B,D detector outputs. Ellipse fitting operates on
-`X=C-A`, `Y=D-B` at each wavelength to estimate phase and radius. The middle
-half of the band supplies OPD phase slope and coherent-sum group delay. Fit
-OPD against GD to remove the OPD zero point.
+For each physical baseline, the four outputs are A,C,B,D. At each wavelength fit
+`X=C-A`, `Y=D-B` with the same pseudoinverse and a unit right-hand side. The old
+`envs` argument was always one and was not residual weighting; it is removed.
+Unwrap `atan2(Y_fit,X_fit)` along frames. For ideal intensities
+`I_q=c+A*cos(phi+[0,pi,pi/2,3*pi/2]_q)`, this ellipse phase decreases with phi.
+Use the central half-band to form the mean `phase*lambda/(2*pi)` scan OPD and
+coherent-sum GD. Remove the intercept of the linear OPD-versus-GD fit. Both use m.
 
-At each wavelength, fit each of all 24 detector outputs as
-`c + a*cos(phi) + b*sin(phi)`. Compute the existing fitted DC coefficient and residual ADU RMS without refitting;
-retain them only when diagnostics are requested.
-Persist coherence amplitude `sqrt(a²+b²)` and
-phase `atan2(b,a)`, including cross-talk outputs. Fit photometric transmission
-from telescope flats, apply the original transmission/coherence normalizations,
-and set the A output's phase reference within each baseline.
+Fit all 24 outputs, including cross-talk, as `c+a*cos(phi)+b*sin(phi)` with
+`phi=2*pi*OPD/lambda`. The design columns remain `(1,sin(phi),cos(phi))`.
+The amplitude is `sqrt(a*a+b*b)` and the response phase is `atan2(b,a)`, giving
+`c+amplitude*cos(phi-phase)`. Amplitude, DC and residual RMS are ADU at this stage;
+returned response arrays have axes `(output, baseline, wavelength)`.
 
-Expand these physical terms transiently into the Cartesian V2PM and compute
-its per-wavelength pseudoinverse. Persist the inverse and physical terms;
-there is no duplicate Cartesian matrix product. Optional phase-reference
-correction rebuilds the P2VM and records whether it was actually applied.
+Normalization retains its existing order and arithmetic:
+
+1. Within each physical output quartet, subtract its A output phase from **all
+   six** baseline response components, including cross-talk.
+2. The frame-median telescope spectra first have their global telescope totals
+   removed, then the transmission mean across outputs is set to one at each
+   telescope/wavelength. Both divisions remain to preserve floating arithmetic.
+3. Solve transmission against each baseline's DC terms with `pinv`; divide its
+   amplitude by `sqrt(P_i*P_j)`. Nonfinite/nonpositive products fail locally.
+
+V2PM has axes `(24 outputs, 16 data channels, wavelength)`: columns T4,T3,T2,T1,
+then six real and six imaginary coherent components in 43,42,41,32,31,21 order.
+The coherent columns are amplitude*cos(phase) and amplitude*sin(phase); the whole
+matrix is divided by 24. Require numerical rank 16, then compute the original
+per-wavelength `pinv`. No new condition-number rejection is added.
+
+The optional phase reference is applied in four explicit stages:
+
+1. Reconstruct reference coherent flux with the initial P2VM. Use baselines
+   43,42,41 to obtain central-channel phases relative to T4 (fixed phase zero),
+   using GD to retain the existing phase branch. Subtract each telescope's
+   temporal mean. These are phases in radians, not path lengths.
+2. Scale telescope phase differences by `lambda_center/lambda`, rotate each
+   frame, then **sum** coherent flux over frames.
+3. Measure GD of that integrated coherence, construct the T4-anchored telescope
+   phasors, and apply the existing residual chromatic-slope correction.
+4. Subtract the integrated reference phase only from each detector output's
+   **own physical baseline** response. Rebuild and invert V2PM.
+
+With no reference or with correction disabled, this stage is skipped. A reference
+uses its selected dark, or main dark if none was supplied. Both independent file
+entry points reject a phase dark without a reference, even if correction is off.
+
+The original ellipse thresholds (`1e-9` for scaling; nonpositive quadratic terms
+replaced by `1e-6`) remain unchanged. On the regression bench sequence, none of
+906 fits (six baselines x 151 channels) used these branches. This does not define
+a failure policy for other data: an all-zero scan still returns zero phase/radius
+through the old fallbacks. Deciding which channels to reject is a separate
+scientific change requiring an explicit criterion.
 
 ## Instrumental science and live frames (`reduction.py`)
 
@@ -139,7 +175,7 @@ cards are converted only when writing the header.
 
 The 0.5.0 migration to metre arithmetic introduced floating-point rounding
 differences documented in the historical report linked from
-[CHANGE_REPORT](CHANGE_REPORT.md). Version 0.8.0 retains the numerical definitions
+[CHANGE_REPORT](CHANGE_REPORT.md). Version 0.11.0 retains the numerical definitions
 and per-wavelength pseudoinverse. Physically invalid mappings and rank-deficient
 V2PM matrices fail locally; rank uses NumPy's default numerical criterion.
 

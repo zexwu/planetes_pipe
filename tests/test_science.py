@@ -23,9 +23,7 @@ class ScienceTests(unittest.TestCase):
             spectra = 1000 + contrast_adu * np.cos(
                 phase_rad[None, :, :] + abcd_phase_rad[:, None, None]
             )
-            ellipse_phase_rad, ellipse_radius = fit_abcd_ellipse(
-                spectra, np.ones_like(phase_rad)
-            )
+            ellipse_phase_rad, ellipse_radius = fit_abcd_ellipse(spectra)
             np.testing.assert_allclose(ellipse_radius, 1.0, rtol=0, atol=1e-12)
             # The retained A,C,B,D differences give phase decreasing with input OPD.
             np.testing.assert_allclose(

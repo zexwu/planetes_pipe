@@ -1,0 +1,26 @@
+digraph P2VM {
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.4, fontname="PingFang SC", fontsize=20, label="PLANETES 0.11.0 · P2VM 科学流程", labelloc=t];
+  node [shape=box, style="rounded", fontname="PingFang SC", fontsize=13, color="#64748b", margin="0.16,0.12"];
+  edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
+  files [label="make_p2vm / extract_p2vm_spectra\n读取所选 DARK、FLAT、WAVE 和 raw\n提取光谱；核对 flat 照明与扫描调制的 output 身份"];
+  spectra [label="P2VMSpectra · 计算精度数组\n扫描 (6, 24, frame, wavelength)\ntelescope flats (4, 24, frame, wavelength)\n可选 reference (24, frame, wavelength)", style="rounded,filled", fillcolor="#f8fafc"];
+  scan [label="1 · 扫描响应拟合\nA,C,B,D → ellipse phase / radius\n中央半波段 → OPD / GD [m] → OPD 零点\n全部 24 outputs → c + a cos(phi) + b sin(phi)", style="rounded,filled", fillcolor="#eff6ff"];
+  transmission [label="2 · Transmission\n各 telescope 的 frame-median spectrum\n保留原来的全局归一化", style="rounded,filled", fillcolor="#eff6ff"];
+  normalize [label="3 · 响应归一化\n各 output quartet：A 为零点，作用于全部六个响应分量\nT：每个 telescope / wavelength 跨 outputs 的均值为 1\ncoherence amplitude：除以 sqrt(P_i P_j)", style="rounded,filled", fillcolor="#eff6ff"];
+  inverse [label="4 · V2PM → P2VM\nT / amplitude cos(phase) / amplitude sin(phase)，整体除以 24\nV2PM (24,16,wavelength) → rank=16 → 原 pinv\nP2VM (16,24,wavelength)", style="rounded,filled", fillcolor="#eff6ff"];
+  optional [shape=diamond, label="提供 reference\n且启用校正？"];
+  phase [label="5 · 仪器相位参考\n初始 P2VM 重建 reference coherence\nT4 锚点，43 / 42 / 41 → 逐帧 telescope phase\n去时间相位变化 → 帧求和 → 去残余 GD\n只修正 output 所属 baseline 的响应相位\n重建 V2PM，再用原 pinv 求逆", style="rounded,filled", fillcolor="#ecfdf5"];
+  product [label="P2VM 产品\ninverse + transmission + 全 24 outputs 的 amplitude / phase\n波长 [m] 与物理 output mapping", shape=folder];
+  diagnostics [label="可选诊断 · keep_diagnostics\nscan OPD/GD、ellipse phase/radius\nDC 与 residual RMS\n只控制保存，不改变计算", style="rounded,dashed"];
+  files -> spectra;
+  spectra -> scan;
+  spectra -> transmission;
+  {rank=same; scan; transmission;}
+  scan -> normalize;
+  transmission -> normalize;
+  normalize -> inverse -> optional;
+  optional -> phase [label="是"];
+  optional -> product [label="否"];
+  phase -> product;
+  scan -> diagnostics [style=dashed];
+}

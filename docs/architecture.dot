@@ -1,5 +1,5 @@
 digraph Architecture {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.10.0 — 每个步骤自己负责输入、参数和计算", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.11.0 — 每个步骤自己负责输入、参数和计算", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.16,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   python [label="Python / examples/reduce.py"];

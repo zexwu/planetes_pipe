@@ -1,5 +1,5 @@
 digraph Dataflow {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.10.0 — 原始数据、标定与科学结果\n浮点数组：存盘32位 / 计算64位", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.11.0 — 原始数据、标定与科学结果\n浮点数组：存盘32位 / 计算64位", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.15,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   rawdark [label="DARK_RAW\nmain / lamp / science 分别选择"];
@@ -12,7 +12,8 @@ digraph Dataflow {
   wave [label="wavelength.py / planetes_wave\nmake_wave → fit_wavelength_solution\n保留谱线匹配与波长拟合", style="rounded,filled", fillcolor="#eff6ff"];
   wavefits [label="WAVE\n全输出波长图 + accepted residuals", shape=folder];
   rawp2vm [label="FLAT_RAW × 4 + P2VM_RAW × 6\n可选仪器 phase reference / 独立 DARK"];
-  p2vm [label="p2vm.py / planetes_p2vm\nmake_p2vm → fit_p2vm\n提取 · 物理响应 · 求逆", style="rounded,filled", fillcolor="#eff6ff"];
+  p2vm [label="p2vm.py / planetes_p2vm\nmake_p2vm → fit_p2vm\nscan response → transmission → 归一化
+求逆 → 可选 phase reference", style="rounded,filled", fillcolor="#eff6ff"];
   p2vmfits [label="P2VM\n全 24 输出响应 + inverse\n保存目标波长网格 [m]\n扫描诊断按需保留", shape=folder];
   rawscience [label="SINGLE_SCI_RAW\n选用匹配曝光的 science DARK"];
   science [label="reduction.py / planetes_reduce\nreduce_science / FrameReducer\n共用计算与 invalid flags", style="rounded,filled", fillcolor="#eff6ff"];

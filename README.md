@@ -1,9 +1,13 @@
-# PLANETES pipeline 0.10.0
+# PLANETES pipeline 0.11.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
 single-frame kernels. File entry points return typed objects; saving is explicit in
 Python. Raw data are read only, and product writers refuse existing destinations.
+
+P2VM calculation: [flow diagram](docs/p2vm_flow.png) ·
+[phase and normalization conventions](docs/SCIENTIFIC_METHODS.md#p2vm-p2vmpy) ·
+[change report](docs/CHANGE_REPORT.md).
 
 ## Install
 
@@ -248,6 +252,10 @@ products no longer store `baseline_telescopes`. Actual `baseline_outputs` remain
 in the products. P2VM scan/ellipse/DC/residual diagnostics are omitted by default;
 use `keep_diagnostics=True` in Python or `--keep-diagnostics=true` in PyEsoRex
 to retain them. This does not alter calibration or reduction.
+
+Version 0.11.0 makes the P2VM fit follow the physical stages above. Call
+`fit_abcd_ellipse(spec)` without the removed unit `envs` argument; the existing
+pseudoinverse, thresholds and phase order are retained.
 
 New products use FITS format **6**; formats **4/5** remain readable. Full structured
 raw files stay at format **3**. Product data layout and units remain documented in

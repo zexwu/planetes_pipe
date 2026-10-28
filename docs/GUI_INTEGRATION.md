@@ -84,7 +84,7 @@ when applied to its original source.
 
 On another machine, verify the original hashes, back up all four files and run
 `git apply --check` for each patch from the devel directory before applying.
-Do not apply again to already updated files. Install the matching PLANETES 0.10.0 version
+Do not apply again to already updated files. Install the matching PLANETES 0.11.0 version
 without replacing existing camera/Qt dependencies. To restore, preserve later local
 edits and recover the four original files from:
 

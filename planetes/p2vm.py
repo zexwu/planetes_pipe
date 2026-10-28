@@ -1,4 +1,4 @@
-"""P2VM step: input sequence, spectral calibration, parameters and physical response."""
+"""P2VM calibration: scan response, photometric normalization and phase reference."""
 
 from collections.abc import Iterable, Mapping
 from pathlib import Path
@@ -31,51 +31,6 @@ from .products import (
 from .reduction import estimate_group_delay
 
 
-def make_p2vm(
-    flat: Flat,
-    wave: Wave,
-    main_dark: Dark,
-    *,
-    telescope_flats: Mapping[str, Path] | Iterable[Path],
-    baseline_cubes: Mapping[str, Path] | Iterable[Path],
-    phase_reference: Path | None = None,
-    phase_dark: Dark | None = None,
-    phase_correction: bool = True,
-    keep_diagnostics: bool = False,
-    wavelength_min_m: float = 1.15e-6,
-    wavelength_max_m: float = 1.30e-6,
-    wavelength_channels: int = 151,
-    gd_search_min_m: float = -30e-6,
-    gd_search_max_m: float = 30e-6,
-) -> P2VM:
-    """Read the calibration sequence and return the full 24-output response/inverse.
-
-    Wavelength and coarse GD bounds use metres. The optional phase reference
-    defines the instrumental phase and uses its selected DARK, or ``main_dark``.
-    """
-
-    if phase_dark is not None and phase_reference is None:
-        raise ValueError("phase_dark requires phase_reference")
-    grid = np.linspace(wavelength_min_m, wavelength_max_m, wavelength_channels)
-    spectra = extract_p2vm_spectra(
-        flat,
-        wave,
-        main_dark,
-        telescope_flats=telescope_flats,
-        baseline_cubes=baseline_cubes,
-        wavelength_m=grid,
-        phase_reference=phase_reference if phase_correction else None,
-        phase_dark=phase_dark if phase_correction else None,
-    )
-    return fit_p2vm(
-        spectra,
-        phase_correction=phase_correction,
-        keep_diagnostics=keep_diagnostics,
-        gd_search_min_m=gd_search_min_m,
-        gd_search_max_m=gd_search_max_m,
-    )
-
-
 def fit_p2vm(
     spectra: P2VMSpectra,
     *,
@@ -84,10 +39,59 @@ def fit_p2vm(
     gd_search_min_m: float = -30e-6,
     gd_search_max_m: float = 30e-6,
 ) -> P2VM:
-    """Fit/invert V2PM; keep_diagnostics retains scan arrays without changing the fit."""
-    log.info("--- Step: P2VM ---")
+    """Fit the full detector response and return its per-wavelength inverse.
 
+    Scans: (baseline, output, frame, wavelength); flats: (telescope, output,
+    frame, wavelength). Wavelength and GD bounds are metres. All 24 outputs
+    enter each baseline fit, including cross-talk. Optional scan diagnostics
+    change only the retained arrays, not the response or inverse.
+    """
+    log.info("--- Step: P2VM ---")
+    _check_input_axes(spectra)
+    wavelength_m = spectra.wavelength_m
     search_range = (gd_search_min_m, gd_search_max_m)
+
+    # Scans: ABCD ellipse -> OPD/GD -> sinusoidal response of all 24 outputs.
+    amplitude, phase_rad, dc_adu, diagnostics = _fit_scan_responses(
+        spectra, search_range, keep_diagnostics=keep_diagnostics
+    )
+
+    # Telescope flats supply the photometric scale for the fitted response.
+    transmission = _estimate_transmission(spectra.telescope_spectra)
+    _normalize_response_inplace(
+        transmission, amplitude, phase_rad, dc_adu, spectra.baseline_outputs
+    )
+    p2vm = _invert_v2pm(build_v2pm(transmission, amplitude, phase_rad))
+
+    # The instrumental reference changes phases, then requires a new inverse.
+    if phase_correction and spectra.phase_reference.shape[1] > 0:
+        phase_rad = _apply_phase_reference(
+            phase_rad,
+            p2vm,
+            spectra.phase_reference,
+            wavelength_m,
+            spectra.baseline_outputs,
+            search_range=search_range,
+        )
+        p2vm = _invert_v2pm(build_v2pm(transmission, amplitude, phase_rad))
+    elif phase_correction:
+        log.info("Skipping phase correction: no phase-reference cube was provided.")
+
+    product = P2VM(
+        matrix=p2vm,
+        wavelength_m=wavelength_m,
+        baseline_outputs=spectra.baseline_outputs,
+        transmission=transmission,
+        coherence_amplitude=amplitude,
+        coherence_phase_rad=phase_rad,
+        **diagnostics,
+    )
+    log.info("--- Step: P2VM [DONE] ---")
+    return product
+
+
+def _check_input_axes(spectra: P2VMSpectra) -> None:
+    """Check the array-fit boundary and the physical output assignment."""
     wavelength_m = spectra.wavelength_m
     _check_baselines(spectra.baseline_outputs)
     if (
@@ -108,6 +112,20 @@ def fit_p2vm(
     if (3 * len(wavelength_m)) // 4 - len(wavelength_m) // 4 < 2:
         raise ValueError("P2VM requires at least two central-band wavelength samples")
 
+
+def _fit_scan_responses(
+    spectra: P2VMSpectra,
+    search_range: tuple[float, float],
+    *,
+    keep_diagnostics: bool,
+) -> tuple[NDArray, NDArray, NDArray, dict[str, NDArray]]:
+    """Fit each baseline scan: ellipse -> OPD zero point -> detector response.
+
+    Return amplitude [ADU], phase [rad], DC [ADU], each (output, baseline,
+    wavelength), and requested diagnostics. Scan OPD/GD are metres; ellipse
+    radius is dimensionless. All output rows, including cross-talk, are fitted.
+    """
+    wavelength_m = spectra.wavelength_m
     n_frames, n_wavelengths = spectra.baseline_spectra[0].shape[1:]
     coherence_amplitude = np.zeros((N_OUTPUTS, N_BASELINES, n_wavelengths))
     coherence_phase_rad = np.zeros((N_OUTPUTS, N_BASELINES, n_wavelengths))
@@ -119,15 +137,11 @@ def fit_p2vm(
     group_delay_m = np.zeros((N_BASELINES, n_frames))
 
     for baseline in range(N_BASELINES):
-        log.info(f"Processing baseline {baseline + 1}/{N_BASELINES}...")
+        log.info(f"Fitting baseline {BASELINES[baseline]}...")
         baseline_spectra = spectra.baseline_spectra[baseline]
         outputs = spectra.baseline_outputs[baseline]
-        # Keep explicit envelope weights for the planned weighted ellipse fit.
-        envelope_weights = np.ones((n_frames, n_wavelengths))
         log.debug("    Fitting ellipses for phase extraction...")
-        ellipse_phase_rad, ellipse_radius = fit_abcd_ellipse(
-            baseline_spectra[outputs], envelope_weights
-        )
+        ellipse_phase_rad, ellipse_radius = fit_abcd_ellipse(baseline_spectra[outputs])
         if keep_diagnostics:
             ellipse_phases.append(ellipse_phase_rad)
             ellipse_radii.append(ellipse_radius)
@@ -143,58 +157,17 @@ def fit_p2vm(
             baseline_spectra, opd_m[baseline], wavelength_m
         )
 
-    transmission = _estimate_transmission(spectra.telescope_spectra)
-    _normalize_response_inplace(
-        transmission,
-        coherence_amplitude,
-        coherence_phase_rad,
-        dc_term_adu,
-        spectra.baseline_outputs,
-    )
-    v2pm_matrix = build_v2pm(transmission, coherence_amplitude, coherence_phase_rad)
-    p2vm = _invert_v2pm(v2pm_matrix)
-
-    has_phase_reference = spectra.phase_reference.shape[1] > 0
-    if has_phase_reference and phase_correction:
-        log.info("Applying phase-reference correction...")
-        reference_channels = np.einsum("dow,ofw->fdw", p2vm, spectra.phase_reference)
-        reference_coherent_flux_adu = (
-            reference_channels[:, REAL_SLICE, :]
-            + 1j * reference_channels[:, IMAG_SLICE, :]
+    diagnostics = {}
+    if keep_diagnostics:
+        diagnostics = dict(
+            opd_m=opd_m,
+            group_delay_m=group_delay_m,
+            ellipse_phase_rad=np.asarray(ellipse_phases),
+            ellipse_amplitude=np.asarray(ellipse_radii),
+            dc_term_adu=dc_term_adu,
+            fit_rms_adu=fit_rms_adu,
         )
-        baseline_by_output = {
-            output: baseline
-            for baseline, outputs in spectra.baseline_outputs.items()
-            for output in outputs
-        }
-        coherence_phase_rad = _apply_phase_reference(
-            coherence_phase_rad,
-            reference_coherent_flux_adu,
-            wavelength_m,
-            baseline_by_output,
-            search_range=search_range,
-        )
-        v2pm_matrix = build_v2pm(transmission, coherence_amplitude, coherence_phase_rad)
-        p2vm = _invert_v2pm(v2pm_matrix)
-    elif phase_correction:
-        log.info("Skipping phase correction: no phase-reference cube was provided.")
-
-    product = P2VM(
-        matrix=p2vm,
-        wavelength_m=wavelength_m,
-        baseline_outputs=spectra.baseline_outputs,
-        transmission=transmission,
-        coherence_amplitude=coherence_amplitude,
-        coherence_phase_rad=coherence_phase_rad,
-        opd_m=opd_m if keep_diagnostics else None,
-        group_delay_m=group_delay_m if keep_diagnostics else None,
-        ellipse_phase_rad=np.asarray(ellipse_phases) if keep_diagnostics else None,
-        ellipse_amplitude=np.asarray(ellipse_radii) if keep_diagnostics else None,
-        dc_term_adu=dc_term_adu if keep_diagnostics else None,
-        fit_rms_adu=fit_rms_adu if keep_diagnostics else None,
-    )
-    log.info("--- Step: P2VM [DONE] ---")
-    return product
+    return coherence_amplitude, coherence_phase_rad, dc_term_adu, diagnostics
 
 
 def _estimate_scan_opd(
@@ -203,7 +176,11 @@ def _estimate_scan_opd(
     wavelength_m: NDArray,
     search_range: tuple[float, float],
 ) -> tuple[NDArray, NDArray]:
-    """Use the central half-band and set the fitted OPD zero point at GD=0."""
+    """Convert ellipse phase/radius (frame, wavelength) to scan OPD/GD (frame,).
+
+    Both paths are metres. Use the central half-band, convert phase to
+    phase*lambda/(2*pi), and remove the intercept of its linear fit against GD.
+    """
     ellipse_phasor = ellipse_radius * np.exp(1j * ellipse_phase_rad)
     n_wavelengths = len(wavelength_m)
     start, end = n_wavelengths // 4, (n_wavelengths * 3) // 4
@@ -225,6 +202,8 @@ def _fit_interferometric_response(
     """Fit c+a*cos(phi)+b*sin(phi) to all outputs, retaining amplitude/phase/DC/RMS.
 
     Amplitude, DC and RMS are raw ADU at this stage; phase is in radians.
+    With phase=atan2(b,a), the response is c+amplitude*cos(phi-phase).
+    Arrays returned here are (output, wavelength); OPD is (frame,) in metres.
     The response amplitude is normalized later using the photometric transmission.
     """
     n_wavelengths = len(wavelength_m)
@@ -257,7 +236,7 @@ def _estimate_transmission(telescope_spectra: NDArray) -> NDArray:
     """Normalize each telescope's median spectrum by its total over outputs/wavelengths."""
     transmission = np.zeros((N_OUTPUTS, N_TELESCOPES, telescope_spectra.shape[-1]))
     for telescope in range(N_TELESCOPES):
-        log.info(f"Processing telescope {telescope + 1}/{N_TELESCOPES}...")
+        log.info(f"Measuring transmission for telescope {TELESCOPES[telescope]}...")
         median_spectrum = np.median(telescope_spectra[telescope], axis=1)
         transmission[:, telescope, :] = median_spectrum / median_spectrum.sum()
     return transmission
@@ -270,7 +249,14 @@ def _normalize_response_inplace(
     dc_term_adu: NDArray,
     baseline_outputs: Mapping[int, list[int]],
 ) -> None:
-    """Normalize phase, transmission and ADU coherence to dimensionless response in-place."""
+    """Normalize phase, transmission and coherence in place.
+
+    Within each physical output quartet, subtract its A row from *all six*
+    response components, retaining that convention for cross-talk as well.
+    Set each telescope/wavelength's mean transmission over outputs to one,
+    then divide coherence [ADU] by sqrt(P_i*P_j) from the fitted DC terms.
+    The resulting amplitude and transmission are dimensionless.
+    """
     log.info("P2VM Normalization...")
     log.info("    Phase normalization (A=0)...")
     for baseline in range(N_BASELINES):
@@ -320,7 +306,12 @@ def build_v2pm(
     coherence_amplitude: NDArray,
     coherence_phase_rad: NDArray,
 ) -> NDArray:
-    """Expand the V2PM calibration terms into the matrix used for inversion."""
+    """Expand dimensionless terms into V2PM (output, data channel, wavelength).
+
+    Columns are T4,T3,T2,T1, then Re(C_43,...,C_21), then Im(C_43,...,C_21).
+    Coherent columns are amplitude*cos(phase) and amplitude*sin(phase).
+    The complete matrix retains the original division by 24 outputs.
+    """
     matrix = np.zeros((N_OUTPUTS, N_DATA, transmission.shape[-1]))
     matrix[:, :N_TELESCOPES] = transmission
     matrix[:, REAL_SLICE] = coherence_amplitude * np.cos(coherence_phase_rad)
@@ -330,90 +321,110 @@ def build_v2pm(
 
 
 def _apply_phase_reference(
-    phase: NDArray,
-    visdata: NDArray,
-    wavelength: NDArray,
-    region_to_baseline: Mapping[int, int],
+    phase_rad: NDArray,
+    p2vm: NDArray,
+    reference_spectra: NDArray,
+    wavelength_m: NDArray,
+    baseline_outputs: Mapping[int, list[int]],
     *,
-    search_range=(-30e-6, 30e-6),
+    search_range: tuple[float, float],
 ) -> NDArray:
-    """Apply the phase-reference solution to the calibrated V2PM phases."""
-    phase = phase.copy()
-    telescope_phase_rad = np.zeros((len(visdata), N_TELESCOPES))
-    reference_channel = len(wavelength) // 2
+    """Set instrumental phases using a reference, with T4 as the telescope anchor.
 
-    for telescope in range(1, N_TELESCOPES):
-        group_delay = estimate_group_delay(
-            visdata[:, telescope - 1, :], wavelength, search_range=search_range
+    Reference spectra [ADU]: (output, frame, wavelength). Reconstructed complex
+    coherence [ADU]: (frame, baseline, wavelength). Input/output response phases
+    [rad]: (output, baseline, wavelength). Only each output's own baseline is
+    corrected; off-baseline response phases retain their scan normalization.
+    """
+    log.info("Applying phase-reference correction...")
+    phase_rad = phase_rad.copy()
+    channels = np.einsum("dow,ofw->fdw", p2vm, reference_spectra)
+    coherent_flux_adu = channels[:, REAL_SLICE, :] + 1j * channels[:, IMAG_SLICE, :]
+    reference_channel = len(wavelength_m) // 2
+    reference_telescope = TELESCOPES.index("4")
+    # 43, 42, 41 identify the other telescopes relative to T4 explicitly.
+    reference_baselines = [
+        (baseline, second)
+        for baseline, (first, second) in enumerate(BASELINE_PAIRS)
+        if first == reference_telescope
+    ]
+
+    # Reconstruct each frame's telescope phase at the central wavelength.
+    telescope_phase_rad = np.zeros((len(coherent_flux_adu), N_TELESCOPES))
+    for baseline, telescope in reference_baselines:
+        group_delay_m = estimate_group_delay(
+            coherent_flux_adu[:, baseline, :], wavelength_m, search_range=search_range
         )
-        phasor = np.exp(-1j * 2 * np.pi * group_delay[:, None] / wavelength)
+        phasor = np.exp(-1j * 2 * np.pi * group_delay_m[:, None] / wavelength_m)
         telescope_phase_rad[:, telescope] = (
             np.angle(
-                visdata[:, telescope - 1, reference_channel]
+                coherent_flux_adu[:, baseline, reference_channel]
                 * phasor[:, reference_channel]
             )
-            + 2 * np.pi * group_delay / wavelength[reference_channel]
+            + 2 * np.pi * group_delay_m / wavelength_m[reference_channel]
         )
     telescope_phase_rad -= telescope_phase_rad.mean(axis=0)[None, :]
 
-    integrated_coherent_flux = np.zeros((N_BASELINES, len(wavelength)), dtype=complex)
-    for baseline in range(N_BASELINES):
-        telescope_1, telescope_2 = BASELINE_PAIRS[baseline]
+    # Remove temporal phase excursions (scaled as 1/lambda), then sum frames.
+    integrated_coherent_flux = np.zeros((N_BASELINES, len(wavelength_m)), dtype=complex)
+    for baseline, (telescope_1, telescope_2) in enumerate(BASELINE_PAIRS):
         baseline_phase_rad = (
             telescope_phase_rad[:, telescope_2] - telescope_phase_rad[:, telescope_1]
         )
         integrated_coherent_flux[baseline] = (
-            visdata[:, baseline]
+            coherent_flux_adu[:, baseline]
             * np.exp(
                 -1j
                 * baseline_phase_rad[:, None]
-                * wavelength[reference_channel]
-                / wavelength
+                * wavelength_m[reference_channel]
+                / wavelength_m
             )
         ).sum(axis=0)
 
-    telescope_phasor = np.ones((N_TELESCOPES, len(wavelength)), dtype=complex)
-    group_delay = estimate_group_delay(
-        integrated_coherent_flux, wavelength, search_range=search_range
+    # Remove the residual spectral GD with telescope phasors anchored to T4.
+    telescope_phasor = np.ones((N_TELESCOPES, len(wavelength_m)), dtype=complex)
+    group_delay_m = estimate_group_delay(
+        integrated_coherent_flux, wavelength_m, search_range=search_range
     )
-    for telescope in range(N_TELESCOPES - 1):
-        telescope_phasor[telescope + 1] = np.exp(
-            2j * np.pi * group_delay[telescope] / wavelength
+    for baseline, telescope in reference_baselines:
+        telescope_phasor[telescope] = np.exp(
+            2j * np.pi * group_delay_m[baseline] / wavelength_m
         )
-
-    for baseline in range(N_BASELINES):
-        telescope_1, telescope_2 = BASELINE_PAIRS[baseline]
+    for baseline, (telescope_1, telescope_2) in enumerate(BASELINE_PAIRS):
         integrated_coherent_flux[baseline] *= (
             telescope_phasor[telescope_1] * telescope_phasor[telescope_2].conj()
         )
 
+    # Apply the reference phase only to the matching physical output quartet.
+    baseline_by_output = {
+        output: baseline
+        for baseline, outputs in baseline_outputs.items()
+        for output in outputs
+    }
     for output in range(N_OUTPUTS):
-        baseline = region_to_baseline[output]
+        baseline = baseline_by_output[output]
         phasor = (
-            np.exp(1j * phase[output, baseline])
+            np.exp(1j * phase_rad[output, baseline])
             * integrated_coherent_flux[baseline].conj()
         )
-        phase[output, baseline] = np.angle(phasor)
-    return phase
+        phase_rad[output, baseline] = np.angle(phasor)
+    return phase_rad
 
 
-def fit_abcd_ellipse(spec: NDArray, envs: NDArray) -> tuple[NDArray, NDArray]:
-    """
-    Estimate unwrapped phase and normalized ellipse radius from A,C,B,D outputs.
+def fit_abcd_ellipse(spec: NDArray) -> tuple[NDArray, NDArray]:
+    """Fit X=C-A, Y=D-B to an ellipse with equation M @ coefficients = 1.
 
-    Args:
-        spec (NDArray): ABCD flux with shape `(4, n_frame, n_wave)`.
-        envs (NDArray): Envelope weights with shape `(n_frame, n_wave)`.
-
-    Returns:
-        tuple[NDArray, NDArray]:
-            Phase in radians with shape `(n_frame, n_wave)`, and dimensionless
-            ellipse radius with the same shape.
+    Input ADU axes are (output, frame, wavelength), ordered A,C,B,D along
+    the four-output axis. Return unwrapped phase [rad] and dimensionless radius, both
+    (frame, wavelength). Unwrapping runs along frames. For ideal outputs
+    I_q = c + A*cos(phi + [0, pi, pi/2, 3*pi/2]_q), this phase decreases
+    with phi; preserve that sign through scan OPD and response fitting.
     """
     _, n_frames, n_wave = spec.shape
 
     ellipse_phase_rad = np.zeros((n_frames, n_wave))
     ellipse_radius = np.zeros((n_frames, n_wave))
+    unit_rhs = np.ones(n_frames)
 
     for wavelength_index in range(n_wave):
         A, C, B, D = spec[:, :, wavelength_index]
@@ -437,9 +448,9 @@ def fit_abcd_ellipse(spec: NDArray, envs: NDArray) -> tuple[NDArray, NDArray]:
         coeffs[3, :] = Y
         coeffs[4, :] = Y**2
 
-        # Linear solve via Pseudo-Inverse
-        w = np.linalg.pinv(coeffs.T) @ np.ascontiguousarray(envs[:, wavelength_index])
+        w = np.linalg.pinv(coeffs.T) @ unit_rhs
 
+        # Retained numerical fallbacks; these do not certify a valid ellipse.
         b_sq = w[4]
         if b_sq <= 0:
             b_sq = 1e-6
@@ -463,6 +474,51 @@ def fit_abcd_ellipse(spec: NDArray, envs: NDArray) -> tuple[NDArray, NDArray]:
         ellipse_radius[:, wavelength_index] = np.sqrt(X_fit**2 + Y_fit**2)
 
     return ellipse_phase_rad, ellipse_radius
+
+
+def make_p2vm(
+    flat: Flat,
+    wave: Wave,
+    main_dark: Dark,
+    *,
+    telescope_flats: Mapping[str, Path] | Iterable[Path],
+    baseline_cubes: Mapping[str, Path] | Iterable[Path],
+    phase_reference: Path | None = None,
+    phase_dark: Dark | None = None,
+    phase_correction: bool = True,
+    keep_diagnostics: bool = False,
+    wavelength_min_m: float = 1.15e-6,
+    wavelength_max_m: float = 1.30e-6,
+    wavelength_channels: int = 151,
+    gd_search_min_m: float = -30e-6,
+    gd_search_max_m: float = 30e-6,
+) -> P2VM:
+    """Read the calibration sequence and return the full 24-output response/inverse.
+
+    Wavelength and coarse GD bounds use metres. The optional phase reference
+    defines the instrumental phase and uses its selected DARK, or ``main_dark``.
+    """
+
+    if phase_dark is not None and phase_reference is None:
+        raise ValueError("phase_dark requires phase_reference")
+    grid = np.linspace(wavelength_min_m, wavelength_max_m, wavelength_channels)
+    spectra = extract_p2vm_spectra(
+        flat,
+        wave,
+        main_dark,
+        telescope_flats=telescope_flats,
+        baseline_cubes=baseline_cubes,
+        wavelength_m=grid,
+        phase_reference=phase_reference if phase_correction else None,
+        phase_dark=phase_dark if phase_correction else None,
+    )
+    return fit_p2vm(
+        spectra,
+        phase_correction=phase_correction,
+        keep_diagnostics=keep_diagnostics,
+        gd_search_min_m=gd_search_min_m,
+        gd_search_max_m=gd_search_max_m,
+    )
 
 
 def extract_p2vm_spectra(
@@ -506,6 +562,19 @@ def extract_p2vm_spectra(
         phase_reference_spectra = extract_spectra_from_file(
             phase_reference, extractor, selected_dark
         )
+    return P2VMSpectra(
+        telescope_spectra,
+        baseline_spectra,
+        phase_reference_spectra,
+        _identify_output_mapping(telescope_spectra, baseline_spectra),
+        extractor.wavelength_m,
+    )
+
+
+def _identify_output_mapping(
+    telescope_spectra: NDArray, baseline_spectra: NDArray
+) -> dict[int, list[int]]:
+    """Require telescope illumination and baseline modulation to identify the same outputs."""
     outputs_by_telescope = {}
     for telescope, flux in enumerate(telescope_spectra):
         mean_flux = flux.mean(axis=(1, 2))
@@ -519,28 +588,16 @@ def extract_p2vm_spectra(
         outputs_by_modulation[baseline] = np.sort(active).tolist()
 
     baseline_outputs = {}
-    for telescope_1 in range(N_TELESCOPES):
-        for telescope_2 in range(N_TELESCOPES):
-            if telescope_1 >= telescope_2:
-                continue
-            baseline_name = TELESCOPES[telescope_1] + TELESCOPES[telescope_2]
-            baseline = BASELINES.index(baseline_name)
-            from_telescopes = set(outputs_by_telescope[telescope_1]) & set(
-                outputs_by_telescope[telescope_2]
+    for baseline, (telescope_1, telescope_2) in enumerate(BASELINE_PAIRS):
+        from_telescopes = set(outputs_by_telescope[telescope_1]) & set(
+            outputs_by_telescope[telescope_2]
+        )
+        from_modulation = set(outputs_by_modulation[baseline])
+        if from_telescopes != from_modulation:
+            raise ValueError(
+                f"Output mapping mismatch for baseline {BASELINES[baseline]}: "
+                f"{sorted(from_telescopes)} from flats, "
+                f"{sorted(from_modulation)} from modulation"
             )
-            from_modulation = set(outputs_by_modulation[baseline])
-            if from_telescopes != from_modulation:
-                raise ValueError(
-                    f"Output mapping mismatch for baseline {baseline_name}: "
-                    f"{sorted(from_telescopes)} from flats, "
-                    f"{sorted(from_modulation)} from modulation"
-                )
-            baseline_outputs[baseline] = sorted(outputs_by_modulation[baseline])
-
-    return P2VMSpectra(
-        telescope_spectra,
-        baseline_spectra,
-        phase_reference_spectra,
-        baseline_outputs,
-        extractor.wavelength_m,
-    )
+        baseline_outputs[baseline] = sorted(outputs_by_modulation[baseline])
+    return baseline_outputs

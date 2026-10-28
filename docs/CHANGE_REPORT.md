@@ -1,65 +1,73 @@
-# PLANETES 0.10.0：计算64位，浮点存盘32位
+# PLANETES 0.11.0：按物理流程整理 P2VM
 
-基于 `3688449`，将精度策略集中到 `io/hdu.py`。算法内部不再选择float32/64，
-不做精度转换。现有物理单位、阈值、SOF和recipe参数保持。
+基于 `08904a2`。这轮集中修改 `p2vm.py` 的可读性：保持科学算法、阈值、
+相位操作顺序和计算精度，将入口检查、扫描诊断、文件读取与物理映射分开。
 
-## 修改
+## 现在怎么读代码
 
-- raw每16帧读入后转换为float64；浮点产品读入为float64，复数为complex128。
-  GUI的raw frame和当前帧dark在输入边界转换一次。数组级调用者提供计算精度数组。
-- 新写出的浮点image/table数组统一float32，复数complex64；整数raw、索引、
-  BAD bits和bool flags保持原类型。FITS header标量沿用标准文本表示。
-  旧raw文件不重写。产品format仍为6，继续读取format 4/5/6。
-- 移除dark、提取、flat、波长、P2VM及reduction里的精度dtype和astype。
-  ndarray类型标注不再夹带存盘精度，没有新增wrapper或配置层。
-- 暗场统计改为合并每块mean与中心平方和M2，返回sqrt(M2/N)。仍是population
-  RMS；避免E[x²]−E[x]²的大数相减，不再把计算结果转回32位。
-- 按用户确认，波长也存32位。覆盖检查只容忍一次存盘舍入的相对误差上界
-  `2**-24`，该常量同样在I/O定义。真实越界仍拒绝。
+`fit_p2vm`直接展示五个阶段：
 
-## 实测影响
+1. 扫描响应拟合：每条baseline的ABCD ellipse → OPD/GD与零点 → 全24输出响应。
+2. Telescope flats估计transmission。
+3. 归一化phase、transmission和coherence amplitude。
+4. 构造V2PM，检查rank，逐波长用原`pinv`求逆。
+5. 可选仪器phase reference：校正响应相位，再构造并求逆。
 
-使用同一数值环境、15份既有raw，对比0.9.0和新recipe完整链。31个数组的shape
-保持，三个BAD、提取像素索引、science flags、物理映射、setup和实际输入保持。
-这次精度策略会改变浮点数值，不以逐字节相同作为接受条件。
+扫描诊断只在扫描函数内收集，通过普通字典写入已有产品字段。
+数组入口检查集中在`_check_input_axes`；两个文件入口置于模块后部。
+`_identify_output_mapping`单独表达flat照明和baseline调制必须给出同一组outputs。
+没有新增文件框架、产品类或通用validator。
 
-| 最终科学量 | 新旧完整链最大绝对差 | RMS差 |
-| --- | --- | --- |
-| VISAMP | 1.7263e-4 | 1.3319e-5 |
-| 差分相位 | 0.0109904 deg | 0.0008951 deg |
-| GD | 3.5623e-11 m | 1.0059e-11 m |
+`_apply_phase_reference`明确分为重建reference、恢复逐帧telescope phase、
+去时间变化并求和、去残余GD、更新响应相位。用T4与43/42/41的物理配对
+取代`telescope-1`索引。各数组轴、单位与相位符号在代码及科学说明中明确。
 
-另跑全64位内存链，再用新代码读取已存盘的标定计算，分离三个来源：
+## 接口与科学约定
 
-| 对照 | VISAMP最大差 | 差分相位最大差 |
-| --- | --- | --- |
-| 旧版 → 新全64位内存计算 | 6.7904e-7 | 4.4897e-5 deg |
-| 新全64位内存标定 → 标定产品32位存盘后再读入 | 1.7261e-4 | 0.0109956 deg |
-| 新science计算结果 → 最终32位写出 | 5.9605e-8 | 3.7957e-6 deg |
+- `fit_abcd_ellipse(spec)`删除全1的`envs`参数。它原来是方程右端，
+  并不是residual weights。内部使用一维全1右端，继续`pinv`，不改成`lstsq`。
+- 保留原两次transmission归一化及运算顺序，守住浮点基线。
+- A输出相位归零仍作用于该quartet的全部六个响应分量，包括cross-talk。
+  phase reference则仍只修正各output所属的物理baseline。
+- 非正/非有限photometric normalization与V2PM rank检查保留。
+  未新增condition-number拒绝阈值。
+- FITS format仍为6；计算64位、浮点存盘32位的策略保持。
+  版本升至0.11.0以标明ellipse公开函数签名变化。
 
-因此这批数据的主要变化来自标定文件量化经过后续标定链传播，不是最终science
-文件写出的舍入。保留用户确认的32位存盘策略，并记录这个数值代价；这些对照
-不能证明天文准确度提高。
+## 数值验证
 
-## 验证
+同一数值环境、同一批15份既有raw，在独立目录运行旧版和新版完整五种recipe。
+两版均显式选择main/lamp/science DARK；reference使用独立science DARK。
 
-- 12项测试通过，数量未增加：稳定方差、存盘精度往返、64位读入、complex
-  signed zero/NaN、已知物理映射和真实覆盖越界、PyEsoRex science链。
-- 新生成文件中58个实数字段均为32位、1个复数字段为complex64；36个内存浮点
-  数组均为float64/complex128，整数和flags保持。
-- 10份format-4和10份format-5产品可读；新format-6产品可读。
-- 真实Python 3.12 Qt窗口可处理记录帧、模拟采集并拒绝中途相机设置变化。
-  本机GUI与四份可迁移补丁同步。没有操作硬件。
+- 10份产品的31个科学数组逐字节相同，包括BAD、提取索引、P2VM与science flags。
+  mapping、setup、QC、recipe参数及输入选择相同（运行根目录归一后比较）。
+- 另用完全相同的提取光谱比较**存盘前**结果：reference启用、提供但禁用、
+  未提供而启用，分别开/关诊断，共六种配置。连同V2PM、science reduction和
+  退化ellipse样例，共63个数组逐字节相同；浮点科学数组为float64/complex128。
+- 新recipe开启诊断后，五个共有P2VM数组与默认产品逐字节相同。
+- 现有12项测试通过，数量未增加；Ruff与diff检查通过。
 
-源码及GUI备份、一次性数值对照脚本：
+## 椭圆兜底的实测情况
 
-`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261028_131544_precision_boundary/`
+临时观测基线版本的`pinv`调用，返回原inverse不作修改。六条baseline × 151
+channels，共906次拟合：`std_x/std_y <= 1e-9`均为0次，两个非正二次项触发的
+`1e-6`兜底也均为0次。此统计仅描述这批数据。
 
-产品、测试、GUI快照和comparison/precision_control结果：
+全部原阈值与兜底保留。全零扫描对照仍会经兜底返回零phase/radius，不能因此
+视为有效标定。其他数据下如何判定、拒绝失败channel，仍需另行确定科学标准。
 
-`reduced/precision_boundary/20261028_131544/`
+## 备份与结果
 
-[架构图](architecture.png) · [数据流](dataflow.png) · [产品接口](PRODUCT_CONTRACT.md)
+修改前完整源码、一次性对照脚本：
 
-端到端分块science reduction仍是后续工作；本轮只保留16帧raw读取和稳定分块统计。
-[上一版记录](https://github.com/zexwu/planetes_pipe/blob/3688449ffd555d90c7a271d6705d47433323c9bc/docs/CHANGE_REPORT.md)。
+`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261028_172501_p2vm_readability/`
+
+本轮产品、存盘前数组、`comparison.json`、`ellipse_fallbacks.json`：
+
+`reduced/p2vm_readability/20261028_172501/`
+
+[P2VM流程图](p2vm_flow.png) · [科学约定](SCIENTIFIC_METHODS.md) ·
+[总体架构](architecture.png) · [完整数据流](dataflow.png)。
+
+[0.10.0精度修改报告](https://github.com/zexwu/planetes_pipe/blob/08904a20ce7a3d4942b4af8c418765172aeff14e/docs/CHANGE_REPORT.md)
+保留计算精度、标定存盘量化和最终写出舍入的原始证据，不与本轮重构混淆。

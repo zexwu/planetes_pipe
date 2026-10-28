@@ -9,7 +9,7 @@
 <g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 651.87)">
 <title>Architecture</title>
 <polygon fill="white" stroke="none" points="-18,18 -18,-651.87 1126.29,-651.87 1126.29,18 -18,18"/>
-<text xml:space="preserve" text-anchor="middle" x="554.14" y="-610.87" font-family="PingFang SC" font-size="20.00">PLANETES 0.10.0 — 每个步骤自己负责输入、参数和计算</text>
+<text xml:space="preserve" text-anchor="middle" x="554.14" y="-610.87" font-family="PingFang SC" font-size="20.00">PLANETES 0.11.0 — 每个步骤自己负责输入、参数和计算</text>
 <!-- python -->
 <g id="node1" class="node">
 <title>python</title>

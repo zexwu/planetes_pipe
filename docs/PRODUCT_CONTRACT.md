@@ -1,4 +1,4 @@
-# PLANETES science products and FITS interface (v0.10.0)
+# PLANETES science products and FITS interface (v0.11.0)
 
 ## Design
 

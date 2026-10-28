@@ -1,4 +1,4 @@
-# PLANETES 0.10.0：简单科学产品与明确的步骤 API
+# PLANETES 0.11.0：简单科学产品与明确的步骤 API
 
 0.7曾将`products.py`从401行缩减到119行；0.8统一步骤、字段和参数名称，
 0.8.1合并Dark类型后为109行；0.9.0移除固定配对副本后为106行，继续使用普通数据类。
@@ -110,16 +110,18 @@ raw每16帧读入后转换一次，产品读入和GUI入口同理；写出时统
 按用户确认，所有浮点数组均按32位写出；波长覆盖检查仅容忍一次存盘舍入的
 相对误差上界2**-24，实际越界仍拒绝。
 
-## 验证
+## 0.11.0 的 P2VM 流程
 
-保留12项开发测试；测试检查存盘舍入后的数值、读入64位、复数signed zero/NaN、
-稳定方差和真实波长越界拒绝。15份真实raw的完整recipe链通过，BAD、提取索引、
-science flags和物理映射不变。新的科学结果包含精度策略引起的数值差异；
-受控全64位内存链把计算变化与标定存盘舍入分开，数值见修改报告。
-GUI窗口、模拟采集和四份迁移补丁也已核对。
+`fit_p2vm`直接展示扫描响应拟合 → transmission → 归一化 → V2PM求逆 →
+可选phase reference。输入数组契约、扫描诊断、文件读取和物理output识别分别有
+清楚的位置，仍在同一个步骤文件内。没有引入新的框架或产品类。
 
-SOF身份标签、file-level workflow集中、端到端分块reduction属于下一步，
-本轮保持现有接口和处理方式。
+删除椭圆拟合的全1 `envs`参数，仍用原`pinv`及全部原阈值。
+phase reference明确用T4及43/42/41，不再通过`telescope-1`隐含配对。
+原有相位操作顺序、双重transmission归一化、全24输出cross-talk响应保持。
 
-[当前修改报告](CHANGE_REPORT.md)记录证据位置；
-[产品接口](PRODUCT_CONTRACT.md)列出字段、文件布局和参数。
+保留12项开发测试。真实数据对照及椭圆兜底统计见[当前修改报告](CHANGE_REPORT.md)；
+0.10精度改动和GUI验证见[上一版报告](https://github.com/zexwu/planetes_pipe/blob/08904a20ce7a3d4942b4af8c418765172aeff14e/docs/CHANGE_REPORT.md)。
+
+[P2VM流程图](p2vm_flow.png) · [科学约定](SCIENTIFIC_METHODS.md) ·
+[产品接口](PRODUCT_CONTRACT.md)
