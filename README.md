@@ -177,8 +177,9 @@ metre equivalents at the file boundary.
 
 [Change report and diagrams](docs/CHANGE_REPORT.md) explain the migration and
 full-data evidence. [Scientific methods](docs/SCIENTIFIC_METHODS.md) describe retained numerical
-definitions. Maintained tests are grouped into scientific calculations, calibration
-relationships, FITS I/O and optional ESO integration. One-off migration scripts
+definitions. During development, 12 focused tests cover core scientific calculations,
+bench P2VM inputs, FITS round trips/non-overwriting writes and one optional PyEsoRex
+P2VM-to-science chain. One-off migration scripts
 and logs are kept in Git history and the local archive referenced in the report.
 
 ```bash

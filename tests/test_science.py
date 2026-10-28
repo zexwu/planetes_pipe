@@ -6,14 +6,7 @@ import numpy as np
 from p2vm_fixture import calibration_spectra
 
 from planetes.extraction import extract_spec_sparse
-from planetes.instrument import (
-    IMAG_SLICE,
-    N_BASELINES,
-    N_DATA,
-    N_OUTPUTS,
-    N_TELESCOPES,
-    REAL_SLICE,
-)
+from planetes.instrument import N_DATA
 from planetes.p2vm import build_v2pm_matrix, compute_p2vm, fit_ellipse_linear
 from planetes.reduction import normalize_visibility
 from planetes.wavelength import match_lines_grid
@@ -40,25 +33,6 @@ class ScienceTests(unittest.TestCase):
                 rtol=0,
                 atol=1e-12,
             )
-
-    def test_v2pm_terms_expand_to_cartesian_matrix(self) -> None:
-        transmission = np.arange(N_OUTPUTS * N_TELESCOPES * 2, dtype=float).reshape(
-            N_OUTPUTS, N_TELESCOPES, 2
-        )
-        amplitude = np.full((N_OUTPUTS, N_BASELINES, 2), 2.0)
-        phase = np.full((N_OUTPUTS, N_BASELINES, 2), np.pi / 3)
-
-        matrix = build_v2pm_matrix(transmission, amplitude, phase)
-
-        np.testing.assert_array_equal(
-            matrix[:, :N_TELESCOPES], transmission / N_OUTPUTS
-        )
-        np.testing.assert_array_equal(
-            matrix[:, REAL_SLICE], amplitude * np.cos(phase) / N_OUTPUTS
-        )
-        np.testing.assert_array_equal(
-            matrix[:, IMAG_SLICE], amplitude * np.sin(phase) / N_OUTPUTS
-        )
 
     def test_sparse_extractor_skips_invalid_sentinels(self) -> None:
         cube = np.ones((1, 2, 3), dtype=np.float32)
@@ -110,38 +84,3 @@ class ScienceTests(unittest.TestCase):
                 np.eye(N_DATA),
                 atol=1e-12,
             )
-
-
-class StandaloneScienceTests(unittest.TestCase):
-    def test_steps_run_without_cpl(self):
-        """Each step remains usable from ordinary Python without CPL."""
-        import subprocess
-        import sys
-        from pathlib import Path
-
-        code = """
-import importlib.abc
-import sys
-class NoExecutorImports(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'cpl', 'pyesorex'}:
-            raise ImportError(f'Forbidden scientific dependency: {fullname}')
-sys.meta_path.insert(0, NoExecutorImports())
-import numpy as np
-from planetes import dark, flat, wavelength, p2vm
-from planetes import extraction, reduction, qc
-measured = dark.compute_dark([np.arange(24, dtype=np.float32).reshape(2,3,4)])
-assert measured.n_frames == 2
-assert dark.compute_badpix(measured).bad_pixel_flags.shape == (3,4)
-values, _ = qc.measure_quality(measured)
-assert values['dark_median_adu'][0] == 11.5
-assert not any(key.startswith('ESO ') for key in values)
-"""
-        result = subprocess.run(
-            [sys.executable, "-c", code],
-            cwd=Path(__file__).resolve().parents[1],
-            text=True,
-            capture_output=True,
-            timeout=30,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

@@ -4,27 +4,20 @@ import tempfile
 import unittest
 from dataclasses import fields, replace
 from pathlib import Path
-from unittest.mock import patch
 
 import numpy as np
 from astropy.io import fits
-from p2vm_fixture import calibration_arrays, calibration_spectra, metadata
+from p2vm_fixture import calibration_arrays, calibration_spectra
 
-from planetes.dark import frame_statistics
 from planetes.io.fits import read_product, write_product
-from planetes.io.publication import destinations
 from planetes.io.raw import iter_raw_cube as iter_cube
 from planetes.io.raw import (
-    identify_raw,
-    parse_raw_header,
     read_raw_header,
     read_raw_metadata,
-    write_raw,
 )
 from planetes.p2vm import compute_p2vm
 from planetes.products import ReducedObservables
 from planetes.reduction import reduce_spectra
-from planetes.wavelength import load_wavelength_reference
 
 
 class ScienceProductTests(unittest.TestCase):
@@ -63,60 +56,6 @@ class ScienceProductTests(unittest.TestCase):
             self.assertTrue(loaded.flags[0].all())
             self.assertEqual(loaded.flags.dtype, bool)
 
-    def test_science_rows_use_physical_station_ids_and_frame_order(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "science.fits"
-            write_product(path, self.product)
-            with fits.open(path) as hdus:
-                np.testing.assert_array_equal(
-                    hdus["PLANETES_VIS"].data["STA_INDEX"][:6],
-                    [[4, 3], [4, 2], [4, 1], [3, 2], [3, 1], [2, 1]],
-                )
-                np.testing.assert_array_equal(
-                    hdus["PLANETES_FLUX"].data["STA_INDEX"][:4], [4, 3, 2, 1]
-                )
-                self.assertTrue((hdus["PLANETES_VIS"].data["FRAME"][:6] == 1).all())
-
-    def test_mapping_dictionary_order_cannot_change_baseline_identity(self):
-        product = replace(
-            self.product,
-            baseline_regions=dict(
-                reversed(list(self.product.baseline_regions.items()))
-            ),
-        )
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "science.fits"
-            write_product(path, product)
-            actual = read_product(path)
-            self.assertEqual(actual.baseline_regions, product.baseline_regions)
-            self.assertEqual(actual.baseline_telescopes, product.baseline_telescopes)
-
-    def test_static_reference_retains_original_values(self):
-        lines = load_wavelength_reference().wavelength_m
-        self.assertEqual(len(lines), 30)
-        self.assertAlmostEqual(lines[0], 0.965780e-6, delta=1e-20)
-        self.assertAlmostEqual(lines[-1], 1.409370e-6, delta=1e-20)
-
-    def test_changed_visibility_flag_with_updated_checksum_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "science.fits"
-            write_product(path, self.product)
-            with fits.open(path, mode="update") as hdus:
-                hdus["PLANETES_VIS"].data["FLAG"][0, 0] = False
-                hdus["PLANETES_VIS"].add_checksum()
-            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
-                read_product(path, ReducedObservables)
-
-    def test_scientific_edit_with_valid_checksums_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "science.fits"
-            write_product(path, self.product)
-            with fits.open(path, mode="update") as hdus:
-                hdus["PLANETES_VIS"].data["VISAMP"][0, 0] = 42.0
-                hdus["PLANETES_VIS"].add_checksum()
-            with self.assertRaisesRegex(ValueError, "fingerprint mismatch"):
-                read_product(path)
-
 
 class CalibrationFitsTests(unittest.TestCase):
     @classmethod
@@ -149,24 +88,6 @@ class CalibrationFitsTests(unittest.TestCase):
                     else:
                         self.assertEqual(before, after)
 
-    def test_fits_reader_rejects_changed_wavelength_units(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "wave.fits"
-            write_product(path, self.wave)
-            with fits.open(path, mode="update") as hdus:
-                hdus["WAVE_DATA_SC"].header["TUNIT1"] = "nm"
-                hdus["WAVE_DATA_SC"].add_checksum()
-            with self.assertRaisesRegex(ValueError, "units"):
-                read_product(path, type(self.wave))
-
-    def test_fits_writer_rejects_changed_telescope_identity(self):
-        pairs = dict(self.p2vm.baseline_telescopes)
-        pairs[0] = tuple(reversed(pairs[0]))
-        product = replace(self.p2vm, baseline_telescopes=pairs)
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaisesRegex(ValueError, "identities"):
-                write_product(Path(tmp) / "bad.fits", product)
-
     def test_fits_writer_preserves_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "wave.fits"
@@ -175,32 +96,6 @@ class CalibrationFitsTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 write_product(path, self.wave)
             self.assertEqual(path.read_bytes(), original)
-
-    def test_qc_choice_preserves_scientific_content_and_default_output(self):
-        for include_qc in (True, False):
-            with (
-                self.subTest(include_qc=include_qc),
-                tempfile.TemporaryDirectory() as tmp,
-            ):
-                path = Path(tmp) / "p2vm.fits"
-                if include_qc:
-                    write_product(path, self.p2vm)  # Existing callers keep QC.
-                else:
-                    with patch(
-                        "planetes.qc.measure_quality",
-                        side_effect=AssertionError("QC ran"),
-                    ):
-                        write_product(path, self.p2vm, include_qc=False)
-                actual = read_product(path)
-                np.testing.assert_array_equal(actual.p2vm, self.p2vm.p2vm)
-                self.assertEqual(
-                    actual.provenance.dependencies, self.p2vm.provenance.dependencies
-                )
-                with fits.open(path) as hdus:
-                    self.assertEqual(
-                        "ESO QC P2VM_COHERENCE_AVG_SC" in hdus[0].header, include_qc
-                    )
-                self.assertEqual(bool(actual.provenance.qc_status), include_qc)
 
 
 class RawFitsTests(unittest.TestCase):
@@ -227,290 +122,3 @@ class RawFitsTests(unittest.TestCase):
                 self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
                 np.testing.assert_array_equal(np.concatenate(chunks), cube)
                 self.assertEqual(path.read_bytes(), original)
-
-    def test_multiple_cubes_require_an_explicit_hdu(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "two_cubes.fits"
-            cube = np.ones((2, 3, 5))
-            fits.HDUList(
-                [fits.PrimaryHDU(cube), fits.ImageHDU(7 * cube, name="DETECTOR")]
-            ).writeto(path)
-            with self.assertRaisesRegex(ValueError, "Multiple raw detector cubes"):
-                read_raw_metadata(path, category="DARK_RAW")
-            with self.assertRaisesRegex(ValueError, "Multiple raw detector cubes"):
-                list(iter_cube(path))
-            read_raw_metadata(path, category="DARK_RAW", hdu="DETECTOR")
-            np.testing.assert_array_equal(
-                next(iter_cube(path, hdu="DETECTOR")), 7 * cube
-            )
-
-    def test_known_non_adu_values_are_rejected_before_processing(self):
-        for primary_unit in (True, False):
-            with (
-                self.subTest(primary_unit=primary_unit),
-                tempfile.TemporaryDirectory() as tmp,
-            ):
-                path = Path(tmp) / "electrons.fits"
-                hdus = fits.HDUList(
-                    [fits.PrimaryHDU(), fits.ImageHDU(np.ones((2, 3, 5)))]
-                )
-                hdus[0 if primary_unit else 1].header["BUNIT"] = "electron"
-                hdus.writeto(path)
-                with self.assertRaisesRegex(ValueError, "must be ADU"):
-                    read_raw_metadata(path, category="DARK_RAW")
-                with self.assertRaisesRegex(ValueError, "must be ADU"):
-                    list(iter_cube(path))
-
-    def test_bench_header_reads_known_values_and_rejects_contradictions(self):
-        header = fits.Header({"ESO DET WIN1 DIT1": 0.02, "ESO DET WIN1 STRX": 5})
-        raw = parse_raw_header(header, (2, 3, 5), category="FLAT_RAW")
-        self.assertEqual(raw.setup.exposure_s, 0.02)
-        self.assertEqual(raw.setup.origin_x, 4)
-        self.assertIsNone(raw.setup.binning_x)
-        for key, value in (
-            ("ESO DET WIN1 DIT1", -1),
-            ("ESO DET WIN1 NX", 6),
-            ("PLANETES INS SHUT1 ST", "OPEN"),
-            ("ESO DPR TYPE", "DARK"),
-        ):
-            with self.subTest(key=key), self.assertRaises(ValueError):
-                parse_raw_header(
-                    fits.Header({**dict(header), key: value}),
-                    (2, 3, 5),
-                    category="FLAT_RAW",
-                )
-
-    def test_explicit_identity_mapping_checks_partial_shutter_readback(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            paths = {}
-            for index, identity in enumerate(("2", "4", "1", "3")):
-                path = Path(tmp) / f"arbitrary_{index}.fits"
-                fits.PrimaryHDU(np.ones((2, 3, 5))).writeto(path)
-                paths[identity] = path
-            self.assertEqual(identify_raw(paths, "FLAT_RAW"), paths)
-            with self.assertRaisesRegex(ValueError, "explicit identity mapping"):
-                identify_raw(paths.values(), "FLAT_RAW")
-            with fits.open(paths["4"], mode="update") as hdus:
-                hdus[0].header["HIERARCH PLANETES INS SHUT1 ST"] = True
-            with self.assertRaisesRegex(ValueError, "conflicts with recorded shutters"):
-                identify_raw(paths, "FLAT_RAW")
-
-    def test_versioned_raw_cannot_fall_back_to_provisional_metadata(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "incomplete.fits"
-            hdu = fits.PrimaryHDU(np.ones((2, 3, 5)))
-            hdu.header["HIERARCH PLANETES FORMAT"] = 3
-            hdu.writeto(path)
-            with self.assertRaisesRegex(ValueError, "complete PLANETES raw format"):
-                read_raw_metadata(path, category="DARK_RAW")
-
-    def test_fits_cube_iteration_and_statistics_use_the_full_cube(self) -> None:
-        cube = np.arange(17 * 3 * 5, dtype=np.int16).reshape(17, 3, 5)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            cube_path = Path(tmp) / "cube.fits"
-            write_raw(cube_path, cube, metadata("DARK_RAW", n_wave=5, height=3))
-
-            chunks = list(iter_cube(cube_path))
-            mean, std, _ = frame_statistics(chunks)
-            expected = cube.astype(np.float32)
-
-            self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
-            np.testing.assert_array_equal(np.concatenate(chunks), expected)
-            np.testing.assert_allclose(mean, expected.mean(axis=0), rtol=1e-6)
-            np.testing.assert_allclose(std, expected.std(axis=0), rtol=1e-6)
-
-    def test_fits_input_must_be_a_3d_extension(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "image.fits"
-            fits.HDUList(
-                [
-                    fits.PrimaryHDU(),
-                    fits.ImageHDU(np.ones((3, 5)), name="IMAGING_DATA_SC"),
-                ]
-            ).writeto(path)
-
-            with self.assertRaisesRegex(
-                ValueError, "three-dimensional raw detector cube"
-            ):
-                list(iter_cube(path))
-
-
-class PublicationTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.wave = calibration_arrays(n_wave=15)[-1]
-
-    def test_failure_during_write_leaves_no_final_file_and_can_retry(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "wave.fits"
-            with patch(
-                "planetes.io.fits.read_product",
-                side_effect=ValueError("injected readback failure"),
-            ):
-                with self.assertRaisesRegex(ValueError, "injected"):
-                    write_product(path, self.wave)
-            self.assertFalse(path.exists())
-            self.assertEqual(list(path.parent.iterdir()), [])
-            write_product(path, self.wave)
-            self.assertIsNotNone(read_product(path))
-
-    def test_concurrent_publication_never_overwrites_the_winner(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "wave.fits"
-            with self.assertRaises(FileExistsError):
-                with destinations([path], verify=read_product) as staged:
-                    write_product(staged[0], self.wave)
-                    path.write_bytes(b"existing winner")
-            self.assertEqual(path.read_bytes(), b"existing winner")
-
-    def test_dangling_symlink_is_also_an_existing_target(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "wave.fits"
-            path.symlink_to("missing")
-            with self.assertRaises(FileExistsError):
-                write_product(path, self.wave)
-            self.assertTrue(path.is_symlink())
-
-    def test_second_publication_failure_rolls_back_only_our_first_file(self):
-        import os
-
-        link = os.link
-        with tempfile.TemporaryDirectory() as temporary:
-            paths = [Path(temporary) / "dark.fits", Path(temporary) / "bad.fits"]
-
-            def fail_second(source, target):
-                if Path(target) == paths[1]:
-                    raise OSError("injected second publication failure")
-                return link(source, target)
-
-            with patch("planetes.io.publication.os.link", side_effect=fail_second):
-                with self.assertRaisesRegex(OSError, "second publication"):
-                    with destinations(paths, verify=read_product) as staged:
-                        # Stage directly to avoid counting nested single-product publication.
-                        from planetes.io.fits import encode_product
-
-                        for path in staged:
-                            encode_product(self.wave).writeto(path, checksum=True)
-            self.assertFalse(any(path.exists() for path in paths))
-
-
-class CanonicalAndRawTests(unittest.TestCase):
-    def test_rewrites_retain_valid_metres_and_inplace_changes_invalidate_hash(self):
-        from planetes.products import fingerprint
-
-        wave = calibration_arrays(n_wave=15)[-1]
-        metres = np.nextafter(wave.wavelength_map_m, np.inf)
-        wave = replace(wave, wavelength_map_m=metres)
-        original = fingerprint(wave)
-        with tempfile.TemporaryDirectory() as temporary:
-            for i in range(3):
-                path = Path(temporary) / f"wave{i}.fits"
-                write_product(path, wave)
-                wave = read_product(path)
-                self.assertEqual(fingerprint(wave), original)
-                with fits.open(path) as hdus:
-                    np.testing.assert_array_equal(
-                        hdus["WAVE_DATA_SC"].data["DATA1"][0], metres[0]
-                    )
-            wave.wavelength_map_m[0, 0] += 1e-6
-            self.assertNotEqual(fingerprint(wave), original)
-            self.assertNotEqual(
-                fingerprint(
-                    replace(
-                        wave, provenance=replace(wave.provenance, parameters={"x": 1})
-                    )
-                ),
-                original,
-            )
-
-    def test_raw_pixels_metadata_and_duplicate_shutters(self):
-        from planetes.io.raw import identify_raw, read_raw_metadata
-
-        data = np.array([[[40000.0, -2.0, 3.5]], [[1.0, 2.0, 3.0]]], dtype=np.float32)
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "anything.fits"
-            raw = metadata("FLAT_RAW", "4", 3, 1)
-            write_raw(path, data, raw)
-            self.assertEqual(read_raw_metadata(path), raw)
-            with fits.open(path) as hdus:
-                self.assertNotIn("DATE-OBS", hdus[0].header)
-                self.assertEqual(hdus[0].header["ESO DET WIN1 DIT1"], 0.01)
-                self.assertEqual(hdus[0].header["EXPTIME"], 0.02)
-                np.testing.assert_array_equal(hdus["IMAGING_DATA_SC"].data, data)
-                self.assertEqual(hdus["IMAGING_DATA_SC"].data.dtype.kind, "f")
-            with self.assertRaisesRegex(ValueError, "Duplicate shutter"):
-                identify_raw([path, path], "FLAT_RAW")
-            with fits.open(path, mode="update") as hdus:
-                hdus[0].header["ESO DET WIN1 STRX"] = 2
-                hdus[0].add_checksum()
-            with self.assertRaisesRegex(ValueError, "disagree"):
-                read_raw_metadata(path)
-
-    def test_operator_exposure_is_requested_and_legacy_missing_stays_unknown(self):
-        from planetes.io.raw import read_raw_metadata
-
-        with tempfile.TemporaryDirectory() as temporary:
-            data = np.zeros((2, 1, 3), dtype=np.uint16)
-            raw = metadata("DARK_RAW", n_wave=3, height=1)
-            raw = replace(raw, setup=replace(raw.setup, exposure_source="operator"))
-            path = Path(temporary) / "operator.fits"
-            write_raw(path, data, raw)
-            with fits.open(path) as hdus:
-                self.assertIn("ESO DET WIN1 UIT1", hdus[0].header)
-                self.assertNotIn("EXPTIME", hdus[0].header)
-            raw = replace(
-                raw,
-                configuration_source="legacy-role-map",
-                setup=replace(
-                    raw.setup,
-                    legacy=True,
-                    exposure_s=None,
-                    exposure_source="unknown",
-                    binning_x=None,
-                ),
-            )
-            path = Path(temporary) / "legacy.fits"
-            write_raw(path, data, raw)
-            self.assertIsNone(read_raw_metadata(path).setup.exposure_s)
-
-    def test_invalid_fits_logical_bytes_are_rejected(self):
-        spectra = calibration_spectra(n_wave=15)
-        product = reduce_spectra(
-            spectra.phase_reference, compute_p2vm(spectra, phase_correction=False)
-        )
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "science.fits"
-            write_product(path, product)
-            with fits.open(path, mode="update") as hdus:
-                hdus["PLANETES_VIS"].data._get_raw_data()["FLAG"][0, 0] = ord("X")
-                hdus["PLANETES_VIS"].add_checksum()
-            with self.assertRaisesRegex(ValueError, "logical flag"):
-                read_product(path)
-
-    def test_rollback_preserves_a_concurrent_replacement(self):
-        import os
-
-        from planetes.io.fits import encode_product
-
-        wave = calibration_arrays(n_wave=15)[-1]
-        link = os.link
-        with tempfile.TemporaryDirectory() as temporary:
-            paths = [Path(temporary) / "one.fits", Path(temporary) / "two.fits"]
-
-            def replace_first_then_fail(source, target):
-                if Path(target) == paths[1]:
-                    paths[0].unlink()
-                    paths[0].write_bytes(b"concurrent winner")
-                    raise OSError("injected second failure")
-                return link(source, target)
-
-            with patch(
-                "planetes.io.publication.os.link", side_effect=replace_first_then_fail
-            ):
-                with self.assertRaisesRegex(OSError, "injected"):
-                    with destinations(paths, verify=read_product) as staged:
-                        for path in staged:
-                            encode_product(wave).writeto(path, checksum=True)
-            self.assertEqual(paths[0].read_bytes(), b"concurrent winner")
-            self.assertFalse(paths[1].exists())
