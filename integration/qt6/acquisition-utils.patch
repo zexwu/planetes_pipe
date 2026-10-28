@@ -23,7 +23,7 @@
 +    """Snapshot supported readbacks and explicitly sourced physical camera settings."""
 +    from planetes.instrument import DetectorSetup
 +    from planetes.io.raw import RawMetadata
-+    from planetes.io.raw import validate_raw_metadata
++    from planetes.io.raw import raw_header
 +
 +    required = ("detector", "orientation", "binning_x", "binning_y")
 +    if any(camera_config.get(key) in (None, "", 0) for key in required):
@@ -70,7 +70,7 @@
 +            }
 +        },
 +    )
-+    validate_raw_metadata(metadata, (1, setup.height, setup.width))
++    raw_header(metadata, (1, setup.height, setup.width))
 +    return metadata
 +
 +

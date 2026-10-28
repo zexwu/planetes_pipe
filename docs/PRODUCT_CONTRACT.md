@@ -1,167 +1,113 @@
-# PLANETES 0.5.1 product and raw contract (products 4 / raw 3)
+# PLANETES science products and FITS interface (v0.7.0)
 
-Science functions return named Python objects. `products.py` defines their units,
-axes and parent relationships; `io/fits.py` maps them to files. `recipes/` binds SOF and
-parameters to those ordinary functions and asks CPL DFS to sign/register results.
-Numerical code imports neither PyCPL nor Qt. No YAML scheduler is added.
+## Design
 
-## Reference and adaptations
+The scientific functions return **plain dataclasses** from `planetes.products`.
+They store arrays and optional detector context; file provenance and association
+are handled at the I/O/recipe boundary. Units and array axes are visible in each field's name/comment.
+`planetes.io.fits` alone defines serialization; `recipes/` binds SOF roles,
+recipe parameters, CPL DFS and file registration. These layers are independent.
 
-The fixed reference is GRAVITY **1.9.6**, available locally at
-`/Users/zexwu/software/gravi_pipeline/gravity-1.9.6/`; paths below are relative to
-that source. These are instrument pipeline conventions, not an assertion that
-all GRAVITY keywords belong to an ESO-wide dictionary.
+ESO GRAVITY's **DARK, BAD, FLAT, WAVE, P2VM** categories and the distinct
+**P2VMRED** intermediate product are the naming reference. The FITS layout is
+a PLANETES adaptation, **not** a byte-for-byte implementation of GRAVITY's
+internal products. GRAVITY `VIS` is a further (averaged, uncalibrated) OIFITS
+product; it is not implemented here.
 
-| Reference | Meaning | PLANETES representation and difference |
+Official references:
+
+- [ESO GRAVITY product names](https://www.eso.org/observing/dfo/quality/GRAVITY/pipeline/product_codes.html)
+- [ESO GRAVITY Pipeline User Manual, issue 1.10.2 (12 June 2026)](https://ftp.eso.org/pub/dfs/pipelines/gravity/gravity-pipeline-manual-1.10.2.pdf), §2.4–2.5
+
+## Python objects
+
+| Dataclass | Important contents | Usage |
 | --- | --- | --- |
-| `gravi/gravi_dfs.h:43–99` | raw/product categories | DARK_RAW, FLAT_RAW, P2VM_RAW, WAVELAMP_RAW, SINGLE_SCI_RAW; DARK, BAD, FLAT, WAVE, P2VM, SINGLE_SCI_P2VMRED |
-| `gravi/gravi_dfs.c` parameter constructors | instrument.stage.hyphenated-parameter | explicit `planetes.calib.*` / `planetes.reduce.*` registry; original scientific defaults |
-| `gravi/gravi_utils.h:131–140`, `gravi_utils.c:gravi_get_shutter` | physical shutters, GRAVITY ESO INS SHUT11..14/IPAG variants | private PLANETES INS SHUT1..4 ST, physical channels 1..4; no invented GRAVITY hardware |
-| `gravi/gravi_pfits.h:41–95` | named SC detector/profile/wave/P2VM extensions | same names where quantities match; one PLANETES camera, no imaginary FT |
-| `gravi/gravi_calib.c:1293–1407` | PROFILE_PARAMS CENTERY and Gaussian WIDTH | one-based smoothed trace and retained accepted Gaussian sigma; flat response remains private, not a weighted GRAVITY PROFILE_DATA |
-| `gravi/gravi_p2vm.c:125–171,637–639` | output rows with physical response vectors and C_MATRIX | full 24-output TRANSMISSION, COHERENCE, PHASE and fitted DC C_MATRIX; inverse has its own private extension |
-| `gravi/gravi_wave.c:gravi_wave_fit_2d` | fitted wavelength surface | lamp-line surface retained; the raw input is WAVELAMP_RAW, not GRAVITY's internal interferometric WAVE_RAW |
-| supplied ESO-044156 v8, p24, p47–48 | exposure times, UTC start, detector window | real per-integration readback DIT1 or requested UIT1, actual NDIT, ROI and physical binning |
+| `DarkImage` | `mean_adu` `(y, x)` | Live subtraction only; no measured RMS |
+| `Dark` | `mean_adu`, `temporal_rms_adu` `(y,x)`, `n_frames`, optional `setup` | Formal DARK |
+| `BadPixelMap` | `bad_pixel_flags` `(y,x)` | Bit flags: hot 1, dead 2, noisy 4 |
+| `Flat` | sparse `profile_x_pixels`/`profile_y_pixels`, `flat_map_adu`, `trace_y_pixels`; optional sigma/flux/setup | FLAT and extraction geometry |
+| `Wave` | `wavelength_map_m` `(output,x)`; optional fit residuals | WAVE solution |
+| `P2VM` | `p2vm` `(16,24,wavelength)` plus wavelength, output/baseline identity, transmission and fit diagnostics | P2VM response/inverse |
+| `P2VMRed` | per-frame `photometric_flux_adu`, complex `coherent_flux_adu`, `visibility_amplitude`, `flags`; optional GD and differential phase | Science intermediate, **not VIS** |
+| `WavelengthReference` | laboratory `wavelength_m`, origins | Static line list |
+| `CalibrationSpectra` | extracted calibration scans and explicit instrument identity | Internal P2VM fit input, not a file product |
 
-Physical telescope order is **4,3,2,1**, baselines **43,42,41,32,31,21** and
-outputs within each baseline **A,C,B,D**. These PLANETES conventions are retained,
-including baseline signs. SC means the sole spectroscopic camera here.
+`P2VMRed.group_delay_m` and `.differential_phase_deg` are `None` in the
+fast live preview. Formal file reductions compute them; only complete
+`P2VMRed` objects can be saved to FITS.
 
-## Raw acquisition contract
+`DarkInput = Dark | DarkImage` is a type alias for subtraction, **not** a
+separate product. `DetectorSetup` is defined in `instrument.py`; unknown
+header fields are `None`. Static telescope order is 4,3,2,1; baseline order
+43,42,41,32,31,21; each baseline's outputs are A,C,B,D.
 
-An empty primary carries INSTRUME=PLANETES, DPR classification and
-`HIERARCH PLANETES FORMAT=3`. A named IMAGING_DATA_SC image contains the original
-(frame, detector_y, detector_x) cube in ADU. Dtype and pixel values are preserved;
-there is no unconditional int16 cast or lossy floating compression. Files are
-published without overwrite. The complete cube is read in 16-frame float32
-chunks for the original core arithmetic.
+## Raw bench input
 
-| SOF/raw category | DPR CATG / TYPE / TECH | Open physical shutters |
-| --- | --- | --- |
-| DARK_RAW | CALIB / DARK / IMAGE | 0 |
-| FLAT_RAW | CALIB / FLAT / SPECTRUM | 1 |
-| P2VM_RAW | CALIB / P2VM / INTERFEROMETRY | 2 |
-| WAVELAMP_RAW | CALIB / WAVE,LAMP / SPECTRUM | 4 |
-| SINGLE_SCI_RAW | SCIENCE / OBJECT,SINGLE / INTERFEROMETRY | 4 |
+The reader selects IMAGING_DATA_SC when present, otherwise the unique nonempty
+3-D primary/image extension. Ambiguous cubes require explicit low-level `hdu`
+selection. Known non-ADU units are rejected; missing BUNIT follows the bench ADU
+convention and stays marked in raw metadata. Missing acquisition fields remain
+None. Version-3 raw files still require their complete metadata extension.
 
-Four explicit boolean `PLANETES INS SHUTn ST` cards refer to **physical** n=1..4.
-Configuration sources are readback, command, operator or an explicit legacy-role-map.
-`PLANETES_META` stores named RawMetadata, detector setup and original/source records.
-It never infers identity from filenames, caller numbering or SOF order.
+Python telescope/baseline dictionaries supply identities when shutter readback
+is incomplete. All known shutter states must agree with that assignment.
+SOF keeps the existing repeated FLAT_RAW/P2VM_RAW categories and uses recorded
+shutters; no additional temporary SOF tags are introduced.
 
-New captures require exposure seconds and source, detector identity, orientation,
-ROI origin and dimensions, physical binning, category and shutters. ROI origins
-are zero-based internally and one-based in ESO DET WIN1 STRX/STRY; NX/NY and
-BINX/BINY describe sensor geometry, independently of GUI display binning.
+## FITS products
 
-Exposure readback uses ESO DET WIN1 DIT1 [s]; command/operator requests use UIT1.
-NDIT is the actual cube frame count. Only actual/readback DIT creates EXPTIME as
-the sum of unaveraged integration durations; host elapsed time is not EXPTIME.
-The established camera exposure_time property is microseconds. Host start/end UTC
-are separately sourced in metadata. DATE-OBS/MJD-OBS are emitted only for an actual
-camera exposure-start UTC; neither saving time nor GUI refresh rate supplies it.
+New reduced FITS files use `HIERARCH PLANETES FORMAT = 5`. The reader also
+accepts previous format-4 files, ignoring their old private SHA-256 field
+and provenance JSON entries. Full structured raw files remain **format 3**.
 
-Publishing legacy data as raw format 3 requires separate files with an explicit
-adopted role/shutter map. Width/height come from the actual image, known header settings
-are retained with source, and unrecoverable settings stay None. Legacy is explicit;
-missing association fields are returned as `provenance.unverified`. Original
-EXP_TIME, DATE/TIME and other available header values remain in original metadata;
-historical local saving times do not become observation timestamps.
-
-Unversioned bench FITS can also be read directly while acquisition headers are
-unfinished. Category comes from the Python caller, SOF role or recognized DPR TYPE;
-telescope/baseline identity comes from complete shutter readback or an explicit
-Python mapping (`{"4": path, ...}` / `{"43": path, ...}`). Partial shutter readback
-cannot assign an identity, but any known state must agree with an explicit mapping.
-SOF categories remain unchanged and require shutter readback for repeated roles.
-Missing detector fields remain None and association checks record unknowns.
-
-The detector cube is the named IMAGING_DATA_SC image, otherwise the unique nonempty
-3-D image in the primary/extensions. Ambiguity requires explicit low-level `hdu`
-selection. A known non-ADU BUNIT is rejected in both metadata and cube reads;
-missing BUNIT follows the provisional bench ADU convention and records RAW.BUNIT
-as unverified. `read_raw_header()` preserves the primary header for inspection.
-Declaring a private format or metadata extension selects the strict reader: an
-incomplete version-3 file cannot fall back to the bench parser. Original files
-are never rewritten by these readers.
-
-## Products and layouts
-
-All products have empty primary, format 4, ESO PRO CATG/TYPE/SCIENCE and private
-`PLANETES CONTENT SHA256`. Every HDU has CHECKSUM/DATASUM. PLANETES_META holds
-producer, software version, actual parameters, all source roles, parent scientific
-fingerprints, unverified associations and unavailable QC reasons. Known DARK/FLAT
-ROI/exposure cards are also exposed in the primary and checked against metadata.
-CPL products additionally carry its DFS recipe, parameters, all used frames and
-signature. Standalone Python uses the same payload, units, QC and validation.
-`write_product(..., include_qc=True)` preserves the existing QC default; setting
-False skips measurement and attachment. Recipes explicitly request QC at their
-publication call. `encode_product(..., quality=...)` serializes supplied
-measurements/missing reasons and never calls the numerical QC routines itself.
-
-| Python class / category | Extensions and quantities |
+| Category | FITS payload |
 | --- | --- |
-| DarkCalibration / DARK | IMAGING_DATA_SC mean ADU; IMAGING_ERR_SC temporal **population** RMS ADU; actual NFRAMES >=2; DetectorSetup |
-| BadPixelMap / BAD | IMAGING_DATA_SC integer bits hot=1, dead=2, noisy=4, explicitly declared; mandatory DARK parent |
-| FlatCalibration / FLAT | PLANETES_FLAT_IMAGE ADU; PROFILE_PARAMS(REGNAME,CENTERY,optional WIDTH); PLANETES_PROFILE(PIXEL_X,PIXEL_Y); optional PLANETES_FLAT_FLUX ADU |
-| WavelengthCalibration / WAVE | WAVE_DATA_SC, one row, DATA1..DATA24 metre vectors; PLANETES_WAVE_FIT(RESIDUAL [m], X/Y [zero-based pixel]) for accepted lines |
-| P2VMCalibration / P2VM | P2VM_SC, 24 REGNAME rows; TRANSMISSION (4,nwave), COHERENCE/PHASE/C_MATRIX (6,nwave); PHASE rad and DC C_MATRIX ADU |
-| ReducedObservables / SINGLE_SCI_P2VMRED | PLANETES_FLUX: FRAME, physical STA_INDEX, FLUXDATA [ADU]; PLANETES_VIS: FRAME, station pair, VISDATA [complex ADU], VISAMP, FLAG, GDELAY [m], DIFFPHASE [deg] |
-| WavelengthReference / LINE_LIST | LINE_LIST(WAVELENGTH [m], ORIGIN), 30 laboratory wavelengths in metres with original ECSV source labels; ECSV SHA in provenance |
+| DARK | `IMAGING_DATA_SC` mean [ADU], `IMAGING_ERR_SC` temporal RMS [ADU], `NFRAMES` |
+| BAD | `IMAGING_DATA_SC` bit flags |
+| FLAT | `IMAGING_DETECTOR_SC` labels, `PLANETES_FLAT_IMAGE`, `PROFILE_PARAMS`, `PLANETES_PROFILE`, optional `PLANETES_FLAT_FLUX` |
+| WAVE | `WAVE_DATA_SC` metre-valued detector wavelength columns; optional `PLANETES_WAVE_FIT` |
+| P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC` (transmission, coherence, phase), `PLANETES_P2VM_INVERSE` and fitting diagnostics |
+| SINGLE_SCI_P2VMRED | `PLANETES_FLUX` and `PLANETES_VIS`: per-frame station indices, instrumental flux/coherence, visibility amplitude, flags, GD [m] and differential phase [deg] |
+| LINE_LIST | laboratory wavelength [m] and origin labels |
 
-FLAT/WAVE contain IMAGING_DETECTOR_SC with REG01..REG24 labels until the output
-mapping is measured. P2VM/science use actual baseline-phase labels such as 43-A;
-P2VM_SC rows and the detector table must agree. Science rows are frame-major:
-four telescope rows or six baseline rows per frame. FRAME and physical STA_INDEX
-are positive one-based identifiers, never Python offsets. REGNAME reconstructs
-the measured ABCD output mapping independently of dictionary insertion order.
+All products carry `ESO PRO CATG/TYPE/SCIENCE`, named extensions, physical
+units, per-HDU FITS checksum/DATASUM and minimal private `PLANETES_META`
+(software version, optional known detector setup and, when requested, QC status). FITS checksum is a
+transmission/integrity check, **not** cryptographic provenance. New standalone
+Python files do not encode input paths or processing parameters. PyCPL/ESO DFS
+files additionally record recipe parameters and the frames actually used.
 
-Vector columns preserve float32/float64 or complex64/complex128 precision. FITS
-TDIM reverses the per-row Python shape: e.g. TRANSMISSION has (nwave,4), while
-COHERENCE/PHASE/C_MATRIX have (nwave,6). Boolean FLAG uses FITS L (true=invalid).
-Complex values, NaNs and signed zero are retained. Flat integer coordinates and
-trace centers are one-based on disk; paired (-1,-1) sparse sentinels stay -1.
+FITS station indices are physical telescope numbers. Sparse profile indices and
+trace centers are one-based on disk and zero-based in Python; accepted WAVE_FIT
+X/Y fit samples retain their existing zero-based coordinates. The sparse pixel
+`-1` remains a sentinel. Wavelength and group delay use **metres**, fringe phase
+**radians**, differential phase **degrees**, instrumental counts **ADU**.
+Boolean `FLAG=True` marks an invalid visibility sample.
 
-Necessary PLANETES extensions retain scientific quantities with no matching
-reference field:
+## What is checked and where
 
-| Extension | Python shape | File unit / reason |
-| --- | --- | --- |
-| PLANETES_PROFILE | output,sample for each coordinate | pixel; sparse aperture indices, not weighted GRAVITY PROFILE_DATA |
-| PLANETES_FLAT_IMAGE / FLAT_FLUX | detector_y,detector_x / telescope | ADU; response and mean-frame total flux |
-| PLANETES_WAVELENGTH | wavelength | m; target coordinate without invented effective bandwidth |
-| PLANETES_P2VM_INVERSE | 16,24,wavelength | dimensionless; inverse is **not** GRAVITY C_MATRIX |
-| PLANETES_OPD / GD | baseline,calibration_frame | m; retained ellipse/scan diagnostics |
-| PLANETES_ELLIPSE_PHASE / AMPLITUDE | baseline,frame,wavelength | rad / dimensionless |
-| PLANETES_P2VM_FIT_RMS | output,baseline,wavelength | ADU; unweighted fit RMS is not chi-square |
-| PLANETES_FLUX / VIS | frame-major table rows | per-frame instrumental observables, without fictitious OIFITS time, errors, bandwidth or target/station tables |
+- At the calculation entry points, fixed telescope/baseline identities and
+  detector/wavelength dimensions are checked before fitting or matrix application.
+  This prevents NumPy broadcasting physically incompatible input spectra.
+- Sparse extraction indices and wavelength coverage/order are checked once before
+  Numba gathering and interpolation. V2PM inversion requires full numerical rank
+  using NumPy matrix_rank; the pseudoinverse algorithm itself is unchanged.
+- At the acquisition/calibration boundary, **known** ROI/DIT/detector
+  contradictions fail; missing provisional header fields are *unknown*, not
+  fabricated or silently interpreted as matching.
+- At the FITS boundary, unit codes, checksums, product categories, physical
+  telescope/baseline identity and frame order are checked. Output files are
+  published without overwriting existing paths.
+- General purpose `validate_wavelength()`, `validate_gd_range()`, `positive()`,
+  `fingerprint()`, `require_parent()` and object-level `validate()` are gone.
+- QC remains optional through `include_qc`. Existing Python and recipe publication
+  defaults retain QC (`True`); use `False` to skip it. The FITS encoder only
+  serializes supplied measurements. QC never changes scientific masks or weights.
 
-DarkImage, CalibrationSpectra and live VisibilityObservables remain memory-only.
-A two-dimensional or single-frame explicitly selected GUI dark is subtraction-only;
-all file entry points require a full DARK. Earlier product formats are rejected;
-regenerate them from standardized raw. This format does not implement final OIFITS.
-
-## Relationships, hashing and publication
-
-BAD names its DARK; FLAT names DARK and BAD; WAVE names FLAT; P2VM names FLAT
-and WAVE. Same-shaped wrong parents fail. At each raw subtraction, known DARK
-exposure and detector configuration must match. At extraction, FLAT geometry must
-match; science/lamp may have different DIT from flats when using their own matching
-DARK. No dark scaling is added. Unknown matching fields only pass for explicitly
-legacy data/calibrations and remain recorded as unverified. Exposure matching
-permits only four ULP of encoding roundoff, no arbitrary physical tolerance.
-
-Scientific fingerprints identify arrays, units, axes, fixed mappings, parameters,
-detector setup and parent fingerprints. Paths, producer and derived QC status do
-not change them. `products.fingerprint()` computes this directly; there is no
-retained representation or decoded-state cache. `read_product()` verifies the
-recorded hash once after decoding, in addition to FITS checksums and unit checks.
-Lengths are already metres, so reading and saving never rescale them.
-
-DARK and BAD are fully encoded, signed and read back before either final name is
-published. Existing targets are refused. An ordinary second publication failure
-removes only links still owned by this operation; concurrent replacements survive.
-The two names do not form a crash-atomic filesystem transaction.
+The raw FITS keyword dictionary and calibrated VIS/VIS2/T3 OIFITS remain
+subsequent work. Python-only calls keep their input selection and parameters
+in the calling script; they do not build a product provenance graph.
 
 ## Parameters
 
@@ -188,42 +134,6 @@ SOF quantities and allowed classes are stated in README and implemented in each
 recipe. All entries have RAW/CALIB group and image/table type matching their role;
 outputs are final PRODUCT frames. LINE_LIST and PHASE_REFERENCE/PHASE_DARK_CALIB
 are documented project roles where no strictly equivalent GRAVITY input exists.
-A phase DARK without reference fails; a disabled reference never enters the used
-input provenance. Repeated FLAT_RAW/P2VM_RAW tags are required; duplicate physical
+A phase DARK without reference fails; a disabled reference is excluded from DFS
+used inputs. Repeated FLAT_RAW/P2VM_RAW tags remain unchanged; duplicate physical
 shutter combinations or incomplete sets fail.
-
-## Python organization in 0.5.1
-
-DARK, FLAT, WAVE, P2VM and REDUCE are peer step modules at package root. Each owns
-its input handling, parameters, scientific functions and returned products. Shared
-extraction stays in extraction.py; the P2VM input sequence and output mapping stay
-in p2vm.py. Saving uses io/fits.py explicitly. RawMetadata belongs to io/raw.py;
-DetectorSetup belongs to instrument.py; products and their fingerprints belong to
-products.py. Every CPL import and DFS operation stays inside recipes/.
-
-Checks cover physical associations, array/index safety and external file contracts.
-They are not a separate validation workflow. QC reports measurements and missing
-reasons without changing scientific cuts. Product format 4 records the new metre
-field/parameter names and fingerprints; standardized raw remain format 3.
-
-
-## Physical stages and product meaning
-
-DARK/BAD, FLAT, WAVE and P2VM characterize the instrument. Their products describe
-measured detector statistics, extraction geometry, wavelengths and the full physical
-response respectively. The P2VM inverse remains coupled to its saved wavelength
-grid and actual FLAT/WAVE parents.
-
-SINGLE_SCI_P2VMRED is a sequence of instrumental measurements: each frame retains
-four photometric spectra, six complex coherent spectra, visibility amplitudes and
-flags, with GD and differential-phase diagnostics. ADU are extracted instrumental
-counts, not a calibrated photon/electron flux or astrophysical flux density.
-
-Averaging would define estimators for VIS/VIS2/T3, their weights, debiasing and
-uncertainties. Astronomical calibration would measure/apply a transfer function
-using calibrator observations and a physical source model. These are subsequent
-scientific stages. The optional P2VM phase reference establishes an instrumental
-phase reference; it is not automatically an astronomical transfer-function calibrator.
-
-Version 0.5.1 changes interface ownership and documentation only. Format-4 products,
-physical conventions and fingerprints remain compatible with 0.5.0.

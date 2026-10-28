@@ -1,7 +1,7 @@
 """P2VMRED step: per-frame instrumental fluxes, visibility, group delay and phase."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -9,82 +9,78 @@ from numpy.typing import NDArray
 
 from . import log
 from .extraction import SpectralExtractor, extract_file, prepare_extraction
-from .instrument import IMAG_SLICE, N_BASELINES, N_TELESCOPES, REAL_SLICE
+from .instrument import (
+    IMAG_SLICE,
+    N_BASELINES,
+    N_DATA,
+    N_OUTPUTS,
+    N_TELESCOPES,
+    REAL_SLICE,
+    _check_baselines,
+)
 from .io.fits import read_product
 from .io.raw import check_raw_calibrations
 from .products import (
     Dark,
-    DarkCalibration,
-    FlatCalibration,
-    P2VMCalibration,
-    Provenance,
-    ReducedObservables,
-    VisibilityObservables,
-    WavelengthCalibration,
-    fingerprint,
-    require_parent,
-    validate,
-    validate_gd_range,
+    DarkInput,
+    Flat,
+    P2VM,
+    P2VMRed,
+    Wave,
 )
 
 
 def reduce_file(
     path: Path,
-    dark: DarkCalibration,
-    flat: FlatCalibration,
-    wave: WavelengthCalibration,
-    p2vm: P2VMCalibration,
+    dark: Dark,
+    flat: Flat,
+    wave: Wave,
+    p2vm: P2VM,
     *,
     gd_search_min_m: float = -100e-6,
     gd_search_max_m: float = 100e-6,
-) -> ReducedObservables:
+) -> P2VMRed:
     """Apply selected calibrations to every raw frame and return instrumental P2VMRED.
 
     Extraction uses the P2VM's saved wavelength grid. No averaging is performed;
     fluxes are ADU, GD and its search bounds are metres, differential phase is deg.
     """
 
-    unknown = check_raw_calibrations(path, dark, flat, category="SINGLE_SCI_RAW")
-    validate(dark)
+    check_raw_calibrations(path, dark, flat, category="SINGLE_SCI_RAW")
     reducer = FrameReducer(flat, wave, p2vm)
     spectra = extract_file(path, reducer.extractor, dark)
-    result = reduce_spectra(
+    return reduce_spectra(
         spectra,
         p2vm,
         gd_search_min_m=gd_search_min_m,
         gd_search_max_m=gd_search_max_m,
     )
-    info = Provenance(
-        producer="planetes.reduction",
-        unverified=unknown,
-        parameters={
-            "gd_search_min_m": gd_search_min_m,
-            "gd_search_max_m": gd_search_max_m,
-        },
-        inputs={"science_raw": str(path)},
-        dependencies={
-            "dark": fingerprint(dark),
-            "flat": fingerprint(flat),
-            "wave": fingerprint(wave),
-            "p2vm": fingerprint(p2vm),
-        },
-    )
-    return replace(result, provenance=info)
 
 
 def reduce_spectra(
     spectra: NDArray,
-    p2vm: P2VMCalibration,
+    p2vm: P2VM,
     *,
     gd_search_min_m: float = -100e-6,
     gd_search_max_m: float = 100e-6,
     diagnostics: bool = True,
-) -> ReducedObservables | VisibilityObservables:
+) -> P2VMRed:
     """Apply P2VM and calculate the retained instrumental visibility observables."""
+    _check_baselines(p2vm.baseline_regions, p2vm.baseline_telescopes)
+    if (
+        p2vm.wavelength_m.ndim != 1
+        or p2vm.p2vm.shape != (N_DATA, N_OUTPUTS, len(p2vm.wavelength_m))
+        or spectra.ndim != 3
+        or spectra.shape[0] != N_OUTPUTS
+        or spectra.shape[-1] != len(p2vm.wavelength_m)
+    ):
+        raise ValueError("Science spectra and P2VM output/wavelength dimensions differ")
     log.info("Applying P2VM to extract visibility for science spectra...")
-    p2vmred = np.einsum("box,ofx->fbx", p2vm.p2vm, spectra)
-    photometric_flux_adu = p2vmred[:, :N_TELESCOPES, :]
-    coherent_flux_adu = p2vmred[:, REAL_SLICE, :] + 1j * p2vmred[:, IMAG_SLICE, :]
+    reconstructed_data = np.einsum("box,ofx->fbx", p2vm.p2vm, spectra)
+    photometric_flux_adu = reconstructed_data[:, :N_TELESCOPES, :]
+    coherent_flux_adu = (
+        reconstructed_data[:, REAL_SLICE, :] + 1j * reconstructed_data[:, IMAG_SLICE, :]
+    )
     visibility_amplitude, flags = normalize_visibility(
         coherent_flux_adu,
         photometric_flux_adu,
@@ -92,7 +88,7 @@ def reduce_spectra(
     )
 
     if not diagnostics:
-        return VisibilityObservables(
+        return P2VMRed(
             photometric_flux_adu,
             coherent_flux_adu,
             visibility_amplitude,
@@ -119,7 +115,7 @@ def reduce_spectra(
     differential_phase_deg -= differential_phase_deg.mean(axis=2)[:, :, None]
     differential_phase_deg = (differential_phase_deg + 180) % 360 - 180
 
-    product = ReducedObservables(
+    product = P2VMRed(
         photometric_flux_adu=photometric_flux_adu,
         coherent_flux_adu=coherent_flux_adu,
         visibility_amplitude=visibility_amplitude,
@@ -167,7 +163,6 @@ def compute_gdelay(
     n_newton: int = 5,
 ) -> NDArray:
     """Estimate group delay by grid search followed by Newton refinement."""
-    validate_gd_range(search_range)
     k = -2j * np.pi / wavelength
     w = -2 * np.pi / wavelength
 
@@ -200,32 +195,16 @@ def compute_gdelay(
 class FrameReducer:
     """Load/prepare calibration once; raw unbinned frames always use the formal core."""
 
-    flat: FlatCalibration
-    wave: WavelengthCalibration
-    p2vm: P2VMCalibration
+    flat: Flat
+    wave: Wave
+    p2vm: P2VM
     calibration_dir: Path | None = None
     extractor: SpectralExtractor = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        validate(self.p2vm)
-        require_parent(self.p2vm, "flat", self.flat)
-        require_parent(self.p2vm, "wave", self.wave)
         self.extractor = prepare_extraction(
             self.flat, self.wave, self.p2vm.wavelength_m
         )
-        from copy import deepcopy
-        from dataclasses import fields
-
-        snapshots = {}
-        for item in fields(self.p2vm):
-            value = getattr(self.p2vm, item.name)
-            if item.metadata:
-                value = np.array(value, copy=True)
-                value.flags.writeable = False
-            else:
-                value = deepcopy(value)
-            snapshots[item.name] = value
-        self.p2vm = P2VMCalibration(**snapshots)
 
     @property
     def n_baselines(self) -> int:
@@ -239,11 +218,11 @@ class FrameReducer:
         self,
         raw: NDArray,
         *,
-        dark: Dark,
+        dark: DarkInput,
         diagnostics: bool = False,
         gd_search_min_m: float = -100e-6,
         gd_search_max_m: float = 100e-6,
-    ) -> ReducedObservables | VisibilityObservables:
+    ) -> P2VMRed:
         """Reduce one RAW frame; caller must not subtract its selected dark beforehand."""
         cube = np.asarray(raw, dtype=np.float32)[None, :, :]
         spectra = self.extractor.extract(cube, dark)

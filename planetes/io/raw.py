@@ -9,7 +9,7 @@ from astropy.io import fits as afits
 from astropy.time import Time
 
 from ..instrument import BASELINES, TELESCOPES, DetectorSetup
-from ..products import DarkCalibration
+from ..products import Dark
 from . import keywords as kw
 from .hdu import _checksums, _json_hdu, _read_json
 from .publication import destinations
@@ -31,94 +31,51 @@ class RawMetadata:
     original: dict = field(default_factory=dict)
 
 
-def validate_raw_metadata(metadata: RawMetadata, shape, *, provisional: bool = False):
-    """Validate real category/configuration, retaining explicitly unknown legacy fields."""
-    if metadata.category not in kw.RAW_TYPES or len(shape) != 3 or min(shape) < 1:
-        raise ValueError("Expected a supported raw category and nonempty 3-D cube")
-    if metadata.shutters is None:
-        if not provisional:
-            raise ValueError(
-                "Four explicit boolean physical shutter states are required"
-            )
-    elif len(metadata.shutters) != 4 or any(
-        type(x) is not bool for x in metadata.shutters
-    ):
-        raise ValueError("Four explicit boolean physical shutter states are required")
-    if (
-        metadata.shutters is not None
-        and sum(metadata.shutters) != kw.RAW_TYPES[metadata.category][3]
-    ):
-        raise ValueError("Raw category and shutter configuration conflict")
-    if metadata.configuration_source not in (
-        "readback",
-        "command",
-        "operator",
-        "legacy-role-map",
-    ) and not (provisional and metadata.configuration_source == "pending"):
-        raise ValueError("Unknown shutter configuration source")
-    if metadata.setup.exposure_source not in (
-        "readback",
-        "command",
-        "operator",
-        "legacy-property",
-        "unknown",
-    ):
-        raise ValueError("Unknown exposure source")
-    setup = metadata.setup
-    for key in (
-        "origin_x",
-        "origin_y",
-        "width",
-        "height",
-        "binning_x",
-        "binning_y",
-        "exposure_s",
-        "detector",
-        "orientation",
-    ):
-        value = getattr(setup, key)
-        if value is None:
-            if not setup.legacy:
-                raise ValueError(f"New raw data require {key}")
-            continue
-        if key in ("origin_x", "origin_y"):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"Invalid raw {key}")
-        elif key in ("width", "height", "binning_x", "binning_y"):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise ValueError(f"Invalid raw {key}")
-        elif key == "exposure_s" and (not np.isfinite(value) or value <= 0):
-            raise ValueError("Exposure must be positive finite seconds")
-        elif key in ("detector", "orientation") and (
-            not isinstance(value, str) or not value.strip()
-        ):
-            raise ValueError(f"Invalid raw {key}")
-    if not setup.legacy and setup.exposure_source not in (
-        "readback",
-        "command",
-        "operator",
-    ):
-        raise ValueError("New raw data require a known exposure source")
-    if (setup.height, setup.width) != shape[1:]:
-        raise ValueError("Raw detector size differs from the recorded ROI")
-    if (
-        setup.legacy
-        and not provisional
-        and metadata.configuration_source != "legacy-role-map"
-    ):
-        raise ValueError("Legacy raw requires an explicit adopted role map")
-    for value in (
-        metadata.host_start_utc,
-        metadata.host_end_utc,
-        metadata.exposure_start_utc,
-    ):
-        if value is not None:
-            Time(value, format="isot", scale="utc")
-
-
 def raw_header(metadata: RawMetadata, shape):
     """ESO ICD exposure/window fields; private shutter provenance stays explicit."""
-    validate_raw_metadata(metadata, shape)
+    if metadata.category not in kw.RAW_TYPES or len(shape) != 3 or min(shape) < 1:
+        raise ValueError("Expected a supported raw category and nonempty 3-D cube")
+    if (
+        metadata.shutters is None
+        or len(metadata.shutters) != 4
+        or any(not isinstance(v, (bool, np.bool_)) for v in metadata.shutters)
+        or sum(metadata.shutters) != kw.RAW_TYPES[metadata.category][3]
+    ):
+        raise ValueError("Raw category requires explicit, consistent shutter states")
+    setup = metadata.setup
+    if any(
+        getattr(setup, name) is not None and getattr(setup, name) < 0
+        for name in ("origin_x", "origin_y")
+    ) or any(
+        getattr(setup, name) is not None and getattr(setup, name) < 1
+        for name in ("binning_x", "binning_y")
+    ):
+        raise ValueError("Invalid detector ROI origin or binning")
+    if (setup.height is not None and setup.height != shape[1]) or (
+        setup.width is not None and setup.width != shape[2]
+    ):
+        raise ValueError("Raw detector size differs from the recorded ROI")
+    if not setup.legacy and any(
+        getattr(setup, name) is None
+        for name in (
+            "origin_x",
+            "origin_y",
+            "width",
+            "height",
+            "binning_x",
+            "binning_y",
+            "exposure_s",
+            "detector",
+            "orientation",
+        )
+    ):
+        raise ValueError("New raw data require known detector/ROI/exposure metadata")
+    if setup.legacy and metadata.configuration_source != "legacy-role-map":
+        raise ValueError("Legacy raw requires an explicit adopted shutter role map")
+    if setup.exposure_s is not None and (
+        not np.isfinite(setup.exposure_s) or setup.exposure_s <= 0
+    ):
+        raise ValueError("Exposure must be positive finite seconds")
     h = afits.Header()
     h["INSTRUME"] = "PLANETES"
     category, kind, technique, _ = kw.RAW_TYPES[metadata.category]
@@ -220,6 +177,14 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
             raise ValueError(f"Raw {name} disagrees with cube dimensions")
         roi[name] = size
     exposure = header.get(kw.DIT, header.get(kw.UIT))
+    if exposure is not None and (not np.isfinite(exposure) or exposure <= 0):
+        raise ValueError("Exposure must be positive finite seconds")
+    if any(
+        roi[name] is not None and roi[name] < 0 for name in ("origin_x", "origin_y")
+    ) or any(
+        roi[name] is not None and roi[name] < 1 for name in ("binning_x", "binning_y")
+    ):
+        raise ValueError("Invalid detector ROI origin or binning")
     raw = RawMetadata(
         category=category,
         shutters=shutter_values if unknown == 0 else None,
@@ -236,7 +201,6 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
         exposure_start_utc=header.get("DATE-OBS"),
         original={"header_status": "provisional", "shutters": shutter_values},
     )
-    validate_raw_metadata(raw, shape, provisional=True)
     return raw
 
 
@@ -359,15 +323,13 @@ def check_raw_calibrations(path, dark, flat=None, *, flat_setup=None, category=N
     """Shared formal task boundary: known DIT/ROI conflicts are scientific errors."""
     from ..instrument import check_setup
 
-    if not isinstance(dark, DarkCalibration) or dark.n_frames < 2:
+    if not isinstance(dark, Dark) or dark.n_frames < 2:
         raise ValueError("Formal file tasks require complete DARK calibrations")
     raw = read_raw_metadata(path, category=category)
-    unknown = list(raw.original.get("unverified", ()))
-    unknown.extend(check_setup(raw.setup, dark.setup, exposure=True, role="DARK"))
+    check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
     geometry = flat.setup if flat is not None else flat_setup
     if flat is not None or flat_setup is not None:
-        unknown.extend(check_setup(raw.setup, geometry, exposure=False, role="FLAT"))
-    return tuple(sorted(set(unknown)))
+        check_setup(raw.setup, geometry, exposure=False, role="FLAT")
 
 
 def verify_raw(path):

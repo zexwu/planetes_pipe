@@ -16,10 +16,10 @@ import planetes
 from planetes.io.fits import read_product, write_product
 from planetes.io.raw import write_raw
 from planetes.products import (
-    FlatCalibration,
-    P2VMCalibration,
-    ReducedObservables,
-    WavelengthCalibration,
+    Flat,
+    P2VM,
+    P2VMRed,
+    Wave,
 )
 from planetes.reduction import reduce_file
 
@@ -98,10 +98,10 @@ class ESOChainTests(unittest.TestCase):
                 timeout=60,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            actual = read_product(output / "planetes_reduced.fits", ReducedObservables)
-            flat = read_product(inputs["FLAT"], FlatCalibration)
-            wave = read_product(inputs["WAVE"], WavelengthCalibration)
-            p2vm = read_product(science_inputs["P2VM"], P2VMCalibration)
+            actual = read_product(output / "planetes_reduced.fits", P2VMRed)
+            flat = read_product(inputs["FLAT"], Flat)
+            wave = read_product(inputs["WAVE"], Wave)
+            p2vm = read_product(science_inputs["P2VM"], P2VM)
             expected = reduce_file(
                 science_file,
                 read_product(dark_calib),
@@ -112,8 +112,6 @@ class ESOChainTests(unittest.TestCase):
                 gd_search_max_m=12e-6,
             )
             for field in fields(expected):
-                if field.name == "provenance":
-                    continue
                 before, after = (
                     getattr(expected, field.name),
                     getattr(actual, field.name),
@@ -124,8 +122,12 @@ class ESOChainTests(unittest.TestCase):
                 else:
                     self.assertEqual(before, after)
             self.assertTrue(actual.flags[0].all())
-            self.assertEqual(actual.provenance.parameters["gd_search_min_m"], -12e-6)
-            self.assertEqual(actual.provenance.parameters["gd_search_max_m"], 12e-6)
             with fits.open(output / "planetes_reduced.fits") as hdus:
                 self.assertEqual(hdus[0].header["ESO PRO CATG"], "SINGLE_SCI_P2VMRED")
+                self.assertEqual(
+                    float(hdus[0].header["ESO PRO REC1 PARAM1 VALUE"]), -12e-6
+                )
+                self.assertEqual(
+                    float(hdus[0].header["ESO PRO REC1 PARAM2 VALUE"]), 12e-6
+                )
                 self.assertNotIn("ESO QC REJECTED RATIO", hdus[0].header)

@@ -8,11 +8,11 @@ adaptation of gravi_utils.h:131-140, not GRAVITY's hardware numbering.
 from ..instrument import BASELINES, TELESCOPES
 from ..products import (
     BadPixelMap,
-    DarkCalibration,
-    FlatCalibration,
-    P2VMCalibration,
-    ReducedObservables,
-    WavelengthCalibration,
+    Dark,
+    Flat,
+    P2VM,
+    P2VMRed,
+    Wave,
     WavelengthReference,
 )
 
@@ -43,19 +43,18 @@ ROI_KEYS = {
 # These are explicitly private; they are not ESO dictionary/QC definitions.
 META_EXT = "PLANETES_META"
 FORMAT_KEY = "PLANETES FORMAT"
-HASH_KEY = "PLANETES CONTENT SHA256"
 SHUTTER_KEYS = tuple(f"PLANETES INS SHUT{n} ST" for n in range(1, 5))
 RAW_FORMAT = 3
-PRODUCT_FORMAT = 4
+PRODUCT_FORMAT = 5
 
 
 CATEGORIES = {
-    DarkCalibration: "DARK",
+    Dark: "DARK",
     BadPixelMap: "BAD",
-    FlatCalibration: "FLAT",
-    WavelengthCalibration: "WAVE",
-    P2VMCalibration: "P2VM",
-    ReducedObservables: "SINGLE_SCI_P2VMRED",
+    Flat: "FLAT",
+    Wave: "WAVE",
+    P2VM: "P2VM",
+    P2VMRed: "SINGLE_SCI_P2VMRED",
     WavelengthReference: "LINE_LIST",
 }
 

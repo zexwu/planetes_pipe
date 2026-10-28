@@ -16,7 +16,7 @@ from planetes.io.raw import (
     read_raw_metadata,
 )
 from planetes.p2vm import compute_p2vm
-from planetes.products import ReducedObservables
+from planetes.products import P2VMRed
 from planetes.reduction import reduce_spectra
 
 
@@ -37,10 +37,8 @@ class ScienceProductTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "science.fits"
             write_product(path, product)
-            loaded = read_product(path, ReducedObservables)
+            loaded = read_product(path, P2VMRed)
             for field in fields(product):
-                if field.name == "provenance":
-                    continue
                 before, after = (
                     getattr(product, field.name),
                     getattr(loaded, field.name),
@@ -75,8 +73,6 @@ class CalibrationFitsTests(unittest.TestCase):
                 write_product(path, product)
                 loaded = read_product(path, type(product))
                 for field in fields(product):
-                    if field.name == "provenance":
-                        continue
                     before, after = (
                         getattr(product, field.name),
                         getattr(loaded, field.name),

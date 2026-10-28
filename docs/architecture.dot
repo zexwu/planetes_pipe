@@ -1,5 +1,5 @@
 digraph Architecture {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.5.1 — 每个步骤自己负责输入、参数和计算", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.7.0 — 每个步骤自己负责输入、参数和计算", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.16,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   python [label="Python / examples/reduce.py"];
@@ -8,7 +8,7 @@ digraph Architecture {
   steps [label="五个同级科学步骤\ndark.py · flat.py · wavelength.py · p2vm.py · reduction.py\n\n文件输入 → 调用本文件计算函数 → 返回具名结果\n每个文件保留物理参数、默认值、算法和 helper\n波长 / OPD / GD 全部使用 m", style="rounded,filled", fillcolor="#eff6ff"];
   extraction [label="extraction.py\n共用像素提取 · 波数重采样\n16 帧分块读取与提取"];
   io [label="io/raw.py · io/fits.py\n原始数据元信息 / 产品 FITS\n单位、checksum、不覆盖写入"];
-  products [label="products.py · instrument.py\n具名数组、单位、轴、通道约定\n标定父关系与内容指纹"];
+  products [label="products.py · instrument.py\nDark · Flat · Wave · P2VM · P2VMRed\n具名数组与固定物理通道约定"];
   qc [label="qc.py → io/keywords.py\n报告质量统计 → FITS keyword\n不修改拟合、mask 或权重"];
   {rank=same; python; recipes; gui;}
   python -> steps;
@@ -19,5 +19,6 @@ digraph Architecture {
   steps -> io [label="读 raw / 载入已有标定"];
   python -> io [label="显式保存结果"];
   recipes -> io [label="共用产品编码"];
-  io -> qc;
+  io -> qc [label="发布入口选择是否计算"];
+  recipes -> qc [label="可选 QC"];
 }

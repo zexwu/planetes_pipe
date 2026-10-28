@@ -1,6 +1,7 @@
 """Scientific invariants for the retained extraction, matrix and visibility definitions."""
 
 import unittest
+from dataclasses import replace
 
 import numpy as np
 from p2vm_fixture import calibration_spectra
@@ -8,7 +9,7 @@ from p2vm_fixture import calibration_spectra
 from planetes.extraction import extract_spec_sparse
 from planetes.instrument import N_DATA
 from planetes.p2vm import build_v2pm_matrix, compute_p2vm, fit_ellipse_linear
-from planetes.reduction import normalize_visibility
+from planetes.reduction import normalize_visibility, reduce_spectra
 from planetes.wavelength import match_lines_grid
 
 
@@ -72,7 +73,8 @@ class ScienceTests(unittest.TestCase):
         self.assertTrue(flag[0, 0, 1])
 
     def test_p2vm_inverts_known_full_rank_instrument_response(self):
-        p2vm = compute_p2vm(calibration_spectra(n_wave=15), phase_correction=False)
+        spectra = calibration_spectra(n_wave=15)
+        p2vm = compute_p2vm(spectra, phase_correction=False)
         matrix = build_v2pm_matrix(
             p2vm.transmission,
             p2vm.coherence_amplitude,
@@ -84,3 +86,10 @@ class ScienceTests(unittest.TestCase):
                 np.eye(N_DATA),
                 atol=1e-12,
             )
+        pairs = {**p2vm.baseline_telescopes, 0: (0, 2)}
+        with self.assertRaisesRegex(ValueError, "mapping"):
+            reduce_spectra(
+                spectra.phase_reference, replace(p2vm, baseline_telescopes=pairs)
+            )
+        with self.assertRaisesRegex(ValueError, "dimensions"):
+            reduce_spectra(spectra.phase_reference[..., :1], p2vm)

@@ -1,13 +1,13 @@
 digraph Dataflow {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.5.1 — 原始数据、标定与科学结果", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.7.0 — 原始数据、标定与科学结果", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.15,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   rawdark [label="DARK_RAW\nmain / lamp / science 分别选择"];
   dark [label="dark.py / planetes_dark\n完整多帧 mean + temporal RMS", style="rounded,filled", fillcolor="#eff6ff"];
   darkfits [label="DARK + 独立 BAD\n保留 hot/dead/noisy 判据\n两份校验后发布", shape=folder];
-  rawflat [label="FLAT_RAW × 4\n按物理快门识别望远镜"];
+  rawflat [label="FLAT_RAW × 4\n物理快门或 Python 显式映射"];
   flat [label="flat.py / planetes_flat\n响应 · trace · 稀疏提取几何", style="rounded,filled", fillcolor="#eff6ff"];
-  flatfits [label="FLAT\nDARK/BAD 父关系与探测器几何", shape=folder];
+  flatfits [label="FLAT\n所选 DARK/BAD · 探测器几何", shape=folder];
   rawwave [label="WAVELAMP_RAW + LINE_LIST\n选用匹配曝光的 lamp DARK"];
   wave [label="wavelength.py / planetes_wave\n保留谱线匹配与波长拟合", style="rounded,filled", fillcolor="#eff6ff"];
   wavefits [label="WAVE\n全输出波长图 + accepted residuals", shape=folder];
@@ -16,7 +16,7 @@ digraph Dataflow {
   p2vmfits [label="P2VM\n全 24 输出响应 + inverse\n保存目标波长网格 [m]", shape=folder];
   rawscience [label="SINGLE_SCI_RAW\n选用匹配曝光的 science DARK"];
   science [label="reduction.py / planetes_reduce\nreduce_file / FrameReducer\n共用计算与 invalid flags", style="rounded,filled", fillcolor="#eff6ff"];
-  results [label="离线：SINGLE_SCI_P2VMRED\n逐帧 ADU / VISAMP / GD [m] / 差分相位 [deg]\n实时：内存可见度与 flags → GUI", shape=folder];
+  results [label="离线：SINGLE_SCI_P2VMRED\n逐帧 ADU / VISAMP / GD [m] / 差分相位 [deg]\n实时：内存 P2VMRed 与 flags → GUI", shape=folder];
   {rank=same; rawdark; dark; darkfits;}
   {rank=same; rawflat; flat; flatfits;}
   {rank=same; rawwave; wave; wavefits;}

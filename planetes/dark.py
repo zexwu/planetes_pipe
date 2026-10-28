@@ -14,12 +14,8 @@ from .io.raw import iter_raw_cube, read_raw_metadata
 from .products import (
     BadPixelMap,
     Dark,
-    DarkCalibration,
+    DarkInput,
     DarkImage,
-    Provenance,
-    fingerprint,
-    positive,
-    validate,
 )
 
 BAD_PIXEL_THRESHOLD = 5.0
@@ -27,20 +23,12 @@ BAD_PIXEL_THRESHOLD = 5.0
 
 def calibrate_dark_file(
     path: Path, *, bad_pixel_threshold: float = BAD_PIXEL_THRESHOLD
-) -> tuple[DarkCalibration, BadPixelMap]:
+) -> tuple[Dark, BadPixelMap]:
     """Measure DARK mean/RMS and BAD flags from a full raw stack; saving is explicit."""
 
     metadata = read_raw_metadata(path, category="DARK_RAW")
     dark = compute_dark(iter_raw_cube(path))
-    dark = replace(
-        dark,
-        setup=metadata.setup,
-        provenance=replace(
-            dark.provenance,
-            inputs={"dark_raw": str(Path(path).absolute())},
-            unverified=tuple(metadata.original.get("unverified", ())),
-        ),
-    )
+    dark = replace(dark, setup=metadata.setup)
     return dark, compute_badpix(dark, threshold=bad_pixel_threshold)
 
 
@@ -84,10 +72,8 @@ def frame_statistics(
     return mean.astype(np.float32), np.sqrt(variance).astype(np.float32), count
 
 
-def compute_badpix(dark: DarkCalibration, *, threshold: float = 5.0) -> BadPixelMap:
+def compute_badpix(dark: Dark, *, threshold: float = 5.0) -> BadPixelMap:
     """Build a bad-pixel map from precomputed temporal mean and RMS images."""
-    validate(dark)
-    threshold = positive(threshold, "bad pixel threshold")
     mean_img, std_img = dark.mean_adu, dark.temporal_rms_adu
     BAD_HOT, BAD_DEAD, BAD_NOISY = 1, 2, 4
 
@@ -104,40 +90,27 @@ def compute_badpix(dark: DarkCalibration, *, threshold: float = 5.0) -> BadPixel
     bpm[mean_img < range_min] |= BAD_DEAD
     bpm[std_img > std_max] |= BAD_NOISY
 
-    return BadPixelMap(
-        bpm,
-        provenance=Provenance(
-            producer="planetes.dark.compute_badpix",
-            parameters={"bad_pixel_threshold": threshold},
-            dependencies={"dark": fingerprint(dark)},
-        ),
-    )
+    return BadPixelMap(bpm)
 
 
-def compute_dark(chunks: Iterable[NDArray[np.float32]]) -> DarkCalibration:
+def compute_dark(chunks: Iterable[NDArray[np.float32]]) -> Dark:
     """Measure temporal mean and population RMS from a complete stack."""
     mean, rms, count = frame_statistics(chunks)
     if count < 2:
         raise ValueError(
             "Complete dark calibration needs at least two frames; use DarkImage for subtraction only"
         )
-    result = DarkCalibration(
-        mean,
-        rms,
-        count,
-        provenance=Provenance(producer="planetes.dark"),
-    )
-    return result
+    return Dark(mean, rms, count)
 
 
-def load_dark(path: Path) -> Dark:
+def load_dark(path: Path) -> DarkInput:
     """GUI loader: complete new DARK, or explicitly selected raw/image subtraction data."""
 
     path = Path(path)
     with afits.open(path, memmap=True) as hdus:
         head = hdus[0].header
         if kw.PRO_CATEGORY in head:
-            return read_product(path, DarkCalibration)
+            return read_product(path, Dark)
         role = str(head.get(kw.DPR_TYPE, "")).upper()
         if role and role != "DARK":
             raise ValueError("Expected dark input, FITS declares another raw category")
@@ -151,24 +124,10 @@ def load_dark(path: Path) -> Dark:
         if data.ndim == 3 and len(data) >= 2:
             metadata = read_raw_metadata(path, category="DARK_RAW")
             result = compute_dark(iter_raw_cube(path))
-            return replace(
-                result,
-                setup=metadata.setup,
-                provenance=replace(
-                    result.provenance,
-                    inputs={"dark_raw": str(path.absolute())},
-                    unverified=tuple(metadata.original.get("unverified", ())),
-                ),
-            )
+            return replace(result, setup=metadata.setup)
         if data.ndim == 3 and len(data) == 1:
             data = data[0]
         if data.ndim != 2:
             raise ValueError("A GUI dark must be a 2-D image or nonempty cube")
-        result = DarkImage(
-            np.array(data, dtype=np.float32, copy=True),
-            provenance=Provenance(
-                producer="planetes.dark.load_image",
-                inputs={"dark_image": str(path.absolute())},
-            ),
-        )
+        result = DarkImage(np.array(data, dtype=np.float32, copy=True))
     return result

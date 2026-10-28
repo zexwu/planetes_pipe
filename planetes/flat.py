@@ -20,13 +20,8 @@ from .io.raw import (
 )
 from .products import (
     BadPixelMap,
-    DarkCalibration,
-    FlatCalibration,
-    Provenance,
-    fingerprint,
-    positive,
-    require_parent,
-    validate,
+    Dark,
+    Flat,
 )
 
 PROFILE_WIDTH = 10.0
@@ -34,67 +29,45 @@ PROFILE_WIDTH = 10.0
 
 def calibrate_flat_file(
     telescope_flats: Mapping[str, Path] | Iterable[Path],
-    dark: DarkCalibration,
+    dark: Dark,
     bad: BadPixelMap,
     *,
     profile_width: float = PROFILE_WIDTH,
-) -> FlatCalibration:
+) -> Flat:
     """Read four telescope flats with their DARK/BAD; return response and geometry.
 
     ``profile_width`` is the full extraction aperture in detector pixels.
-    With incomplete shutter headers, supply an explicit telescope-to-path mapping.
+    For incomplete bench headers, supply a {telescope: path} mapping.
     """
 
     telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
-    unknown = []
     maps = []
     setup = read_raw_metadata(telescope_flats[TELESCOPES[0]], category="FLAT_RAW").setup
     for name in TELESCOPES:
-        unknown.extend(
-            check_raw_calibrations(telescope_flats[name], dark, category="FLAT_RAW")
-        )
+        check_raw_calibrations(telescope_flats[name], dark, category="FLAT_RAW")
 
-        unknown.extend(
-            check_setup(
-                read_raw_metadata(telescope_flats[name], category="FLAT_RAW").setup,
-                setup,
-                exposure=False,
-                role="flat sequence",
-            )
+        check_setup(
+            read_raw_metadata(telescope_flats[name], category="FLAT_RAW").setup,
+            setup,
+            exposure=False,
+            role="flat sequence",
         )
         maps.append(frame_mean(iter_raw_cube(telescope_flats[name])) - dark.mean_adu)
     result = compute_flat(dark, bad, maps, profile_width=profile_width)
-    return replace(
-        result,
-        setup=setup,
-        provenance=replace(
-            result.provenance,
-            inputs={
-                f"flat_raw_T{name}": str(telescope_flats[name]) for name in TELESCOPES
-            },
-            unverified=tuple(sorted(set(unknown))),
-        ),
-    )
+    return replace(result, setup=setup)
 
 
 def compute_flat(
-    dark: DarkCalibration,
+    dark: Dark,
     bad: BadPixelMap,
     flat_maps: list[NDArray],
     *,
     n_outputs: int = N_OUTPUTS,
     profile_width: float = PROFILE_WIDTH,
-) -> FlatCalibration:
+) -> Flat:
     """Compute flat maps and traces from pre-reduced detector images."""
-    if not isinstance(dark, DarkCalibration):
-        raise ValueError(
-            "Flat construction requires complete dark RMS/bad-pixel calibration"
-        )
-    validate(bad)
-    require_parent(bad, "dark", dark)
     if bad.bad_pixel_flags.shape != dark.mean_adu.shape:
         raise ValueError("BAD and DARK detector shapes differ")
-    profile_width = positive(profile_width, "profile width")
     bad_map = bad.bad_pixel_flags
 
     flat_map = np.mean(flat_maps, axis=0)
@@ -158,7 +131,7 @@ def compute_flat(
     for i, (sx, sy) in enumerate(zip(profile_xs, profile_ys)):
         padded_x[i, : len(sx)] = sx
         padded_y[i, : len(sy)] = sy
-    product = FlatCalibration(
+    product = Flat(
         profile_x_pixels=padded_x,
         profile_y_pixels=padded_y,
         flat_map_adu=flat_map,
@@ -168,11 +141,6 @@ def compute_flat(
             [np.sum(image, dtype=np.float64) for image in flat_maps]
         ),
         setup=dark.setup,
-        provenance=Provenance(
-            producer="planetes.flat",
-            parameters={"profile_width": profile_width},
-            dependencies={"dark": fingerprint(dark), "bad": fingerprint(bad)},
-        ),
     )
     return product
 

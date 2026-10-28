@@ -1,4 +1,4 @@
-# Scientific methods in PLANETES 0.5.1
+# Scientific methods in PLANETES 0.7.0
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
@@ -56,14 +56,14 @@ by the interpolated flat response to preserve the original flux scale.
 
 P2VM calibration defines its explicit target grid (default 1.15e-6–1.30e-6 m, 151
 channels). Science and live processing consume this saved grid. Every output
-must cover it fully; parent flat/wave relations and wavelength ordering are
-checked before extraction. No extension of boundary values is accepted.
+must cover it fully; detector dimensions, sparse geometry and wavelength ordering
+are checked before extraction. Calibration files are selected explicitly by the caller. No extension of boundary values is accepted.
 
 Photometric telescope flats identify illuminated outputs; modulation in baseline
 cubes identifies four outputs per baseline. Their intersections must agree.
 The resulting CalibrationSpectra stays in memory, without a preprocessing file.
 The main dark applies to telescope and baseline cubes. A phase reference has
-its independently selected dark, or records reuse of the main dark.
+its independently selected dark, or uses the main dark when none is supplied.
 
 ## P2VM (`p2vm.py`)
 
@@ -122,8 +122,9 @@ cards are converted only when writing the header.
 
 The 0.5.0 migration to metre arithmetic introduced floating-point rounding
 differences documented in the historical report linked from
-[CHANGE_REPORT](CHANGE_REPORT.md). Version 0.5.1 keeps the same arithmetic and
-representation; its complete old/new comparison retains every scientific array.
+[CHANGE_REPORT](CHANGE_REPORT.md). Version 0.7.0 retains the numerical definitions
+and per-wavelength pseudoinverse. Physically invalid mappings and rank-deficient
+V2PM matrices fail locally; rank uses NumPy's default numerical criterion.
 
 
 ## Subsequent scientific stages

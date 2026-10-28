@@ -17,6 +17,24 @@ REAL_SLICE = slice(N_TELESCOPES, N_TELESCOPES + N_BASELINES)
 IMAG_SLICE = slice(REAL_SLICE.stop, N_DATA)
 
 
+def _check_baselines(
+    regions: dict[int, list[int]], telescopes: dict[int, tuple[int, int]]
+) -> None:
+    """Require the six physical pairs and one ABCD assignment for every output."""
+    expected = {
+        i: (TELESCOPES.index(pair[0]), TELESCOPES.index(pair[1]))
+        for i, pair in enumerate(BASELINES)
+    }
+    if (
+        telescopes != expected
+        or set(regions) != set(expected)
+        or any(len(outputs) != len(ABCD_ORDER) for outputs in regions.values())
+        or sorted(output for outputs in regions.values() for output in outputs)
+        != list(range(N_OUTPUTS))
+    ):
+        raise ValueError("Incompatible physical telescope/baseline output mapping")
+
+
 @dataclass(frozen=True, slots=True)
 class DetectorSetup:
     """Physical camera configuration; missing legacy fields remain unknown."""
@@ -36,8 +54,8 @@ class DetectorSetup:
 
 def check_setup(
     raw: DetectorSetup, calibration: DetectorSetup | None, *, exposure: bool, role: str
-) -> tuple[str, ...]:
-    """Reject known physical conflicts; only explicitly legacy inputs may lack fields."""
+) -> None:
+    """Reject contradictions in *known* detector settings; unknowns stay unknown."""
     names = [
         "detector",
         "origin_x",
@@ -50,15 +68,12 @@ def check_setup(
     ]
     if exposure:
         names.append("exposure_s")
-    unknown = []
     for name in names:
         actual = getattr(raw, name)
         expected = getattr(calibration, name) if calibration is not None else None
         if actual is None or expected is None:
-            if not raw.legacy and not (calibration is not None and calibration.legacy):
-                raise ValueError(f"Missing {role} configuration: {name}")
-            unknown.append(f"{role}.{name}")
-        elif name == "exposure_s":
+            continue
+        if name == "exposure_s":
             # Encoding roundoff only, not a detector/physical matching tolerance.
             if abs(actual - expected) > 4 * abs(
                 np.spacing(max(abs(actual), abs(expected)))
@@ -68,4 +83,3 @@ def check_setup(
                 )
         elif actual != expected:
             raise ValueError(f"Incompatible {role} {name}: {actual} != {expected}")
-    return tuple(unknown)

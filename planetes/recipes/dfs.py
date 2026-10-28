@@ -1,6 +1,5 @@
 """CPL binding of explicit categories/parameters and verified product publication."""
 
-from dataclasses import replace
 from pathlib import Path
 
 from astropy.io import fits as afits
@@ -15,9 +14,9 @@ from planetes.io.keywords import CATEGORIES, PRO_CATEGORY
 from planetes.io.publication import destinations
 from planetes.qc import measure_quality
 from planetes.products import (
-    P2VMCalibration,
-    ReducedObservables,
-    WavelengthCalibration,
+    P2VM,
+    P2VMRed,
+    Wave,
     WavelengthReference,
 )
 
@@ -28,9 +27,9 @@ def cpl_frame_type(cls):
         if cls
         in (
             WavelengthReference,
-            WavelengthCalibration,
-            P2VMCalibration,
-            ReducedObservables,
+            Wave,
+            P2VM,
+            P2VMRed,
         )
         else ui.Frame.FrameType.IMAGE
     )
@@ -79,13 +78,7 @@ def select_inputs(frameset, required, optional=None, *, multiple=None):
 
 def save_products(outputs, used, recipe, *, include_qc: bool = True):
     """Sign all outputs before publication; rollback only newly owned links on failure."""
-    prepared = []
-    for output, product in outputs:
-        product = replace(
-            product,
-            provenance=replace(product.provenance, producer=f"pyesorex:{recipe.name}"),
-        )
-        prepared.append((Path(output), product))
+    prepared = [(Path(output), product) for output, product in outputs]
     with destinations([p for p, _ in prepared], verify=read_product) as temporary:
         products = ui.FrameSet()
         for (output, product), path in zip(prepared, temporary, strict=True):

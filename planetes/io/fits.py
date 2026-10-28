@@ -7,18 +7,21 @@ import numpy as np
 from astropy.io import fits as afits
 
 from .. import __version__
-from ..instrument import ABCD_ORDER, BASELINES, TELESCOPES, DetectorSetup
+from ..instrument import (
+    ABCD_ORDER,
+    BASELINES,
+    TELESCOPES,
+    DetectorSetup,
+    _check_baselines,
+)
 from ..products import (
     BadPixelMap,
-    DarkCalibration,
-    FlatCalibration,
-    P2VMCalibration,
-    Provenance,
-    ReducedObservables,
-    WavelengthCalibration,
+    Dark,
+    Flat,
+    P2VM,
+    P2VMRed,
+    Wave,
     WavelengthReference,
-    fingerprint,
-    validate,
 )
 from . import keywords as kw
 from .hdu import _checksums, _json_hdu, _native, _read_json
@@ -59,7 +62,8 @@ def _table(name, columns):
 
 def _detector(product):
     labels = [f"REG{i+1:02d}" for i in range(24)]
-    if isinstance(product, (P2VMCalibration, ReducedObservables)):
+    if isinstance(product, (P2VM, P2VMRed)):
+        _check_baselines(product.baseline_regions, product.baseline_telescopes)
         for baseline, outputs in product.baseline_regions.items():
             for output, phase in zip(outputs, ABCD_ORDER, strict=True):
                 labels[output] = BASELINES[baseline] + "-" + phase
@@ -67,24 +71,22 @@ def _detector(product):
 
 
 def encode_product(product, header=None, *, quality=None):
-    """Encode arrays and supplied QC measurements without running scientific diagnostics."""
-    validate(product)
+    """Encode a product; FITS units and ESO keywords stay in this I/O layer."""
     if type(product) not in CATEGORIES:
         raise TypeError(
             "Only complete DARK/BAD/calibration/science objects can be saved"
         )
     h = afits.Header() if header is None else header.copy()
     for key in list(h):
-        if key.startswith("ESO DPR "):
+        if key.startswith("ESO DPR ") or key == "PLANETES CONTENT SHA256":
             del h[key]
     h["INSTRUME"] = "PLANETES"
     h["HIERARCH " + kw.FORMAT_KEY] = kw.PRODUCT_FORMAT
-    h["HIERARCH " + kw.HASH_KEY] = fingerprint(product)
     h["HIERARCH ESO PRO CATG"] = CATEGORIES[type(product)]
     h["HIERARCH ESO PRO TYPE"] = (
         "STATIC" if isinstance(product, WavelengthReference) else "REDUCED"
     )
-    h["HIERARCH ESO PRO SCIENCE"] = isinstance(product, ReducedObservables)
+    h["HIERARCH ESO PRO SCIENCE"] = isinstance(product, P2VMRed)
     setup = getattr(product, "setup", None)
     if setup is not None:
         for name, key in kw.ROI_KEYS.items():
@@ -107,7 +109,12 @@ def encode_product(product, header=None, *, quality=None):
         )
 
     hdus = [afits.PrimaryHDU(header=h)]
-    if isinstance(product, DarkCalibration):
+    if isinstance(product, Dark):
+        if (
+            product.n_frames < 2
+            or product.mean_adu.shape != product.temporal_rms_adu.shape
+        ):
+            raise ValueError("Saved DARK requires measured RMS and at least two frames")
         hdu = hdus[0]
         hdu.header["NFRAMES"] = product.n_frames
         hdus += [
@@ -118,7 +125,7 @@ def encode_product(product, header=None, *, quality=None):
         image = _image(kw.RAW_IMAGE, product.bad_pixel_flags)
         image.header["HIERARCH " + kw.BAD_BITS] = "hot=1,dead=2,noisy=4"
         hdus.append(image)
-    elif isinstance(product, FlatCalibration):
+    elif isinstance(product, Flat):
         hdus += [
             _detector(product),
             _image(kw.FLAT_IMAGE, product.flat_map_adu, "adu"),
@@ -127,7 +134,7 @@ def encode_product(product, header=None, *, quality=None):
             _column("REGNAME", hdus[1].data["REGNAME"]),
             _column("CENTERY", one_based_pixels(product.trace_y_pixels), "pixel"),
         ]
-        if product.profile_sigma_pixels.size:
+        if product.profile_sigma_pixels is not None:
             columns.append(_column("WIDTH", product.profile_sigma_pixels, "pixel"))
         hdus += [
             _table(kw.PROFILE_PARAMS, columns),
@@ -143,9 +150,9 @@ def encode_product(product, header=None, *, quality=None):
                 ],
             ),
         ]
-        if product.telescope_flux_adu.size:
+        if product.telescope_flux_adu is not None:
             hdus.append(_image(kw.FLAT_FLUX, product.telescope_flux_adu, "adu"))
-    elif isinstance(product, WavelengthCalibration):
+    elif isinstance(product, Wave):
         hdus += [
             _detector(product),
             _table(
@@ -156,7 +163,7 @@ def encode_product(product, header=None, *, quality=None):
                 ],
             ),
         ]
-        if product.fit_residual_m.size:
+        if product.fit_residual_m is not None:
             hdus.append(
                 _table(
                     kw.WAVE_FIT,
@@ -185,14 +192,14 @@ def encode_product(product, header=None, *, quality=None):
                 [_column("WAVELENGTH", product.wavelength_m, "m")],
             ),
         ]
-        if isinstance(product, P2VMCalibration):
+        if isinstance(product, P2VM):
             columns = [
                 _column("REGNAME", hdus[1].data["REGNAME"]),
                 _column("TRANSMISSION", product.transmission),
                 _column("COHERENCE", product.coherence_amplitude),
                 _column("PHASE", product.coherence_phase_rad, "rad"),
             ]
-            if product.dc_term_adu.size:
+            if product.dc_term_adu is not None:
                 columns.append(_column("C_MATRIX", product.dc_term_adu, "adu"))
             hdus.append(_table(kw.P2VM_DATA, columns))
             for name, ext, unit in [
@@ -203,9 +210,11 @@ def encode_product(product, header=None, *, quality=None):
                 ("ellipse_amplitude", kw.ELLIPSE_AMPLITUDE, ""),
                 ("fit_rms_adu", kw.P2VM_FIT_RMS, "adu"),
             ]:
-                if getattr(product, name).size:
+                if getattr(product, name) is not None:
                     hdus.append(_image(ext, getattr(product, name), unit))
         else:
+            if product.group_delay_m is None or product.differential_phase_deg is None:
+                raise ValueError("Saved P2VMRED requires GD and differential phase")
             nf, _, nw = product.photometric_flux_adu.shape
             hdus += [
                 _table(
@@ -249,17 +258,10 @@ def encode_product(product, header=None, *, quality=None):
                     ],
                 )
             )
-    info = {
-        "producer": product.provenance.producer,
-        "parameters": product.provenance.parameters,
-        "inputs": product.provenance.inputs,
-        "dependencies": product.provenance.dependencies,
-        "unverified": product.provenance.unverified,
-        "qc_status": product.provenance.qc_status,
-    }
+    # The raw/bench FITS dictionary is unfinished. Store only useful setup
+    # information here; ESO DFS owns input-file and recipe provenance.
     metadata = {
         "software_version": __version__,
-        "provenance": info,
         "setup": asdict(product.setup)
         if getattr(product, "setup", None) is not None
         else None,
@@ -278,35 +280,29 @@ def encode_product(product, header=None, *, quality=None):
                     number * 1e6,
                     comment.replace("[m]", "[um]"),
                 )
-        metadata["provenance"]["qc_status"] = {
-            **info["qc_status"],
-            **{
-                kw.QC_STATUS_KEYS.get(
-                    metric, kw.QC_KEYWORDS.get(metric, metric)
-                ): reason
-                for metric, reason in missing.items()
-            },
+        metadata["qc_status"] = {
+            kw.QC_STATUS_KEYS.get(metric, kw.QC_KEYWORDS.get(metric, metric)): reason
+            for metric, reason in missing.items()
         }
     hdus.append(_json_hdu(kw.META_EXT, metadata))
     return afits.HDUList(hdus)
 
 
 def read_product(path: Path, cls=None):
-    """Verify checksums, physical units/identities and canonical content before use."""
+    """Read a PLANETES FITS product, retaining physical units and identities."""
     with afits.open(path, checksum=True) as hdus:
         h = hdus[0].header
-        if h.get(kw.FORMAT_KEY) != kw.PRODUCT_FORMAT or h.get("INSTRUME") != "PLANETES":
-            raise ValueError(
-                f"Expected PLANETES product format {kw.PRODUCT_FORMAT}; regenerate earlier products"
-            )
+        if (
+            h.get(kw.FORMAT_KEY) not in (4, kw.PRODUCT_FORMAT)
+            or h.get("INSTRUME") != "PLANETES"
+        ):
+            raise ValueError("Unsupported PLANETES product format")
         actual = {v: k for k, v in CATEGORIES.items()}.get(h.get(kw.PRO_CATEGORY))
         if actual is None or (cls is not None and actual is not cls):
             raise ValueError("Unexpected product category")
         _checksums(hdus)
         meta = _read_json(hdus, kw.META_EXT)
-        info = meta["provenance"]
-        info["unverified"] = tuple(info.get("unverified", ()))
-        values = {"provenance": Provenance(**info)}
+        values = {}
 
         def image(ext, unit):
             item = hdus[ext]
@@ -331,7 +327,7 @@ def read_product(path: Path, cls=None):
                 else values - 1
             )
 
-        if actual is DarkCalibration:
+        if actual is Dark:
             values.update(
                 mean_adu=image(kw.RAW_IMAGE, "adu"),
                 temporal_rms_adu=image(kw.DARK_RMS, "adu"),
@@ -341,7 +337,7 @@ def read_product(path: Path, cls=None):
             if hdus[kw.RAW_IMAGE].header.get(kw.BAD_BITS) != "hot=1,dead=2,noisy=4":
                 raise ValueError("Invalid BAD flag definition")
             values["bad_pixel_flags"] = image(kw.RAW_IMAGE, "")
-        elif actual is FlatCalibration:
+        elif actual is Flat:
             values.update(
                 flat_map_adu=image(kw.FLAT_IMAGE, "adu"),
                 trace_y_pixels=zero_based_pixels(
@@ -360,7 +356,7 @@ def read_product(path: Path, cls=None):
                 )
             if kw.FLAT_FLUX in hdus:
                 values["telescope_flux_adu"] = image(kw.FLAT_FLUX, "adu")
-        elif actual is WavelengthCalibration:
+        elif actual is Wave:
             values["wavelength_map_m"] = np.stack(
                 [column(kw.WAVE_DATA, f"DATA{i+1}", "m")[0] for i in range(24)]
             )
@@ -386,7 +382,7 @@ def read_product(path: Path, cls=None):
                 i: (TELESCOPES.index(name[0]), TELESCOPES.index(name[1]))
                 for i, name in enumerate(BASELINES)
             }
-            if actual is P2VMCalibration:
+            if actual is P2VM:
                 if list(hdus[kw.P2VM_DATA].data["REGNAME"]) != labels:
                     raise ValueError("P2VM and detector REGNAME mismatch")
                 values.update(
@@ -405,8 +401,7 @@ def read_product(path: Path, cls=None):
                     ("fit_rms_adu", kw.P2VM_FIT_RMS, "adu"),
                 ]:
                     if ext in hdus:
-                        v = image(ext, unit)
-                        values[name] = v if unit == "m" else v
+                        values[name] = image(ext, unit)
             else:
                 nw = len(values["wavelength_m"])
                 nf = len(hdus[kw.SCIENCE_FLUX].data) // 4
@@ -445,7 +440,7 @@ def read_product(path: Path, cls=None):
                         kw.SCIENCE_VISIBILITY, "DIFFPHASE", "deg"
                     ).reshape(nf, 6, nw),
                 )
-        if actual in (DarkCalibration, FlatCalibration) and meta["setup"] is not None:
+        if actual in (Dark, Flat) and meta["setup"] is not None:
             values["setup"] = DetectorSetup(**meta["setup"])
             setup = values["setup"]
             for name, key in kw.ROI_KEYS.items():
@@ -462,15 +457,11 @@ def read_product(path: Path, cls=None):
             )
             if h.get(key) != setup.exposure_s:
                 raise ValueError("Product exposure and header disagree")
-        product = actual(**values)
-        validate(product)
-        if fingerprint(product) != h.get(kw.HASH_KEY):
-            raise ValueError("Scientific content fingerprint mismatch")
-        return product
+        return actual(**values)
 
 
 def write_product(path: Path, product, *, include_qc: bool = True):
-    """Save a product with optional descriptive QC; existing destinations are preserved."""
+    """Save a product with optional QC; preserve existing destinations."""
     from ..qc import measure_quality
 
     quality = measure_quality(product) if include_qc else None

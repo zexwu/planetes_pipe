@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.5.1
+# PLANETES pipeline 0.7.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
@@ -48,20 +48,20 @@ explicit Python identity mappings below.
 | `planetes_p2vm` | `DARK`, `FLAT`, `WAVE`, `FLAT_RAW` × 4, `P2VM_RAW` × 6 | `PHASE_REFERENCE`, `PHASE_DARK_CALIB` | `planetes_p2vm.fits` |
 | `planetes_reduce` | `DARK`, `FLAT`, `WAVE`, `P2VM`, `SINGLE_SCI_RAW` | — | `planetes_reduced.fits` |
 
-All file entry points require a complete DARK with measured temporal RMS and at
-least two frames. BAD is independent and records its actual parent DARK. Generate
+All file entry points require a complete `Dark` with measured temporal RMS and at
+least two frames. Select the appropriate DARK and BAD explicitly. Generate
 separate darks for main calibration, lamp and science where appropriate. Known
-exposure/ROI/detector conflicts fail before subtraction; explicitly legacy unknown
-fields are recorded as unverified. DarkImage remains a GUI/single-frame object.
+exposure/ROI/detector conflicts fail before subtraction; missing bench fields stay
+unknown. `DarkImage` contains a mean image for live subtraction only.
 A supplied phase reference keeps its SINGLE_SCI_RAW classification and uses the
 independently selected phase DARK, or records reuse of the main DARK. A disabled
-reference is excluded from both scientific provenance and DFS used inputs.
+reference is excluded from the calculation and DFS used inputs.
 
 Telescope order is 4,3,2,1; baseline order is 43,42,41,32,31,21; the four outputs
 within a baseline use A,C,B,D. The wave recipe defaults to the bundled static
 30-line FITS reference with the original ECSV values and origin labels.
 
-Parameters use the same defaults and validation in Python and ESO. For example:
+Parameters use the same scientific defaults in Python and ESO. For example:
 
 ```bash
 pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes/recipes planetes_p2vm \
@@ -116,7 +116,7 @@ Lists remain supported when the headers record all four shutter states.
 The reader selects `IMAGING_DATA_SC` when present, otherwise the unique 3-D image.
 Multiple unnamed cubes require `hdu=...` in the low-level `read_raw_metadata()` and
 `iter_raw_cube()` calls. Values must follow the bench ADU convention: absent BUNIT
-is recorded as `RAW.BUNIT` in unverified provenance; a declared different unit is
+is marked as `RAW.BUNIT` in the raw metadata; a declared different unit is
 rejected. `read_raw_header()` returns the unchanged primary header. Files declaring
 raw format 3 still require their complete metadata and named detector extension.
 
@@ -133,10 +133,11 @@ reducer = FrameReducer(flat, wave, p2vm)
 observables = reducer.reduce_frame(raw_frame_adu, dark=science_dark)
 ```
 
-This returns a length-one frame axis, instrumental fluxes, visibility amplitude
-and invalid flags. Set `diagnostics=True` for GD and differential phase. Science
-and live extraction always use the P2VM's saved wavelength grid; insufficient
-coverage or inconsistent flat/wave parents fails before processing.
+This returns a `P2VMRed` with a length-one frame axis, instrumental fluxes,
+visibility amplitude and invalid flags. GD and differential phase are `None` unless
+`diagnostics=True`; both are required when saving P2VMRED. Science and live
+extraction use the saved P2VM grid. Invalid physical mappings, detector dimensions
+and wavelength coverage fail at the calculation/extraction boundary.
 
 The actual Qt6 viewer integration, recovery instructions and fake-data launch
 are documented in [GUI integration](docs/GUI_INTEGRATION.md).
@@ -156,7 +157,8 @@ it can also be called directly with arrays. Saving stays explicit.
 | `p2vm.py` | Calibration sequence, target grid, output mapping and P2VM response fitting |
 | `reduction.py` | Science inputs, instrumental observables, GD and live FrameReducer |
 | `extraction.py` | Shared pixel extraction, wavelength resampling and chunked file extraction |
-| `products.py`, `instrument.py` | Named arrays, units/axes, parent fingerprints and fixed instrument conventions |
+| `products.py` | Plain `Dark`, `Flat`, `Wave`, `P2VM`, `P2VMRed` data; no file provenance or dependency graph |
+| `instrument.py` | Detector settings and fixed physical telescope/baseline conventions |
 | `qc.py`, `plotting.py` | Descriptive quality measurements and scientific plots |
 | `io/` | Raw metadata, product FITS layout, keywords and non-overwriting file publication |
 | `recipes/planetes_*.py` | SOF roles → step call → CPL DFS output registration |
@@ -175,7 +177,8 @@ pixel indices are zero-based; the FITS boundary writes the GRAVITY one-based
 coordinates. GRAVITY's existing `... UM SC` QC cards are emitted alongside their
 metre equivalents at the file boundary.
 
-[Change report and diagrams](docs/CHANGE_REPORT.md) explain the migration and
+[Simplification notes](docs/SIMPLIFICATION.md) explain the product interfaces.
+[Change report and diagrams](docs/CHANGE_REPORT.md) record the migration and
 full-data evidence. [Scientific methods](docs/SCIENTIFIC_METHODS.md) describe retained numerical
 definitions. During development, 12 focused tests cover core scientific calculations,
 bench P2VM inputs, FITS round trips/non-overwriting writes and one optional PyEsoRex
@@ -191,18 +194,18 @@ Exact comparisons use the same numerical environment and matching Numba cache
 states: the old algorithm itself has a small cold/warm difference. Cache and
 fastmath settings are retained.
 
-Version 0.5.1 keeps product format 4, raw format 3, the Python calling interfaces
-and recipe parameter names/defaults from 0.5.0. Existing 0.5.0 products remain
-readable. CPL parameter declarations now live in their corresponding recipes.
+Version 0.7.0 uses plain `Dark`, `Flat`, `Wave`, `P2VM` and `P2VMRed`
+dataclasses. Replace previous `*Calibration`, `VisibilityObservables` and
+`ReducedObservables` imports directly; there are no legacy aliases. Array
+computations keep their existing units and definitions. General validators,
+SHA-256 product fingerprints, parent dependency graphs and `Provenance` are
+removed. Python callers select their calibration files explicitly; ESO DFS
+records the actual recipe inputs and parameters.
 
-Version 0.5.0 introduced product format 4 and raw format 3. Regenerate earlier
-calibration/science products; existing standardized raw cubes remain usable.
-Python imports from `planetes.tasks`, `planetes.calibration` and
-`planetes.identity` are removed. Length fields and parameters now end in `_m`
-(and CLI aliases in `-m`). The old unit-conversion cache is removed.
-[The product contract](docs/PRODUCT_CONTRACT.md) defines the layouts and parameters.
-[QC definitions](docs/QC_PARAMETERS.md) map measurements to the checked GRAVITY
-1.9.6 source, with units and statistical domains.
+New products use FITS format **5**; format **4** remains readable. Full structured
+raw files stay at format **3**. Product data layout and units remain documented in
+[the product contract](docs/PRODUCT_CONTRACT.md); optional measurements retain
+[the QC definitions](docs/QC_PARAMETERS.md).
 
 The current product is per-frame instrumental **P2VMRED**. Averaged VIS/VIS2/T3
 and astronomical transfer-function calibration are later scientific stages; no

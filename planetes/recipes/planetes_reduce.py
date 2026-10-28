@@ -4,10 +4,10 @@ from cpl import ui
 
 from planetes import __version__
 from planetes.products import (
-    DarkCalibration,
-    FlatCalibration,
-    P2VMCalibration,
-    WavelengthCalibration,
+    Dark,
+    Flat,
+    P2VM,
+    Wave,
 )
 from planetes.recipes.dfs import (
     save_product,
@@ -51,10 +51,10 @@ class PlanetesReduce(ui.PyRecipe):
             frameset,
             {
                 "SINGLE_SCI_RAW": None,
-                "DARK": DarkCalibration,
-                "FLAT": FlatCalibration,
-                "WAVE": WavelengthCalibration,
-                "P2VM": P2VMCalibration,
+                "DARK": Dark,
+                "FLAT": Flat,
+                "WAVE": Wave,
+                "P2VM": P2VM,
             },
         )
         product = reduce_file(

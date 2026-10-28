@@ -10,11 +10,9 @@ from planetes.io.fits import write_product
 from planetes.io.raw import RawMetadata, write_raw
 from planetes.products import (
     CalibrationSpectra,
-    DarkCalibration,
-    FlatCalibration,
-    Provenance,
-    WavelengthCalibration,
-    fingerprint,
+    Dark,
+    Flat,
+    Wave,
 )
 
 
@@ -49,28 +47,15 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
         phase_reference[output] += 400.0 * np.cos(
             reference_phase[None, :, :] + abcd_phase[:, None, None]
         )
-    dark = DarkCalibration(
-        np.zeros((24, n_wave), dtype=np.float32),
-        np.zeros((24, n_wave), dtype=np.float32),
-        n_frame,
-        setup=setup(n_wave),
-    )
-    from planetes.dark import compute_badpix
-
-    bad = compute_badpix(dark)
-    flat = FlatCalibration(
+    flat = Flat(
         profile_x_pixels=np.tile(np.arange(n_wave), (24, 1)),
         profile_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1),
         flat_map_adu=np.ones((24, n_wave)),
         trace_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1).astype(float),
         setup=setup(n_wave),
-        provenance=Provenance(
-            dependencies={"dark": fingerprint(dark), "bad": fingerprint(bad)}
-        ),
     )
-    wave = WavelengthCalibration(
+    wave = Wave(
         wavelength_map_m=np.tile(wavelength, (24, 1)),
-        provenance=Provenance(dependencies={"flat": fingerprint(flat)}),
     )
     return (
         telescope,
@@ -124,7 +109,7 @@ def write_recipe_inputs(directory: Path):
         path = directory / f"{tag.lower()}.fits"
         write_product(path, product)
         paths[tag] = path
-    dark = DarkCalibration(
+    dark = Dark(
         np.zeros((24, 151), dtype=np.float32),
         np.zeros((24, 151), dtype=np.float32),
         32,
@@ -156,14 +141,6 @@ def write_recipe_inputs(directory: Path):
 
 
 def calibration_spectra(n_wave=15):
-    """Array-level fixture with explicit flat/wave dependencies."""
+    """Array-level spectra with explicit telescope and baseline mappings."""
     values = calibration_arrays(n_wave=n_wave)
-    return CalibrationSpectra(
-        *values[:6],
-        provenance=Provenance(
-            dependencies={
-                "flat": fingerprint(values[-2]),
-                "wave": fingerprint(values[-1]),
-            }
-        ),
-    )
+    return CalibrationSpectra(*values[:6])

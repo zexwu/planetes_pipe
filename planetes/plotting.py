@@ -8,7 +8,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from . import log
 from .instrument import BASELINES, N_BASELINES, N_TELESCOPES, TELESCOPES
-from .products import ReducedObservables
+from .products import P2VMRed
 
 
 def genfig(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
@@ -24,7 +24,7 @@ def genfig(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
 
 
 def plot_reduced(
-    reduced: ReducedObservables,
+    reduced: P2VMRed,
     output: Path,
     *,
     object_label: str = "PLANETES",

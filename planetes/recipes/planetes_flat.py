@@ -4,7 +4,7 @@ from cpl import ui
 
 from planetes import __version__
 from planetes.flat import calibrate_flat_file
-from planetes.products import BadPixelMap, DarkCalibration
+from planetes.products import BadPixelMap, Dark
 from planetes.recipes.dfs import (
     save_product,
     select_inputs,
@@ -39,7 +39,7 @@ class PlanetesFlat(ui.PyRecipe):
         options = read_parameters(self, settings, PARAMETERS)
         paths, cal, used = select_inputs(
             frameset,
-            {"DARK": DarkCalibration, "BAD": BadPixelMap, "FLAT_RAW": None},
+            {"DARK": Dark, "BAD": BadPixelMap, "FLAT_RAW": None},
             multiple={"FLAT_RAW": 4},
         )
         product = calibrate_flat_file(

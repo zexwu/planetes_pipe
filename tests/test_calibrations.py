@@ -16,7 +16,7 @@ from planetes.p2vm import (
     extract_calibration_files,
     wavelength_grid,
 )
-from planetes.products import DarkImage, fingerprint
+from planetes.products import DarkImage
 
 
 class CalibrationTests(unittest.TestCase):
@@ -57,9 +57,7 @@ class CalibrationTests(unittest.TestCase):
             )
             np.testing.assert_array_equal(actual.p2vm, expected.p2vm)
             self.assertEqual(actual.baseline_regions, expected.baseline_regions)
-            self.assertEqual(fingerprint(actual), fingerprint(expected))
-            self.assertIn("DARK.exposure_s", actual.provenance.unverified)
-            self.assertIn("RAW.BUNIT", actual.provenance.unverified)
+            self.assertEqual(actual.baseline_telescopes, expected.baseline_telescopes)
 
     def test_phase_dark_is_independent_from_main_dark(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -94,7 +92,3 @@ class CalibrationTests(unittest.TestCase):
                 corrected, DarkImage(np.zeros_like(phase.mean_adu))
             )
             np.testing.assert_array_equal(spectra.phase_reference, expected)
-            self.assertEqual(
-                spectra.provenance.dependencies["phase_dark"], fingerprint(phase)
-            )
-            self.assertNotEqual(fingerprint(main), fingerprint(phase))

@@ -9,11 +9,11 @@ import numpy as np
 from .instrument import BASELINES, TELESCOPES
 from .products import (
     BadPixelMap,
-    DarkCalibration,
-    FlatCalibration,
-    P2VMCalibration,
-    VisibilityObservables,
-    WavelengthCalibration,
+    Dark,
+    Flat,
+    P2VM,
+    P2VMRed,
+    Wave,
 )
 
 
@@ -30,7 +30,7 @@ def measure_quality(product):
         else:
             missing[key] = "unavailable: non-finite statistic"
 
-    if isinstance(product, DarkCalibration):
+    if isinstance(product, Dark):
         put(
             "dark_median_adu",
             np.median(product.mean_adu),
@@ -64,14 +64,16 @@ def measure_quality(product):
         missing["bad_flat_pixel_count"] = (
             "not applicable: retained mask has no flat-based rejection rule"
         )
-    elif isinstance(product, FlatCalibration):
-        for i, flux in enumerate(product.telescope_flux_adu):
+    elif isinstance(product, Flat):
+        for i, flux in enumerate(
+            product.telescope_flux_adu if product.telescope_flux_adu is not None else []
+        ):
             put(
                 f"flat_flux_t{TELESCOPES[i]}_adu",
                 flux,
                 f"[ADU/DIT] Mean-frame total flux, T{TELESCOPES[i]}",
             )
-        if not product.telescope_flux_adu.size:
+        if product.telescope_flux_adu is None:
             missing["flat_flux"] = "unavailable: individual flat images not retained"
         for reg in range(0, len(product.trace_y_pixels), 12):
             trace = (
@@ -87,7 +89,7 @@ def measure_quality(product):
                     np.floor(number * 1e6) * 1e-6,
                     "[pixel] One-based spatial trace center",
                 )
-            if product.profile_sigma_pixels.size:
+            if product.profile_sigma_pixels is not None:
                 widths = product.profile_sigma_pixels[reg]
                 valid = widths[np.isfinite(widths)]
                 if len(valid):
@@ -104,7 +106,7 @@ def measure_quality(product):
                 missing[f"profile_sigma_region{reg+1}_pixels"] = (
                     "unavailable: fitted sigma not provided; aperture width is different"
                 )
-    elif isinstance(product, WavelengthCalibration):
+    elif isinstance(product, Wave):
         low = np.max(np.min(product.wavelength_map_m, axis=1))
         high = np.min(np.max(product.wavelength_map_m, axis=1))
         for name, number in [("min", low), ("max", high)]:
@@ -114,7 +116,7 @@ def measure_quality(product):
                 "[m] Coverage shared by every detector output",
             )
         residual = product.fit_residual_m
-        if residual.size >= 2:
+        if residual is not None and residual.size >= 2:
             rms = np.std(residual, ddof=1)
             put(
                 "wavelength_residual_std_m",
@@ -128,7 +130,7 @@ def measure_quality(product):
         missing["reference_wavelength"] = (
             "not applicable: GRAVITY K-band reference lines are outside PLANETES coverage"
         )
-    elif isinstance(product, P2VMCalibration):
+    elif isinstance(product, P2VM):
         coh_mean = []
         coh_std = []
         phase_std = []
@@ -196,7 +198,7 @@ def measure_quality(product):
         missing["p2vm_group_delay_rejection"] = (
             "not applicable: coarse initialization bounds are not GRAVITY GD rejection limits"
         )
-    elif isinstance(product, VisibilityObservables):
+    elif isinstance(product, P2VMRed):
         missing["averaged_visibility"] = (
             "not applicable: GRAVITY final-VIS QC is measured after its averaging; this product is per-frame instrumental P2VMRED"
         )
@@ -211,13 +213,13 @@ def measure_quality(product):
 
 def diagnostics(product):
     """Stored inverse condition and channel statistics; no ESO QC keyword mapping."""
-    if isinstance(product, P2VMCalibration):
+    if isinstance(product, P2VM):
         return {
             "p2vm_condition_max": float(
                 np.max(np.linalg.cond(np.moveaxis(product.p2vm, -1, 0)))
             )
         }
-    if isinstance(product, VisibilityObservables):
+    if isinstance(product, P2VMRed):
         return {
             "visibility_flag_fraction": float(np.mean(product.flags)),
             "mean_visibility_amplitude": float(

@@ -4,8 +4,8 @@ from cpl import ui
 
 from planetes import __version__
 from planetes.products import (
-    DarkCalibration,
-    FlatCalibration,
+    Dark,
+    Flat,
     WavelengthReference,
 )
 from planetes.recipes.dfs import (
@@ -47,8 +47,8 @@ class PlanetesWave(ui.PyRecipe):
             frames,
             {
                 "WAVELAMP_RAW": None,
-                "DARK": DarkCalibration,
-                "FLAT": FlatCalibration,
+                "DARK": Dark,
+                "FLAT": Flat,
                 "LINE_LIST": WavelengthReference,
             },
         )

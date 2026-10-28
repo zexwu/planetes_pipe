@@ -5,9 +5,9 @@ from cpl import ui
 from planetes import __version__
 from planetes.p2vm import calibrate_p2vm_file
 from planetes.products import (
-    DarkCalibration,
-    FlatCalibration,
-    WavelengthCalibration,
+    Dark,
+    Flat,
+    Wave,
 )
 from planetes.recipes.dfs import (
     save_product,
@@ -67,16 +67,16 @@ class PlanetesP2VM(ui.PyRecipe):
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
         roles = {
-            "DARK": DarkCalibration,
-            "FLAT": FlatCalibration,
-            "WAVE": WavelengthCalibration,
+            "DARK": Dark,
+            "FLAT": Flat,
+            "WAVE": Wave,
             "FLAT_RAW": None,
             "P2VM_RAW": None,
         }
         paths, cal, used = select_inputs(
             frameset,
             roles,
-            {"PHASE_REFERENCE": None, "PHASE_DARK_CALIB": DarkCalibration},
+            {"PHASE_REFERENCE": None, "PHASE_DARK_CALIB": Dark},
             multiple={"FLAT_RAW": 4, "P2VM_RAW": 6},
         )
         product = calibrate_p2vm_file(

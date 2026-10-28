@@ -11,12 +11,9 @@ from .instrument import DetectorSetup
 from .io.raw import iter_raw_cube
 from .products import (
     Dark,
-    DarkCalibration,
-    FlatCalibration,
-    WavelengthCalibration,
-    require_parent,
-    validate,
-    validate_wavelength,
+    DarkInput,
+    Flat,
+    Wave,
 )
 
 
@@ -102,7 +99,7 @@ class SpectralExtractor:
     detector_flat_spectra: NDArray
     resampled_flat_spectra: NDArray
 
-    def extract(self, cube: NDArray, dark: Dark) -> NDArray:
+    def extract(self, cube: NDArray, dark: DarkInput) -> NDArray:
         """Subtract one explicitly supplied dark and extract every frame of this chunk."""
         if (
             cube.ndim != 3
@@ -123,15 +120,27 @@ class SpectralExtractor:
 
 
 def prepare_extraction(
-    flat: FlatCalibration, wave: WavelengthCalibration, wavelength_m: NDArray
+    flat: Flat, wave: Wave, wavelength_m: NDArray
 ) -> SpectralExtractor:
-    """Validate scientific parents and coverage once, then snapshot the required arrays."""
-    validate(flat)
-    validate(wave)
-    validate_wavelength(wavelength_m)
-    require_parent(wave, "flat", flat)
-    if wave.wavelength_map_m.shape[1] != flat.flat_map_adu.shape[1]:
+    """Prepare the extraction geometry and verify wavelength coverage once."""
+    height, width = flat.flat_map_adu.shape
+    xs, ys = flat.profile_x_pixels, flat.profile_y_pixels
+    if wave.wavelength_map_m.shape != (len(xs), width) or xs.shape != ys.shape:
         raise ValueError("Flat and wavelength detector dimensions differ")
+    # Numba's sparse gather has no bounds checks: verify indices once here.
+    if (
+        ((xs == -1) != (ys == -1)).any()
+        or (xs < -1).any()
+        or (ys < -1).any()
+        or (xs >= width).any()
+        or (ys >= height).any()
+    ):
+        raise ValueError("Invalid extraction pixel indices")
+    if (
+        not (np.diff(wave.wavelength_map_m, axis=1) > 0).all()
+        or not (np.diff(wavelength_m) > 0).all()
+    ):
+        raise ValueError("Wavelengths must increase for spectral resampling")
     for output, row in enumerate(wave.wavelength_map_m):
         if wavelength_m[0] < row[0] or wavelength_m[-1] > row[-1]:
             raise ValueError(
@@ -154,9 +163,7 @@ def prepare_extraction(
     )
 
 
-def extract_file(
-    path: Path, extractor: SpectralExtractor, dark: DarkCalibration
-) -> NDArray:
+def extract_file(path: Path, extractor: SpectralExtractor, dark: Dark) -> NDArray:
     """Read and extract a whole file, retaining all frames and the 16-frame chunking."""
 
     return np.concatenate(

@@ -46,6 +46,6 @@ Dark temporal RMS 使用 population 定义；上述谱域/残差 sample stdev �
 - 最终 VISAMP/VISPHI 平均、REJECTED RATIO：产品仍为逐帧仪器级结果；channel invalid flags 不是 GRAVITY 的 frame rejection 百分比。
 
 保存的 P2VM 逆矩阵条件数和 channel-level flag fraction 保留在普通 `qc.diagnostics()` 中，
-不再写成自行命名的 ESO QC。相位校正的请求/实际执行状态在具名 provenance
-参数中保存，不继续发明 ESO DRS 关键词。普通拟合 RMS 保存在
+不再写成自行命名的 ESO QC。相位校正的请求由 DFS recipe 参数记录，实际使用文件由 DFS used frames 记录；
+不在科学产品中建立 provenance 对象或另加 ESO DRS 关键词。普通拟合 RMS 保存在
 PLANETES_P2VM_FIT_RMS [ADU]，不冒称有权重的 chi-square。
