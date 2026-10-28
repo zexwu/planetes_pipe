@@ -45,7 +45,7 @@ META_EXT = "PLANETES_META"
 FORMAT_KEY = "PLANETES FORMAT"
 SHUTTER_KEYS = tuple(f"PLANETES INS SHUT{n} ST" for n in range(1, 5))
 RAW_FORMAT = 3
-PRODUCT_FORMAT = 5
+PRODUCT_FORMAT = 6
 
 
 CATEGORIES = {
@@ -66,52 +66,16 @@ QC_KEYWORDS = {
     "bad_pixel_count": "ESO QC BADPIX SC",
     "bad_dark_pixel_count": "ESO QC BADPIX_DARK SC",
     "bad_rms_pixel_count": "ESO QC BADPIX_RMS SC",
-    "p2vm_coherence_mean": "ESO QC P2VM_COHERENCE_AVG_SC",
-    "p2vm_coherence_spectral_std": "ESO QC P2VM_COHERENCERMS_AVG_SC",
-    "p2vm_phase_spectral_std_rad": "ESO QC P2VM_PHASERMS_AVG_SC",
     "wavelength_residual_std_m": "ESO QC RMSWAVE SC",
     "wavelength_min_m": "ESO QC MINWAVE SC",
     "wavelength_max_m": "ESO QC MAXWAVE SC",
-    "p2vm_transmission_mean": "ESO QC P2VM_TRANS_AVG_SC",
-    "p2vm_transmission_min": "ESO QC P2VM_TRANS_MIN_SC",
-    "p2vm_transmission_max": "ESO QC P2VM_TRANS_MAX_SC",
 }
 for i, telescope in enumerate(TELESCOPES, start=1):
     QC_KEYWORDS[f"flat_flux_t{telescope}_adu"] = f"ESO QC FLATFLUX SC{i}"
-for region in (1, 13):
-    for suffix in ("med", "left", "right"):
-        QC_KEYWORDS[f"profile_center_region{region}_{suffix}_pixels"] = (
-            f"ESO QC PROFILE_CENTER SC{region} {suffix.upper()}"
-        )
-    QC_KEYWORDS[f"profile_sigma_region{region}_pixels"] = (
-        f"ESO QC PROFILE_WIDTH SC{region} MED"
+for baseline in BASELINES:
+    QC_KEYWORDS[f"p2vm_coherence_mean_b{baseline}"] = (
+        f"ESO QC P2VM_COHERENCE_SC{baseline}"
     )
-for baseline in BASELINES:
-    for name, field in (
-        ("mean", "COHERENCE"),
-        ("min", "MINCOHERENCE"),
-        ("max", "MAXCOHERENCE"),
-    ):
-        QC_KEYWORDS[f"p2vm_coherence_{name}_b{baseline}"] = (
-            f"ESO QC P2VM_{field}_SC{baseline}"
-        )
-
-QC_STATUS_KEYS = {
-    "readout_noise": "RON",
-    "bad_flat_pixel_count": "ESO QC BADPIX_FLAT SC",
-    "flat_flux": "FLATFLUX",
-    "wavelength_residual_std": "RMSWAVE",
-    "reference_wavelength": "REFWAVE",
-    "p2vm_chi_square": "P2VM CHI2",
-    "p2vm_group_delay_rejection": "P2VM GD MAX",
-    "averaged_visibility": "VISAMP/VISPHI AVG",
-    "rejected_frame_ratio": "REJECTED RATIO",
-    "snr_and_flux_rate": "SNR/FLUX RATE",
-}
-for region in (1, 13):
-    QC_STATUS_KEYS[f"profile_sigma_region{region}_pixels"] = f"PROFILE_WIDTH SC{region}"
-for baseline in BASELINES:
-    QC_STATUS_KEYS[f"p2vm_coherence_mean_b{baseline}"] = f"P2VM_COHERENCE_SC{baseline}"
 FLAT_IMAGE = "PLANETES_FLAT_IMAGE"
 SPARSE_PROFILE = "PLANETES_PROFILE"
 FLAT_FLUX = "PLANETES_FLAT_FLUX"

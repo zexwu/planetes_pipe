@@ -64,9 +64,12 @@ class CalibrationFitsTests(unittest.TestCase):
         cls.spectra = calibration_spectra(n_wave=15)
         cls.flat, cls.wave = arrays[-2:]
         cls.p2vm = fit_p2vm(cls.spectra, phase_correction=False)
+        cls.p2vm_diagnostics = fit_p2vm(
+            cls.spectra, phase_correction=False, keep_diagnostics=True
+        )
 
     def test_fits_round_trip_preserves_all_arrays_and_mappings(self):
-        for product in [self.flat, self.wave, self.p2vm]:
+        for product in [self.flat, self.wave, self.p2vm, self.p2vm_diagnostics]:
             with (
                 self.subTest(product=type(product).__name__),
                 tempfile.TemporaryDirectory() as tmp,
@@ -110,11 +113,10 @@ class RawFitsTests(unittest.TestCase):
                 fits.HDUList(hdus).writeto(path)
                 original = path.read_bytes()
                 raw = read_raw_metadata(path, category="DARK_RAW")
-                self.assertIsNone(raw.shutters)
+                self.assertEqual(raw.shutters, (None,) * 4)
                 self.assertIsNone(raw.setup.exposure_s)
                 self.assertEqual((raw.setup.height, raw.setup.width), (3, 5))
                 self.assertTrue(raw.setup.legacy)
-                self.assertIn("RAW.BUNIT", raw.original["unverified"])
                 self.assertNotIn("ESO DET WIN1 DIT1", read_raw_header(path))
                 chunks = list(iter_cube(path))
                 self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
@@ -131,10 +133,9 @@ class RawFitsTests(unittest.TestCase):
                 np.testing.assert_array_equal(dark.mean_adu, cube[0])
                 self.assertEqual(dark.n_frames, count)
                 self.assertIsNone(dark.temporal_rms_adu)
-                quality, missing = measure_quality(dark)
+                quality = measure_quality(dark)
                 self.assertEqual(quality["dark_median_adu"][0], np.median(cube[0]))
                 self.assertNotIn("dark_rms_median_adu", quality)
-                self.assertIn("dark_rms_median_adu", missing)
                 with self.assertRaisesRegex(ValueError, "temporal RMS"):
                     detect_bad_pixels(dark)
                 with self.assertRaisesRegex(ValueError, "Saved DARK"):

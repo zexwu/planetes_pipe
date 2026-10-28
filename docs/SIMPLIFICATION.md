@@ -1,7 +1,7 @@
-# PLANETES 0.8.1：简单科学产品与明确的步骤 API
+# PLANETES 0.9.0：简单科学产品与明确的步骤 API
 
 0.7曾将`products.py`从401行缩减到119行；0.8统一步骤、字段和参数名称，
-0.8.1合并Dark类型后为109行，继续使用普通数据类。
+0.8.1合并Dark类型后为109行；0.9.0移除固定配对副本后为106行，继续使用普通数据类。
 每个物理步骤仍在自己的文件中定义输入、参数、计算与局部 helper。
 
 | 原名称 | 当前名称 | 内容 |
@@ -10,7 +10,7 @@
 | BadPixelMap | Bad | hot=1、dead=2、noisy=4 的坏像素 flags |
 | FlatCalibration | Flat | detector flat、trace 和稀疏提取几何 |
 | WavelengthCalibration | Wave | 逐输出波长图及可选拟合诊断 |
-| P2VMCalibration | P2VM | 完整24输出响应、逆矩阵及扫描诊断 |
+| P2VMCalibration | P2VM | 完整24输出响应、逆矩阵；扫描诊断可选 |
 | VisibilityObservables / ReducedObservables | P2VMRed | 逐帧仪器信号；实时预览可以省略 GD/差分相位 |
 
 旧名称直接替换，没有兼容别名。0.8.1统一使用Dark，删除DarkImage和DarkInput，
@@ -43,7 +43,7 @@ flowchart LR
     Steps --> Data["Dark / Flat / Wave / P2VM / P2VMRed"]
     Data --> Python["Python：显式保存"]
     Data --> Recipe["recipe：DFS 来源与参数"]
-    Python --> FITS["io.fits：format 5"]
+    Python --> FITS["io.fits：format 6"]
     Recipe --> FITS
     Data --> QC["可选 qc.measure_quality"]
     QC --> FITS
@@ -55,18 +55,19 @@ flowchart LR
 
 ## 文件与调用兼容性
 
-新产品写 format 5，仍可读 format 4；旧私有 hash/provenance 被忽略。
+新产品写 format 6，仍可读 format 4/5；旧私有 hash/provenance 被忽略。
 原数组扩展、物理单位和坐标约定保持，完整 raw 仍是 format 3。
 原始文件不会被读取或保存过程改写。
 
 保留当前 main 的台架输入支持：Python 显式望远镜/基线映射、不完整 header，
 非 ADU 拒绝、多 cube 歧义拒绝或显式低层 hdu 选择。SOF 类别保持不变。
-Qt6采集helper使用`build_raw_header()`。GUI自己持有目录路径，不再从
+Qt6采集helper使用`io.acquisition`的`CaptureMetadata`、`build_raw_header()`和`write_raw()`。GUI自己持有目录路径，不再从
 FrameReducer读取目录；overlay使用`baseline_outputs`。portable patches同步更新。
 
 QC 仍由发布入口的 `include_qc` 选择，保留当前 Python/recipe 默认 True；
 传 False 可跳过测量和附加。encoder 只编码传入结果，产品数据类不管理 QC。
-启用 QC 时，不可用原因放在 FITS 的最小 metadata 中。
+只保留暗场统计、BAD计数、flat flux、波长覆盖/残差和各基线coherence；
+未测或非有限值省略，删除missing字典、状态映射和qc_status。
 
 ## 两个可直接阅读的层次
 
@@ -86,15 +87,28 @@ QC 仍由发布入口的 `include_qc` 选择，保留当前 Python/recipe 默认
 已减暗图像与BAD，不再依赖Dark。`_invert_v2pm`名称已经准确，继续保留。
 发布函数叫`publish_outputs`，不把多文件发布描述成整体原子事务。
 
+## 0.9.0 的两个边界
+
+`RawMetadata`仅含category、四个可未知的shutter状态、setup；reader不再重建采集记录。
+`CaptureMetadata`在`io/acquisition.py`中保存采集时间和配置来源，并由writer使用。
+标定入口复用身份识别时读取的metadata，不再为同一文件重复解析。
+ROI、曝光来源、detector、单位和已知shutter矛盾检查保留。
+
+固定配对只在`instrument.BASELINE_PAIRS`定义；从三个产品类删除
+`baseline_telescopes`。实际从数据推断的`baseline_outputs`仍保留。
+`keep_diagnostics=False`默认不保存P2VM扫描/ellipse/DC/residual数组；设为True
+可保留原来的六组诊断，计算方法不变。ESO参数对应`--keep-diagnostics=true`。
+
 ## 验证
 
-保留12项开发测试，不恢复补丁中的整批测试或 golden NPZ。0.8.1与0.8.0各用
-15份真实raw运行一轮全部五个recipe，37个科学数组逐字节一致；10份产品的
-物理映射、detector setup、DFS参数、used inputs和QC值相同。实际Qt窗口验证
-完整暗场与相同均值的二维暗场给出相同visibility数组，单帧暗场按钮可用。
+保留12项开发测试，没有新增测试模块。0.9.0与0.8.1各用15份真实raw运行完整链，
+常规产品31个数组逐字节一致；开启诊断的P2VM产品11个数组也与旧版一致。
+10份产品的物理映射、setup和used inputs相同，31个保留的QC值相同。
+Qt窗口读取无扫描诊断的P2VM、处理真实单帧、模拟采集和拒绝中途设置变化均通过。
+10份format-4产品可转存format 6并保留数组字节；四份Qt6补丁可迁移。
 
-[0.8.0报告](https://github.com/zexwu/planetes_pipe/blob/8e62fad201c469d68594cfa4488627dc5a86f166/docs/CHANGE_REPORT.md)
-记录前次命名整理的冷/热对照、相位参照和旧格式验证。
+SOF身份标签、file-level workflow集中、端到端分块reduction属于下一步，
+本轮保持现有接口和处理方式。
 
 [当前修改报告](CHANGE_REPORT.md)记录证据位置；
 [产品接口](PRODUCT_CONTRACT.md)列出字段、文件布局和参数。

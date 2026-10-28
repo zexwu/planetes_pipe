@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.8.1
+# PLANETES pipeline 0.9.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
@@ -117,17 +117,21 @@ state physical identities explicitly: filenames and list order never assign them
 Lists remain supported when the headers record all four shutter states.
 
 The reader selects `IMAGING_DATA_SC` when present, otherwise the unique 3-D image.
-Multiple unnamed cubes require `hdu=...` in the low-level `read_raw_metadata()` and
-`iter_raw_cube()` calls. Values must follow the bench ADU convention: absent BUNIT
-is marked as `RAW.BUNIT` in the raw metadata; a declared different unit is
-rejected. `read_raw_header()` returns the unchanged primary header. Files declaring
-raw format 3 still require their complete metadata and named detector extension.
+Multiple unnamed cubes require `hdu=...` in the low-level reader. A known non-ADU
+unit is rejected; missing BUNIT follows the bench ADU convention. `read_raw_header()`
+returns the unchanged primary header. `RawMetadata` contains only category, four
+shutter states (each may be None), and detector setup. Format-3 files remain
+readable; only relevant physical fields are read from their private metadata.
+Acquisition uses `CaptureMetadata`, `build_raw_header` and `write_raw` from
+`planetes.io.acquisition`; host timing and configuration sources stay there.
 
 Save each calibration with the same `write_product` function when needed. Read it
 with `read_product(path, ExpectedClass)` from `planetes.io.fits`. QC is retained by
 default; `write_product(path, product, include_qc=False)` saves without computing
 QC. Formal recipes explicitly retain QC. The FITS encoder only serializes supplied
-measurements; `qc.measure_quality(product)` is available independently.
+measurements; `qc.measure_quality(product)` returns a dictionary of available
+statistics. Unknown values are omitted, without a separate missing-status table.
+See [the retained QC set](docs/QC_PARAMETERS.md).
 For single frames:
 
 ```python
@@ -161,10 +165,12 @@ science: `measure_dark`, `detect_bad_pixels`, `build_flat`,
 | `p2vm.py` | Calibration sequence, target grid, output mapping and P2VM response fitting |
 | `reduction.py` | Science inputs, instrumental observables, GD and live FrameReducer |
 | `extraction.py` | Shared pixel extraction, wavelength resampling and chunked file extraction |
-| `products.py` | Plain `Dark`, `Flat`, `Wave`, `P2VM`, `P2VMRed` data; no file provenance or dependency graph |
+| `products.py` | Plain `Dark`, `Bad`, `Flat`, `Wave`, `P2VM`, `P2VMRed` data; no file provenance or dependency graph |
 | `instrument.py` | Detector settings and fixed physical telescope/baseline conventions |
 | `qc.py`, `plotting.py` | Descriptive quality measurements and scientific plots |
-| `io/` | Raw metadata, product FITS layout, keywords and non-overwriting file publication |
+| `io/raw.py`, `io/fits.py` | Physical raw fields, product FITS layout and reading |
+| `io/acquisition.py` | Capture metadata, raw header construction and raw writing |
+| `io/keywords.py`, `io/publication.py` | FITS names and non-overwriting publication |
 | `recipes/planetes_*.py` | SOF roles → step call → CPL DFS output registration |
 | `recipes/parameters.py`, `recipes/dfs.py` | Shared CPL translation only; every CPL import stays in recipes/ |
 
@@ -216,9 +222,15 @@ name/alias `planetes.calib.profile-width` / `--profile-width` remains unchanged.
 Version 0.8.1 merges DarkImage into `Dark` and shortens BadPixelMap to `Bad`.
 The old classes and DarkInput union are removed without compatibility aliases.
 Mean-only darks remain usable without fabricating zero RMS; QC reports available
-mean statistics and marks missing temporal RMS as unavailable.
+mean statistics and omits unmeasured temporal RMS.
 
-Products stay at FITS format **5**; format **4** remains readable. Full structured
+Version 0.9.0 centralizes fixed telescope pairs in `instrument.BASELINE_PAIRS`;
+products no longer store `baseline_telescopes`. Actual `baseline_outputs` remain
+in the products. P2VM scan/ellipse/DC/residual diagnostics are omitted by default;
+use `keep_diagnostics=True` in Python or `--keep-diagnostics=true` in PyEsoRex
+to retain them. This does not alter calibration or reduction.
+
+New products use FITS format **6**; formats **4/5** remain readable. Full structured
 raw files stay at format **3**. Product data layout and units remain documented in
 [the product contract](docs/PRODUCT_CONTRACT.md); optional measurements retain
 [the QC definitions](docs/QC_PARAMETERS.md).

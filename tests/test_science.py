@@ -62,10 +62,10 @@ class ScienceTests(unittest.TestCase):
         self.assertEqual(len(matches), len(np.unique(matches[:, 1])))
 
     def test_visibility_normalization_flags_invalid_flux_products(self) -> None:
-        coherent_flux = np.array([[[6 + 8j, 1 + 0j]]])
-        flux = np.array([[[4.0, -1.0], [25.0, 2.0]]])
+        coherent_flux = np.tile(np.array([[[6 + 8j, 1 + 0j]]]), (1, 6, 1))
+        flux = np.array([[[4.0, -1.0], [25.0, 2.0], [25.0, 2.0], [25.0, 2.0]]])
 
-        visamp, flag = normalize_coherent_flux(coherent_flux, flux, {0: (0, 1)})
+        visamp, flag = normalize_coherent_flux(coherent_flux, flux)
 
         self.assertEqual(visamp[0, 0, 0], 1.0)
         self.assertFalse(flag[0, 0, 0])
@@ -75,6 +75,10 @@ class ScienceTests(unittest.TestCase):
     def test_p2vm_inverts_known_full_rank_instrument_response(self):
         spectra = calibration_spectra(n_wave=15)
         p2vm = fit_p2vm(spectra, phase_correction=False)
+        diagnostic = fit_p2vm(spectra, phase_correction=False, keep_diagnostics=True)
+        self.assertIsNone(p2vm.opd_m)
+        self.assertIsNotNone(diagnostic.opd_m)
+        self.assertEqual(p2vm.matrix.tobytes(), diagnostic.matrix.tobytes())
         matrix = build_v2pm(
             p2vm.transmission,
             p2vm.coherence_amplitude,
@@ -86,10 +90,10 @@ class ScienceTests(unittest.TestCase):
                 np.eye(N_DATA),
                 atol=1e-12,
             )
-        pairs = {**p2vm.baseline_telescopes, 0: (0, 2)}
+        outputs = {**p2vm.baseline_outputs, 0: p2vm.baseline_outputs[1]}
         with self.assertRaisesRegex(ValueError, "mapping"):
             reduce_spectra(
-                spectra.phase_reference, replace(p2vm, baseline_telescopes=pairs)
+                spectra.phase_reference, replace(p2vm, baseline_outputs=outputs)
             )
         with self.assertRaisesRegex(ValueError, "dimensions"):
             reduce_spectra(spectra.phase_reference[..., :1], p2vm)

@@ -6,6 +6,10 @@ import numpy as np
 
 TELESCOPES = ("4", "3", "2", "1")
 BASELINES = ("43", "42", "41", "32", "31", "21")
+# Telescope-axis indices, in the fixed physical baseline order above.
+BASELINE_PAIRS = tuple(
+    (TELESCOPES.index(pair[0]), TELESCOPES.index(pair[1])) for pair in BASELINES
+)
 ABCD_ORDER = ("A", "C", "B", "D")
 
 N_TELESCOPES = len(TELESCOPES)
@@ -17,18 +21,10 @@ REAL_SLICE = slice(N_TELESCOPES, N_TELESCOPES + N_BASELINES)
 IMAG_SLICE = slice(REAL_SLICE.stop, N_DATA)
 
 
-def _check_baselines(
-    baseline_outputs: dict[int, list[int]],
-    baseline_telescopes: dict[int, tuple[int, int]],
-) -> None:
-    """Require the six physical pairs and one ABCD assignment for every output."""
-    expected = {
-        i: (TELESCOPES.index(pair[0]), TELESCOPES.index(pair[1]))
-        for i, pair in enumerate(BASELINES)
-    }
+def _check_baselines(baseline_outputs: dict[int, list[int]]) -> None:
+    """Require one ABCD assignment for every output in the fixed baseline order."""
     if (
-        baseline_telescopes != expected
-        or set(baseline_outputs) != set(expected)
+        set(baseline_outputs) != set(range(N_BASELINES))
         or any(len(outputs) != len(ABCD_ORDER) for outputs in baseline_outputs.values())
         or sorted(output for outputs in baseline_outputs.values() for output in outputs)
         != list(range(N_OUTPUTS))

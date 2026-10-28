@@ -16,7 +16,6 @@ from .io.raw import (
     check_raw_calibrations,
     identify_raw_exposures,
     iter_raw_cube,
-    read_raw_metadata,
 )
 from .products import (
     Bad,
@@ -42,17 +41,18 @@ def make_flat(
 
     telescope_flats = identify_raw_exposures(telescope_flats, "FLAT_RAW")
     maps = []
-    setup = read_raw_metadata(telescope_flats[TELESCOPES[0]], category="FLAT_RAW").setup
+    setup = telescope_flats[TELESCOPES[0]][1].setup
     for name in TELESCOPES:
-        check_raw_calibrations(telescope_flats[name], dark, category="FLAT_RAW")
+        path, raw = telescope_flats[name]
+        check_raw_calibrations(raw, dark)
 
         check_setup(
-            read_raw_metadata(telescope_flats[name], category="FLAT_RAW").setup,
+            raw.setup,
             setup,
             exposure=False,
             role="flat sequence",
         )
-        maps.append(frame_mean(iter_raw_cube(telescope_flats[name])) - dark.mean_adu)
+        maps.append(frame_mean(iter_raw_cube(path)) - dark.mean_adu)
     result = build_flat(maps, bad, aperture_width_pixels=aperture_width_pixels)
     return replace(result, setup=setup)
 

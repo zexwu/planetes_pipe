@@ -1,6 +1,5 @@
 """P2VMRED step: per-frame instrumental fluxes, visibility, group delay and phase."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -10,6 +9,7 @@ from numpy.typing import NDArray
 from . import log
 from .extraction import SpectralExtractor, extract_spectra_from_file, prepare_extraction
 from .instrument import (
+    BASELINE_PAIRS,
     IMAG_SLICE,
     N_BASELINES,
     N_DATA,
@@ -19,7 +19,7 @@ from .instrument import (
     _check_baselines,
 )
 from .io.fits import read_product
-from .io.raw import check_raw_calibrations
+from .io.raw import check_raw_calibrations, read_raw_metadata
 from .products import (
     Dark,
     Flat,
@@ -45,7 +45,8 @@ def reduce_science(
     fluxes are ADU, GD and its search bounds are metres, differential phase is deg.
     """
 
-    check_raw_calibrations(path, dark, flat, category="SINGLE_SCI_RAW")
+    raw = read_raw_metadata(path, category="SINGLE_SCI_RAW")
+    check_raw_calibrations(raw, dark, flat)
     reducer = FrameReducer(flat, wave, p2vm)
     spectra = extract_spectra_from_file(path, reducer.extractor, dark)
     return reduce_spectra(
@@ -65,7 +66,7 @@ def reduce_spectra(
     include_phase: bool = True,
 ) -> P2VMRed:
     """Apply P2VM; include_phase adds group delay and differential phase."""
-    _check_baselines(p2vm.baseline_outputs, p2vm.baseline_telescopes)
+    _check_baselines(p2vm.baseline_outputs)
     if (
         p2vm.wavelength_m.ndim != 1
         or p2vm.matrix.shape != (N_DATA, N_OUTPUTS, len(p2vm.wavelength_m))
@@ -83,7 +84,6 @@ def reduce_spectra(
     visibility_amplitude, flags = normalize_coherent_flux(
         coherent_flux_adu,
         photometric_flux_adu,
-        p2vm.baseline_telescopes,
     )
 
     if not include_phase:
@@ -94,7 +94,6 @@ def reduce_spectra(
             flags,
             p2vm.wavelength_m,
             p2vm.baseline_outputs,
-            p2vm.baseline_telescopes,
         )
 
     group_delay_m = np.zeros((len(coherent_flux_adu), N_BASELINES))
@@ -123,7 +122,6 @@ def reduce_spectra(
         group_delay_m=group_delay_m,
         differential_phase_deg=differential_phase_deg,
         baseline_outputs=p2vm.baseline_outputs,
-        baseline_telescopes=p2vm.baseline_telescopes,
     )
     log.info("Reduction for science spectra completed.")
 
@@ -134,13 +132,12 @@ def reduce_spectra(
 def normalize_coherent_flux(
     coherent_flux: NDArray,
     flux: NDArray,
-    baseline_telescopes: Mapping[int, tuple[int, int]],
 ) -> tuple[NDArray, NDArray]:
-    """Normalize coherent flux and flag non-positive or non-finite denominators."""
+    """Normalize the six fixed baselines and flag non-positive/non-finite denominators."""
     visamp = np.full(coherent_flux.shape, np.nan, dtype=float)
     flag = np.ones(coherent_flux.shape, dtype=bool)
 
-    for baseline, (telescope_1, telescope_2) in baseline_telescopes.items():
+    for baseline, (telescope_1, telescope_2) in enumerate(BASELINE_PAIRS):
         flux_product = flux[:, telescope_1, :] * flux[:, telescope_2, :]
         valid = (
             (flux_product > 0)
@@ -206,7 +203,7 @@ class FrameReducer:
 
     @property
     def n_baselines(self) -> int:
-        return len(self.p2vm.baseline_telescopes)
+        return N_BASELINES
 
     @property
     def wavelength_m(self) -> NDArray:

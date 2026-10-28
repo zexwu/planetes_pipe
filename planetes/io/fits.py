@@ -10,6 +10,7 @@ from .. import __version__
 from ..instrument import (
     ABCD_ORDER,
     BASELINES,
+    BASELINE_PAIRS,
     TELESCOPES,
     DetectorSetup,
     _check_baselines,
@@ -63,7 +64,7 @@ def _table(name, columns):
 def _detector_table(product):
     labels = [f"REG{i+1:02d}" for i in range(24)]
     if isinstance(product, (P2VM, P2VMRed)):
-        _check_baselines(product.baseline_outputs, product.baseline_telescopes)
+        _check_baselines(product.baseline_outputs)
         for baseline, outputs in product.baseline_outputs.items():
             for output, phase in zip(outputs, ABCD_ORDER, strict=True):
                 labels[output] = BASELINES[baseline] + "-" + phase
@@ -235,10 +236,7 @@ def encode_product(product, header=None, *, quality=None):
                 )
             ]
             pairs = np.asarray(
-                [
-                    [int(TELESCOPES[t]) for t in product.baseline_telescopes[b]]
-                    for b in range(6)
-                ]
+                [[int(TELESCOPES[t]) for t in BASELINE_PAIRS[b]] for b in range(6)]
             )
             hdus.append(
                 _table(
@@ -269,8 +267,7 @@ def encode_product(product, header=None, *, quality=None):
         else None,
     }
     if quality is not None:
-        measurements, missing = quality
-        for metric, (number, comment) in measurements.items():
+        for metric, (number, comment) in quality.items():
             hdus[0].header["HIERARCH " + kw.QC_KEYWORDS[metric]] = (number, comment)
             if metric in (
                 "wavelength_min_m",
@@ -282,10 +279,6 @@ def encode_product(product, header=None, *, quality=None):
                     number * 1e6,
                     comment.replace("[m]", "[um]"),
                 )
-        metadata["qc_status"] = {
-            kw.QC_STATUS_KEYS.get(metric, kw.QC_KEYWORDS.get(metric, metric)): reason
-            for metric, reason in missing.items()
-        }
     hdus.append(_json_hdu(kw.META_EXT, metadata))
     return afits.HDUList(hdus)
 
@@ -295,7 +288,7 @@ def read_product(path: Path, cls=None):
     with afits.open(path, checksum=True) as hdus:
         h = hdus[0].header
         if (
-            h.get(kw.FORMAT_KEY) not in (4, kw.PRODUCT_FORMAT)
+            h.get(kw.FORMAT_KEY) not in (4, 5, kw.PRODUCT_FORMAT)
             or h.get("INSTRUME") != "PLANETES"
         ):
             raise ValueError("Unsupported PLANETES product format")
@@ -378,10 +371,6 @@ def read_product(path: Path, cls=None):
             labels = list(hdus[kw.DETECTOR_DATA].data["REGNAME"])
             values["baseline_outputs"] = {
                 i: [labels.index(name + "-" + a) for a in ABCD_ORDER]
-                for i, name in enumerate(BASELINES)
-            }
-            values["baseline_telescopes"] = {
-                i: (TELESCOPES.index(name[0]), TELESCOPES.index(name[1]))
                 for i, name in enumerate(BASELINES)
             }
             if actual is P2VM:

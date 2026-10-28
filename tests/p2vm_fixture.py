@@ -7,7 +7,7 @@ import numpy as np
 
 from planetes.instrument import BASELINES, TELESCOPES, DetectorSetup
 from planetes.io.fits import write_product
-from planetes.io.raw import RawMetadata, write_raw
+from planetes.io.acquisition import CaptureMetadata, write_raw
 from planetes.products import (
     P2VMSpectra,
     Dark,
@@ -84,7 +84,7 @@ def setup(n_wave=151, height=24):
 
 
 def metadata(category, active=(), n_wave=151, height=24):
-    return RawMetadata(
+    return CaptureMetadata(
         category,
         tuple(str(n) in active for n in range(1, 5)),
         setup(n_wave, height),
@@ -143,4 +143,4 @@ def write_recipe_inputs(directory: Path):
 def calibration_spectra(n_wave=15):
     """Array-level spectra with explicit telescope and baseline mappings."""
     values = calibration_arrays(n_wave=n_wave)
-    return P2VMSpectra(*values[:6])
+    return P2VMSpectra(*values[:4], values[5])

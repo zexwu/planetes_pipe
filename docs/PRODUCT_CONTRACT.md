@@ -1,4 +1,4 @@
-# PLANETES science products and FITS interface (v0.8.1)
+# PLANETES science products and FITS interface (v0.9.0)
 
 ## Design
 
@@ -27,7 +27,7 @@ Official references:
 | `Bad` | `bad_pixel_flags` `(y,x)` | Bit flags: hot 1, dead 2, noisy 4 |
 | `Flat` | sparse `profile_x_pixels`/`profile_y_pixels`, `flat_map_adu`, `trace_y_pixels`; optional sigma/flux/setup | FLAT and extraction geometry |
 | `Wave` | `wavelength_map_m` `(output,x)`; optional fit residuals | WAVE solution |
-| `P2VM` | `matrix` `(16,24,wavelength)` plus wavelength, output/baseline identity, transmission and fit diagnostics | P2VM response/inverse |
+| `P2VM` | `matrix` `(16,24,wavelength)` plus wavelength, inferred output mapping and physical response; optional fit diagnostics | P2VM response/inverse |
 | `P2VMRed` | per-frame `photometric_flux_adu`, complex `coherent_flux_adu`, `visibility_amplitude`, `flags`; optional GD and differential phase | Science intermediate, **not VIS** |
 | `WavelengthReference` | laboratory `wavelength_m`, origins | Static line list |
 | `P2VMSpectra` | extracted calibration scans and explicit instrument identity | Internal P2VM fit input, not a file product |
@@ -39,19 +39,27 @@ fast live preview (`include_phase=False`). Formal file reductions compute them; 
 `DarkImage` and the `DarkInput` union are removed. Subtraction accepts one `Dark`
 type. Temporal RMS is None until measured; frame count is None when unknown and
 1 for a single measured frame. BAD detection requires RMS. QC always measures
-the available mean and records a missing reason for unknown RMS. The existing
+the available mean and omits unknown RMS. The existing
 complete DARK file category still requires RMS and a frame count of at least two.
 `DetectorSetup` is defined in `instrument.py`; unknown
 header fields are `None`. Static telescope order is 4,3,2,1; baseline order
 43,42,41,32,31,21; each baseline's outputs are A,C,B,D.
+`instrument.BASELINE_PAIRS` defines telescope-axis indices once. Products no longer
+carry `baseline_telescopes`; their data-derived `baseline_outputs` is retained.
+`keep_diagnostics=True` retains P2VM scan OPD/GD, ellipse phase/radius, fitted DC
+and residual RMS. The default omits these arrays from memory products and FITS,
+while all calculations used to derive the response and inverse stay unchanged.
 
 ## Raw bench input
 
 The reader selects IMAGING_DATA_SC when present, otherwise the unique nonempty
 3-D primary/image extension. Ambiguous cubes require explicit low-level `hdu`
 selection. Known non-ADU units are rejected; missing BUNIT follows the bench ADU
-convention and stays marked in raw metadata. Missing acquisition fields remain
-None. Version-3 raw files still require their complete metadata extension.
+convention. Missing physical fields remain None. The reader returns only category,
+shutter states and detector setup; old format-3 private metadata supplies known
+physical fields without reconstructing the acquisition record. Known header/private
+metadata contradictions still fail. Capture records and the raw writer live in
+`io/acquisition.py`; reading does not require host timing or source records.
 
 Python telescope/baseline dictionaries supply identities when shutter readback
 is incomplete. All known shutter states must agree with that assignment.
@@ -64,8 +72,8 @@ Python field renames (`matrix`, `baseline_outputs`) do not change FITS extension
 or column names. `FrameReducer` contains calculation state only; GUI callers keep
 the selected calibration directory themselves.
 
-Reduced FITS files use `HIERARCH PLANETES FORMAT = 5`. The reader also
-accepts previous format-4 files, ignoring their old private SHA-256 field
+Reduced FITS files use `HIERARCH PLANETES FORMAT = 6`. P2VM scan diagnostics are
+optional. The reader also accepts previous format-4/5 files, ignoring their old private SHA-256 field
 and provenance JSON entries. Full structured raw files remain **format 3**.
 
 | Category | FITS payload |
@@ -74,13 +82,13 @@ and provenance JSON entries. Full structured raw files remain **format 3**.
 | BAD | `IMAGING_DATA_SC` bit flags |
 | FLAT | `IMAGING_DETECTOR_SC` labels, `PLANETES_FLAT_IMAGE`, `PROFILE_PARAMS`, `PLANETES_PROFILE`, optional `PLANETES_FLAT_FLUX` |
 | WAVE | `WAVE_DATA_SC` metre-valued detector wavelength columns; optional `PLANETES_WAVE_FIT` |
-| P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC` (transmission, coherence, phase), `PLANETES_P2VM_INVERSE` and fitting diagnostics |
+| P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC` (transmission, coherence, phase), `PLANETES_P2VM_INVERSE` and optional fitting diagnostics |
 | SINGLE_SCI_P2VMRED | `PLANETES_FLUX` and `PLANETES_VIS`: per-frame station indices, instrumental flux/coherence, visibility amplitude, flags, GD [m] and differential phase [deg] |
 | LINE_LIST | laboratory wavelength [m] and origin labels |
 
 All products carry `ESO PRO CATG/TYPE/SCIENCE`, named extensions, physical
 units, per-HDU FITS checksum/DATASUM and minimal private `PLANETES_META`
-(software version, optional known detector setup and, when requested, QC status). FITS checksum is a
+(software version and optional known detector setup). FITS checksum is a
 transmission/integrity check, **not** cryptographic provenance. New standalone
 Python files do not encode input paths or processing parameters. PyCPL/ESO DFS
 files additionally record recipe parameters and the frames actually used.
@@ -129,6 +137,7 @@ Repeated SOF counts are declared by the flat/P2VM recipes, not by the shared loa
 | bad_pixel_threshold | planetes.calib.bad-dark-threshold | 5.0 |
 | aperture_width_pixels | planetes.calib.profile-width | 10.0 pixel full aperture |
 | phase_correction | planetes.calib.phase-correction | true |
+| keep_diagnostics | planetes.calib.keep-diagnostics | false |
 | wavelength_min_m / max_m / channels | planetes.calib.wavelength-min-m / wavelength-max-m / wavelength-channels | 1.15e-6 / 1.30e-6 m / 151 |
 | gd_search_min_m / max_m (P2VM) | planetes.calib.gd-search-min-m / gd-search-max-m | -30e-6 / +30e-6 m |
 | gd_search_min_m / max_m (science) | planetes.reduce.gd-search-min-m / gd-search-max-m | -100e-6 / +100e-6 m |

@@ -61,19 +61,18 @@ class WavelengthReference:
 
 @dataclass(slots=True)
 class P2VM:
-    """Pixel-to-visibility matrix and retained calibration scan diagnostics."""
+    """Pixel-to-visibility response/inverse; calibration scan diagnostics are optional."""
 
     matrix: Array  # (data channel, output, wavelength)
     wavelength_m: Array  # (wavelength,)
     baseline_outputs: dict[int, list[int]]
-    baseline_telescopes: dict[int, tuple[int, int]]
     transmission: Array  # (output, telescope, wavelength)
     coherence_amplitude: Array  # (output, baseline, wavelength)
     coherence_phase_rad: Array  # (output, baseline, wavelength)
-    opd_m: Array  # (baseline, frame)
-    group_delay_m: Array  # (baseline, frame)
-    ellipse_phase_rad: Array  # (baseline, frame, wavelength)
-    ellipse_amplitude: Array  # (baseline, frame, wavelength)
+    opd_m: Array | None = None  # (baseline, frame), optional scan diagnostics
+    group_delay_m: Array | None = None  # (baseline, frame)
+    ellipse_phase_rad: Array | None = None  # (baseline, frame, wavelength)
+    ellipse_amplitude: Array | None = None  # (baseline, frame, wavelength)
     dc_term_adu: Array | None = None  # (output, baseline, wavelength)
     fit_rms_adu: Array | None = None  # (output, baseline, wavelength)
 
@@ -92,7 +91,6 @@ class P2VMRed:
     flags: Array  # bool (frame, baseline, wavelength)
     wavelength_m: Array
     baseline_outputs: dict[int, list[int]]
-    baseline_telescopes: dict[int, tuple[int, int]]
     group_delay_m: Array | None = None  # (frame, baseline)
     differential_phase_deg: Array | None = None  # (frame, baseline, wavelength)
 
@@ -105,5 +103,4 @@ class P2VMSpectra:
     baseline_spectra: Array  # (baseline, output, frame, wavelength)
     phase_reference: Array  # (output, frame, wavelength)
     baseline_outputs: dict[int, list[int]]
-    baseline_telescopes: dict[int, tuple[int, int]]
     wavelength_m: Array

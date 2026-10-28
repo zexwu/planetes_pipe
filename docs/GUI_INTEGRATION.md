@@ -11,7 +11,7 @@ mandatory pipeline import; the current viewer supplies the new hooks.
 ## Viewer
 
 Use the existing Python 3.12 GUI environment; numerical and Qt dependencies have
-not been upgraded. PLANETES is already editable there. Put format-4 or format-5 FLAT, WAVE
+not been upgraded. PLANETES is already editable there. Put format-4, format-5 or format-6 FLAT, WAVE
 and P2VM products together with their ordinary `planetes_*.fits` filenames:
 
 ```bash
@@ -83,7 +83,7 @@ when applied to its original source.
 
 On another machine, verify the original hashes, back up all four files and run
 `git apply --check` for each patch from the devel directory before applying.
-Do not apply again to already updated files. Install the matching PLANETES 0.8.1 version
+Do not apply again to already updated files. Install the matching PLANETES 0.9.0 version
 without replacing existing camera/Qt dependencies. To restore, preserve later local
 edits and recover the four original files from:
 
@@ -92,13 +92,13 @@ edits and recover the four original files from:
 Restore the matching 0.3 pipeline/calibrations too if reverting to format 2.
 
 The current viewer imports `load_reducer` from planetes.reduction and `load_dark` from planetes.dark and passes
-raw arrays to FrameReducer. Acquisition imports RawMetadata/write_raw from
-planetes.io.raw and DetectorSetup from planetes.instrument. These local consumers
+raw arrays to FrameReducer. Acquisition imports CaptureMetadata/build_raw_header/write_raw from
+planetes.io.acquisition and DetectorSetup from planetes.instrument. These local consumers
 and their portable patches are updated together; no compatibility shim is required.
 
 Version 0.5 uses `FrameReducer.wavelength_m` and `extractor.wavelength_map_m`.
 The viewer consumes those metre arrays directly and labels its axes accordingly.
-Format-4 calibrations remain readable; newly saved products use format 5.
+Format-4/5 calibrations remain readable; newly saved products use format 6.
 
 The 0.8.0 product simplification preserves the viewer entry points. Acquisition
 uses `build_raw_header(metadata, shape)` before capture and `write_raw` for publication;
@@ -112,3 +112,9 @@ uses the default `include_phase=False`.
 Version 0.8.1 checks the presence of temporal RMS for the status label, rather than
 dispatching on separate Dark/DarkImage classes. The current-frame button stores
 known count 1 and never fabricates a zero noise image.
+
+Version 0.9.0 separates the raw reader from acquisition writing. The viewer's
+capture helper uses `CaptureMetadata` from `io.acquisition`; pipeline reading
+returns only physical raw fields. Capture timestamps and configuration sources
+remain recorded in raw format 3. The viewer reads P2VM products without scan
+diagnostics. Fixed telescope pairs come from `instrument.BASELINE_PAIRS`.

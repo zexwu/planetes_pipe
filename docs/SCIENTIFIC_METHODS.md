@@ -1,4 +1,4 @@
-# Scientific methods in PLANETES 0.8.1
+# Scientific methods in PLANETES 0.9.0
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
@@ -32,8 +32,7 @@ Accept pixels under the original strict inequality
 retain the original accumulation order. Paired (-1,-1) entries represent invalid
 pixels and padding when different outputs have different sample counts. The
 flat product contains response, geometry and retained Gaussian fit sigmas;
-DARK statistics and BAD flags are separate products. Fit sigmas are descriptive
-QC; the extraction aperture remains aperture_width_pixels.
+DARK statistics and BAD flags are separate products. Fit sigmas remain available for inspection; the extraction aperture remains aperture_width_pixels.
 
 ## Wavelength solution (`wavelength.py`)
 
@@ -72,7 +71,11 @@ its independently selected dark, or uses the main dark when none is supplied.
 `fit_p2vm` follows baseline ellipse/OPD/response fitting, telescope transmission,
 response normalization, V2PM inversion, and optional phase-reference correction.
 The calculation blocks are named helpers in the same file. The normalization and
-per-wavelength inversion order are retained.
+per-wavelength inversion order are retained. Fixed telescope pairs are defined
+once in `instrument.BASELINE_PAIRS`, while detector output mapping is inferred
+from the calibration data. `keep_diagnostics=True` retains scan OPD/GD, ellipse
+phase/radius, fitted DC and residual RMS; the default discards these diagnostics
+after computing the same response and inverse.
 
 `fit_abcd_ellipse` returns normalized ellipse radius. Its persisted diagnostic
 field remains `ellipse_amplitude` for compatibility. In the phase-reference helper,
@@ -85,7 +88,8 @@ half of the band supplies OPD phase slope and coherent-sum group delay. Fit
 OPD against GD to remove the OPD zero point.
 
 At each wavelength, fit each of all 24 detector outputs as
-`c + a*cos(phi) + b*sin(phi)`. Retain the existing fitted DC coefficient and residual ADU RMS without refitting.
+`c + a*cos(phi) + b*sin(phi)`. Compute the existing fitted DC coefficient and residual ADU RMS without refitting;
+retain them only when diagnostics are requested.
 Persist coherence amplitude `sqrt(a²+b²)` and
 phase `atan2(b,a)`, including cross-talk outputs. Fit photometric transmission
 from telescope flats, apply the original transmission/coherence normalizations,

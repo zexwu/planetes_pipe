@@ -16,6 +16,11 @@ from planetes.recipes.dfs import (
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
+    "keep_diagnostics": (
+        "planetes.calib.keep-diagnostics",
+        "keep-diagnostics",
+        "Retain P2VM scan and fit diagnostics in the calibration product",
+    ),
     "phase_correction": (
         "planetes.calib.phase-correction",
         "phase-correction",

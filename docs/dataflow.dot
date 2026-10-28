@@ -1,5 +1,5 @@
 digraph Dataflow {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.8.1 — 原始数据、标定与科学结果", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.9.0 — 原始数据、标定与科学结果", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.15,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   rawdark [label="DARK_RAW\nmain / lamp / science 分别选择"];
@@ -13,7 +13,7 @@ digraph Dataflow {
   wavefits [label="WAVE\n全输出波长图 + accepted residuals", shape=folder];
   rawp2vm [label="FLAT_RAW × 4 + P2VM_RAW × 6\n可选仪器 phase reference / 独立 DARK"];
   p2vm [label="p2vm.py / planetes_p2vm\nmake_p2vm → fit_p2vm\n提取 · 物理响应 · 求逆", style="rounded,filled", fillcolor="#eff6ff"];
-  p2vmfits [label="P2VM\n全 24 输出响应 + inverse\n保存目标波长网格 [m]", shape=folder];
+  p2vmfits [label="P2VM\n全 24 输出响应 + inverse\n保存目标波长网格 [m]\n扫描诊断按需保留", shape=folder];
   rawscience [label="SINGLE_SCI_RAW\n选用匹配曝光的 science DARK"];
   science [label="reduction.py / planetes_reduce\nreduce_science / FrameReducer\n共用计算与 invalid flags", style="rounded,filled", fillcolor="#eff6ff"];
   results [label="离线：SINGLE_SCI_P2VMRED\n逐帧 ADU / VISAMP / GD [m] / 差分相位 [deg]\n实时：内存 P2VMRed 与 flags → GUI", shape=folder];

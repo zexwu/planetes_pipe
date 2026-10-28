@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 from . import log
 from .extraction import extract_spectra_from_file, prepare_extraction
 from .instrument import (
+    BASELINE_PAIRS,
     BASELINES,
     IMAG_SLICE,
     N_BASELINES,
@@ -19,7 +20,7 @@ from .instrument import (
     TELESCOPES,
     _check_baselines,
 )
-from .io.raw import check_raw_calibrations, identify_raw_exposures
+from .io.raw import check_raw_calibrations, identify_raw_exposures, read_raw_metadata
 from .products import (
     P2VMSpectra,
     Dark,
@@ -40,6 +41,7 @@ def make_p2vm(
     phase_reference: Path | None = None,
     phase_dark: Dark | None = None,
     phase_correction: bool = True,
+    keep_diagnostics: bool = False,
     wavelength_min_m: float = 1.15e-6,
     wavelength_max_m: float = 1.30e-6,
     wavelength_channels: int = 151,
@@ -68,6 +70,7 @@ def make_p2vm(
     return fit_p2vm(
         spectra,
         phase_correction=phase_correction,
+        keep_diagnostics=keep_diagnostics,
         gd_search_min_m=gd_search_min_m,
         gd_search_max_m=gd_search_max_m,
     )
@@ -77,15 +80,16 @@ def fit_p2vm(
     spectra: P2VMSpectra,
     *,
     phase_correction: bool = True,
+    keep_diagnostics: bool = False,
     gd_search_min_m: float = -30e-6,
     gd_search_max_m: float = 30e-6,
 ) -> P2VM:
-    """Fit baseline responses, normalize the instrument and invert its V2PM."""
+    """Fit/invert V2PM; keep_diagnostics retains scan arrays without changing the fit."""
     log.info("--- Step: P2VM ---")
 
     search_range = (gd_search_min_m, gd_search_max_m)
     wavelength_m = spectra.wavelength_m
-    _check_baselines(spectra.baseline_outputs, spectra.baseline_telescopes)
+    _check_baselines(spectra.baseline_outputs)
     if (
         wavelength_m.ndim != 1
         or spectra.telescope_spectra.ndim != 4
@@ -124,8 +128,9 @@ def fit_p2vm(
         ellipse_phase_rad, ellipse_radius = fit_abcd_ellipse(
             baseline_spectra[outputs], envelope_weights
         )
-        ellipse_phases.append(ellipse_phase_rad)
-        ellipse_radii.append(ellipse_radius)
+        if keep_diagnostics:
+            ellipse_phases.append(ellipse_phase_rad)
+            ellipse_radii.append(ellipse_radius)
         opd_m[baseline], group_delay_m[baseline] = _estimate_scan_opd(
             ellipse_phase_rad, ellipse_radius, wavelength_m, search_range
         )
@@ -145,7 +150,6 @@ def fit_p2vm(
         coherence_phase_rad,
         dc_term_adu,
         spectra.baseline_outputs,
-        spectra.baseline_telescopes,
     )
     v2pm_matrix = build_v2pm(transmission, coherence_amplitude, coherence_phase_rad)
     p2vm = _invert_v2pm(v2pm_matrix)
@@ -167,7 +171,6 @@ def fit_p2vm(
             coherence_phase_rad,
             reference_coherent_flux_adu,
             wavelength_m,
-            spectra.baseline_telescopes,
             baseline_by_output,
             search_range=search_range,
         )
@@ -180,16 +183,15 @@ def fit_p2vm(
         matrix=p2vm,
         wavelength_m=wavelength_m,
         baseline_outputs=spectra.baseline_outputs,
-        baseline_telescopes=spectra.baseline_telescopes,
         transmission=transmission,
         coherence_amplitude=coherence_amplitude,
         coherence_phase_rad=coherence_phase_rad,
-        opd_m=opd_m,
-        group_delay_m=group_delay_m,
-        ellipse_phase_rad=np.asarray(ellipse_phases),
-        ellipse_amplitude=np.asarray(ellipse_radii),
-        dc_term_adu=dc_term_adu,
-        fit_rms_adu=fit_rms_adu,
+        opd_m=opd_m if keep_diagnostics else None,
+        group_delay_m=group_delay_m if keep_diagnostics else None,
+        ellipse_phase_rad=np.asarray(ellipse_phases) if keep_diagnostics else None,
+        ellipse_amplitude=np.asarray(ellipse_radii) if keep_diagnostics else None,
+        dc_term_adu=dc_term_adu if keep_diagnostics else None,
+        fit_rms_adu=fit_rms_adu if keep_diagnostics else None,
     )
     log.info("--- Step: P2VM [DONE] ---")
     return product
@@ -267,7 +269,6 @@ def _normalize_response_inplace(
     coherence_phase_rad: NDArray,
     dc_term_adu: NDArray,
     baseline_outputs: Mapping[int, list[int]],
-    baseline_telescopes: Mapping[int, tuple[int, int]],
 ) -> None:
     """Normalize phase, transmission and ADU coherence to dimensionless response in-place."""
     log.info("P2VM Normalization...")
@@ -282,7 +283,7 @@ def _normalize_response_inplace(
 
     log.info("    Coherence normalization...")
     for baseline in range(N_BASELINES):
-        telescope_1, telescope_2 = baseline_telescopes[baseline]
+        telescope_1, telescope_2 = BASELINE_PAIRS[baseline]
         for wavelength_index in range(transmission.shape[-1]):
             photometry = (
                 np.linalg.pinv(transmission[:, :, wavelength_index])
@@ -332,7 +333,6 @@ def _apply_phase_reference(
     phase: NDArray,
     visdata: NDArray,
     wavelength: NDArray,
-    baseline_telescopes: Mapping[int, tuple[int, int]],
     region_to_baseline: Mapping[int, int],
     *,
     search_range=(-30e-6, 30e-6),
@@ -358,7 +358,7 @@ def _apply_phase_reference(
 
     integrated_coherent_flux = np.zeros((N_BASELINES, len(wavelength)), dtype=complex)
     for baseline in range(N_BASELINES):
-        telescope_1, telescope_2 = baseline_telescopes[baseline]
+        telescope_1, telescope_2 = BASELINE_PAIRS[baseline]
         baseline_phase_rad = (
             telescope_phase_rad[:, telescope_2] - telescope_phase_rad[:, telescope_1]
         )
@@ -382,7 +382,7 @@ def _apply_phase_reference(
         )
 
     for baseline in range(N_BASELINES):
-        telescope_1, telescope_2 = baseline_telescopes[baseline]
+        telescope_1, telescope_2 = BASELINE_PAIRS[baseline]
         integrated_coherent_flux[baseline] *= (
             telescope_phasor[telescope_1] * telescope_phasor[telescope_2].conj()
         )
@@ -483,21 +483,18 @@ def extract_p2vm_spectra(
     if phase_dark is not None and phase_reference is None:
         raise ValueError("phase_dark requires phase_reference")
     extractor = prepare_extraction(flat, wave, wavelength_m)
-    for category, paths in (
-        ("FLAT_RAW", telescope_flats),
-        ("P2VM_RAW", baseline_cubes),
-    ):
-        for path in paths.values():
-            check_raw_calibrations(path, main_dark, flat, category=category)
+    for exposures in (telescope_flats, baseline_cubes):
+        for _, raw in exposures.values():
+            check_raw_calibrations(raw, main_dark, flat)
     baseline_spectra = np.asarray(
         [
-            extract_spectra_from_file(baseline_cubes[name], extractor, main_dark)
+            extract_spectra_from_file(baseline_cubes[name][0], extractor, main_dark)
             for name in BASELINES
         ]
     )
     telescope_spectra = np.asarray(
         [
-            extract_spectra_from_file(telescope_flats[name], extractor, main_dark)
+            extract_spectra_from_file(telescope_flats[name][0], extractor, main_dark)
             for name in TELESCOPES
         ]
     )
@@ -506,9 +503,8 @@ def extract_p2vm_spectra(
     )
     if phase_reference is not None:
         selected_dark = main_dark if phase_dark is None else phase_dark
-        check_raw_calibrations(
-            phase_reference, selected_dark, flat, category="SINGLE_SCI_RAW"
-        )
+        raw = read_raw_metadata(phase_reference, category="SINGLE_SCI_RAW")
+        check_raw_calibrations(raw, selected_dark, flat)
         phase_reference_spectra = extract_spectra_from_file(
             phase_reference, extractor, selected_dark
         )
@@ -525,7 +521,6 @@ def extract_p2vm_spectra(
         outputs_by_modulation[baseline] = np.sort(active).tolist()
 
     baseline_outputs = {}
-    baseline_telescopes = {}
     for telescope_1 in range(N_TELESCOPES):
         for telescope_2 in range(N_TELESCOPES):
             if telescope_1 >= telescope_2:
@@ -543,13 +538,11 @@ def extract_p2vm_spectra(
                     f"{sorted(from_modulation)} from modulation"
                 )
             baseline_outputs[baseline] = sorted(outputs_by_modulation[baseline])
-            baseline_telescopes[baseline] = (telescope_1, telescope_2)
 
     return P2VMSpectra(
         telescope_spectra,
         baseline_spectra,
         phase_reference_spectra,
         baseline_outputs,
-        baseline_telescopes,
         extractor.wavelength_m,
     )

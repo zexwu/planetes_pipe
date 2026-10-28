@@ -14,7 +14,7 @@ from .dark import frame_mean
 from .extraction import extract_sparse_spectra
 from .instrument import N_OUTPUTS
 from .io.fits import read_product
-from .io.raw import check_raw_calibrations, iter_raw_cube
+from .io.raw import check_raw_calibrations, iter_raw_cube, read_raw_metadata
 from .products import (
     Dark,
     Flat,
@@ -36,7 +36,8 @@ def make_wave(
 ) -> Wave:
     """Read the lamp with its DARK and FLAT geometry; return wavelengths in metres."""
 
-    check_raw_calibrations(path, dark, flat, category="WAVELAMP_RAW")
+    raw = read_raw_metadata(path, category="WAVELAMP_RAW")
+    check_raw_calibrations(raw, dark, flat)
     reference = load_wavelength_reference() if reference is None else reference
     image = frame_mean(iter_raw_cube(path))
     if image.shape != dark.mean_adu.shape or image.shape != flat.flat_map_adu.shape:

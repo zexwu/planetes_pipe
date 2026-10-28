@@ -1,116 +1,26 @@
 """Raw FITS streaming, known bench metadata and calibration compatibility."""
 
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits as afits
-from astropy.time import Time
 
-from ..instrument import BASELINES, TELESCOPES, DetectorSetup
+from ..instrument import BASELINES, TELESCOPES, DetectorSetup, check_setup
 from . import keywords as kw
-from .hdu import _verify_checksums, _json_hdu, _read_json
-from .publication import publish_outputs
+from .hdu import _verify_checksums, _read_json
 
 CHUNK_FRAMES = 16
 
 
 @dataclass(frozen=True, slots=True)
 class RawMetadata:
-    """Known acquisition metadata; absent shutter readback remains unknown."""
+    """Only the raw identity and physical setup needed by the pipeline."""
 
     category: str
-    shutters: tuple[bool, bool, bool, bool] | None
+    shutters: tuple[bool | None, bool | None, bool | None, bool | None]
     setup: DetectorSetup
-    configuration_source: str
-    host_start_utc: str | None = None
-    host_end_utc: str | None = None
-    exposure_start_utc: str | None = None
-    original: dict = field(default_factory=dict)
-
-
-def build_raw_header(metadata: RawMetadata, shape):
-    """ESO ICD exposure/window fields; private shutter provenance stays explicit."""
-    if metadata.category not in kw.RAW_TYPES or len(shape) != 3 or min(shape) < 1:
-        raise ValueError("Expected a supported raw category and nonempty 3-D cube")
-    if (
-        metadata.shutters is None
-        or len(metadata.shutters) != 4
-        or any(not isinstance(v, (bool, np.bool_)) for v in metadata.shutters)
-        or sum(metadata.shutters) != kw.RAW_TYPES[metadata.category][3]
-    ):
-        raise ValueError("Raw category requires explicit, consistent shutter states")
-    setup = metadata.setup
-    if any(
-        getattr(setup, name) is not None and getattr(setup, name) < 0
-        for name in ("origin_x", "origin_y")
-    ) or any(
-        getattr(setup, name) is not None and getattr(setup, name) < 1
-        for name in ("binning_x", "binning_y")
-    ):
-        raise ValueError("Invalid detector ROI origin or binning")
-    if (setup.height is not None and setup.height != shape[1]) or (
-        setup.width is not None and setup.width != shape[2]
-    ):
-        raise ValueError("Raw detector size differs from the recorded ROI")
-    if not setup.legacy and any(
-        getattr(setup, name) is None
-        for name in (
-            "origin_x",
-            "origin_y",
-            "width",
-            "height",
-            "binning_x",
-            "binning_y",
-            "exposure_s",
-            "detector",
-            "orientation",
-        )
-    ):
-        raise ValueError("New raw data require known detector/ROI/exposure metadata")
-    if setup.legacy and metadata.configuration_source != "legacy-role-map":
-        raise ValueError("Legacy raw requires an explicit adopted shutter role map")
-    if setup.exposure_s is not None and (
-        not np.isfinite(setup.exposure_s) or setup.exposure_s <= 0
-    ):
-        raise ValueError("Exposure must be positive finite seconds")
-    h = afits.Header()
-    h["INSTRUME"] = "PLANETES"
-    category, kind, technique, _ = kw.RAW_TYPES[metadata.category]
-    for key, value in (
-        (kw.DPR_CATEGORY, category),
-        (kw.DPR_TYPE, kind),
-        (kw.DPR_TECHNIQUE, technique),
-    ):
-        h["HIERARCH " + key] = value
-    h["HIERARCH " + kw.FORMAT_KEY] = kw.RAW_FORMAT
-    h["HIERARCH " + kw.NDIT] = shape[0]
-    for key, value in zip(kw.SHUTTER_KEYS, metadata.shutters, strict=True):
-        h["HIERARCH " + key] = value
-    for name, key in kw.ROI_KEYS.items():
-        value = getattr(metadata.setup, name)
-        if value is not None:
-            h["HIERARCH " + key] = value + (1 if name.startswith("origin_") else 0)
-    if metadata.setup.exposure_s is not None:
-        key = (
-            kw.DIT
-            if metadata.setup.exposure_source in ("readback", "legacy-property")
-            else kw.UIT
-        )
-        h["HIERARCH " + key] = (
-            metadata.setup.exposure_s,
-            "[s] Per-integration exposure; source in PLANETES_META",
-        )
-        if key == kw.DIT:
-            h["EXPTIME"] = (
-                metadata.setup.exposure_s * shape[0],
-                "[s] Sum of unaveraged integration times",
-            )
-    if metadata.exposure_start_utc is not None:
-        h["DATE-OBS"] = metadata.exposure_start_utc
-        h["MJD-OBS"] = float(Time(metadata.exposure_start_utc, scale="utc").mjd)
-    return h
 
 
 def _detector_hdu(hdus, hdu: int | str | None = None):
@@ -186,7 +96,7 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
         raise ValueError("Invalid detector ROI origin or binning")
     raw = RawMetadata(
         category=category,
-        shutters=shutter_values if unknown == 0 else None,
+        shutters=shutter_values,
         setup=DetectorSetup(
             **roi,
             exposure_s=exposure,
@@ -196,9 +106,6 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
             detector=header.get("ESO DET ID"),
             legacy=True,
         ),
-        configuration_source="readback" if unknown == 0 else "pending",
-        exposure_start_utc=header.get("DATE-OBS"),
-        original={"header_status": "provisional", "shutters": shutter_values},
     )
     return raw
 
@@ -206,86 +113,94 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
 def read_raw_metadata(
     path: Path, *, category=None, hdu: int | str | None = None
 ) -> RawMetadata:
-    """Read strict version-3 raw metadata or known fields from a provisional bench FITS."""
+    """Read known physical fields; acquisition timing/provenance is not parsed."""
     with afits.open(path, memmap=True) as hdus:
-        h = hdus[0].header
-        if kw.PRO_CATEGORY in h:
+        header = hdus[0].header
+        if kw.PRO_CATEGORY in header:
             raise ValueError(f"Expected raw FITS, found pipeline product: {path}")
-        image = _detector_hdu(hdus, hdu)
-        shape = tuple(image.shape)
-        if kw.FORMAT_KEY not in h and kw.META_EXT not in hdus:
-            raw = parse_raw_header(h, shape, category=category)
-            raw.original["unverified"] = (
-                ["RAW.BUNIT"]
-                if "BUNIT" not in h and "BUNIT" not in image.header
-                else []
-            )
-            return raw
-        if (
-            h.get(kw.FORMAT_KEY) != kw.RAW_FORMAT
-            or h.get("INSTRUME") != "PLANETES"
-            or kw.META_EXT not in hdus
-            or kw.RAW_IMAGE not in hdus
-            or image is not hdus[kw.RAW_IMAGE]
+        if kw.FORMAT_KEY in header and (
+            header[kw.FORMAT_KEY] != kw.RAW_FORMAT
+            or header.get("INSTRUME") != "PLANETES"
         ):
-            raise ValueError(
-                f"Expected complete PLANETES raw format {kw.RAW_FORMAT}: {path}"
-            )
-        info = _read_json(hdus, kw.META_EXT)
-        info["setup"] = DetectorSetup(**info["setup"])
-        info["shutters"] = tuple(info["shutters"])
-        raw = RawMetadata(**info)
-        if category is not None and raw.category != category:
-            raise ValueError(f"Expected raw category {category}, got {raw.category}")
-        expected = build_raw_header(raw, shape)
-        for key in expected:
-            if h.get(key) != expected[key]:
-                raise ValueError(f"Raw header and metadata disagree: {key}")
-        # A fast header read does not stream/checksum the full 10 GB dataset.
-        # Publication and the migration verifier check every pixel/checksum once.
-        if image.header.get("BUNIT") != "adu":
-            raise ValueError("Raw detector values must be ADU")
-        return raw
+            raise ValueError(f"Unsupported PLANETES raw format: {path}")
+        image = _detector_hdu(hdus, hdu)
+        info = _read_json(hdus, kw.META_EXT) if kw.META_EXT in hdus else {}
+        raw = parse_raw_header(
+            header,
+            image.shape,
+            category=category if category is not None else info.get("category"),
+        )
+        if info.get("category", raw.category) != raw.category:
+            raise ValueError("Raw header and metadata disagree: category")
+        if not info:
+            return raw
+        # Old format-3 files retain physical fields in PLANETES_META. Ignore
+        # capture timestamps, configuration sources and original-header records.
+        setup = DetectorSetup(**{**asdict(raw.setup), **info.get("setup", {})})
+        check_setup(raw.setup, setup, exposure=True, role="raw metadata")
+        if raw.setup.exposure_s is not None and "exposure_source" in info.get(
+            "setup", {}
+        ):
+            recorded_dit = setup.exposure_source in ("readback", "legacy-property")
+            if recorded_dit != (kw.DIT in header):
+                raise ValueError("Raw header and metadata disagree: exposure source")
+        known = {
+            key: value
+            for key, value in asdict(raw.setup).items()
+            if value is not None and key not in ("legacy", "exposure_source")
+        }
+        values = {**asdict(setup), **known}
+        shutters = tuple(info.get("shutters", raw.shutters))
+        if len(shutters) != 4 or any(
+            state is not None and type(state) is not bool for state in shutters
+        ):
+            raise ValueError("Recorded shutter states must be four booleans or unknown")
+        for first, second in zip(raw.shutters, shutters, strict=True):
+            if first is not None and second is not None and first != second:
+                raise ValueError("Raw header and metadata disagree: shutters")
+        shutters = tuple(
+            first if first is not None else second
+            for first, second in zip(raw.shutters, shutters, strict=True)
+        )
+        active = sum(state is True for state in shutters)
+        if not active <= kw.RAW_TYPES[raw.category][3] <= active + shutters.count(None):
+            raise ValueError("Raw category and recorded shutter states conflict")
+        return RawMetadata(raw.category, shutters, DetectorSetup(**values))
 
 
 def identify_raw_exposures(
     paths: Mapping[str, Path] | Iterable[Path], category: str
-) -> dict[str, Path]:
-    """Use explicit physical identities or shutter readback, never filenames or order."""
+) -> dict[str, tuple[Path, RawMetadata]]:
+    """Read once and retain physical identity with each path and its metadata."""
     expected = set(TELESCOPES if category == "FLAT_RAW" else BASELINES)
-    if isinstance(paths, Mapping):
-        result = {str(name): Path(path) for name, path in paths.items()}
-        if set(result) != expected or len(result) != len(paths):
-            raise ValueError(
-                f"Expected explicit {category} identities {sorted(expected)}"
-            )
-        for identity, path in result.items():
-            raw = read_raw_metadata(path, category=category)
-            shutters = raw.shutters or raw.original.get("shutters", ())
-            for telescope, state in enumerate(shutters, 1):
+    explicit = isinstance(paths, Mapping)
+    entries = paths.items() if explicit else ((None, path) for path in paths)
+    result = {}
+    for identity, path in entries:
+        path = Path(path)
+        raw = read_raw_metadata(path, category=category)
+        if explicit:
+            identity = str(identity)
+            for telescope, state in enumerate(raw.shutters, 1):
                 if state is not None and state != (str(telescope) in identity):
                     raise ValueError(
                         f"Explicit identity {identity} conflicts with recorded shutters: {path}"
                     )
-        if len(set(result.values())) != len(result):
-            raise ValueError("Each physical identity requires a different raw file")
-        return result
-    result = {}
-    for path in paths:
-        raw = read_raw_metadata(Path(path), category=category)
-        if raw.shutters is None:
+        else:
+            if None in raw.shutters:
+                raise ValueError(
+                    f"Unknown shutters for {path}; supply an explicit identity mapping"
+                )
+            identity = "".join(str(n) for n in range(4, 0, -1) if raw.shutters[n - 1])
+        if identity in result:
             raise ValueError(
-                f"Unknown shutters for {path}; supply an explicit identity mapping"
+                f"Duplicate shutter configuration {identity} for {category}"
             )
-        active = [str(i + 1) for i, value in enumerate(raw.shutters) if value]
-        name = "".join(sorted(active, reverse=True))
-        if name in result:
-            raise ValueError(f"Duplicate shutter configuration {name} for {category}")
-        result[name] = Path(path)
+        result[identity] = (path, raw)
     if set(result) != expected:
-        raise ValueError(
-            f"Incomplete {category} shutter set: expected {sorted(expected)}"
-        )
+        raise ValueError(f"Expected {category} identities {sorted(expected)}")
+    if len({path for path, _ in result.values()}) != len(result):
+        raise ValueError("Each physical identity requires a different raw file")
     return result
 
 
@@ -297,32 +212,8 @@ def iter_raw_cube(path: Path, *, hdu: int | str | None = None):
             yield np.asarray(data[start : start + CHUNK_FRAMES], dtype=np.float32)
 
 
-def write_raw(path: Path, cube, metadata: RawMetadata):
-    """Write original raw values/dtype without overwriting or operating hardware."""
-    cube = np.asarray(cube)
-    header = build_raw_header(metadata, cube.shape)
-    if cube.dtype.kind not in "uif" or any(
-        not np.isfinite(cube[start : start + CHUNK_FRAMES]).all()
-        for start in range(0, len(cube), CHUNK_FRAMES)
-    ):
-        raise ValueError("Expected finite real raw detector values")
-    image = afits.ImageHDU(cube, name=kw.RAW_IMAGE)
-    image.header["BUNIT"] = "adu"
-    with publish_outputs([path], verify=verify_raw) as temporary:
-        afits.HDUList(
-            [
-                afits.PrimaryHDU(header=header),
-                image,
-                _json_hdu(kw.META_EXT, asdict(metadata)),
-            ]
-        ).writeto(temporary[0], checksum=True)
-
-
-def check_raw_calibrations(path, dark, flat=None, *, flat_setup=None, category=None):
-    """Shared formal task boundary: known DIT/ROI conflicts are scientific errors."""
-    from ..instrument import check_setup
-
-    raw = read_raw_metadata(path, category=category)
+def check_raw_calibrations(raw: RawMetadata, dark, flat=None, *, flat_setup=None):
+    """Check known DIT/ROI conflicts using metadata already read by the caller."""
     check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
     geometry = flat.setup if flat is not None else flat_setup
     if flat is not None or flat_setup is not None:

@@ -55,7 +55,6 @@ class CalibrationTests(unittest.TestCase):
             )
             np.testing.assert_array_equal(actual.matrix, expected.matrix)
             self.assertEqual(actual.baseline_outputs, expected.baseline_outputs)
-            self.assertEqual(actual.baseline_telescopes, expected.baseline_telescopes)
 
     def test_phase_dark_is_independent_from_main_dark(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -1,6 +1,6 @@
 --- a/scripts/utils.py
 +++ b/scripts/utils.py
-@@ -7,16 +7,117 @@
+@@ -7,16 +7,116 @@
  from astropy.io import fits
 
 
@@ -22,8 +22,7 @@
 +):
 +    """Snapshot supported readbacks and explicitly sourced physical camera settings."""
 +    from planetes.instrument import DetectorSetup
-+    from planetes.io.raw import RawMetadata
-+    from planetes.io.raw import build_raw_header
++    from planetes.io.acquisition import CaptureMetadata, build_raw_header
 +
 +    required = ("detector", "orientation", "binning_x", "binning_y")
 +    if any(camera_config.get(key) in (None, "", 0) for key in required):
@@ -56,7 +55,7 @@
 +        exposure_source=exposure_source,
 +        **{key: camera_config[key] for key in required},
 +    )
-+    metadata = RawMetadata(
++    metadata = CaptureMetadata(
 +        category,
 +        tuple(str(n) in str(active) for n in range(1, 5)),
 +        setup,
@@ -93,7 +92,7 @@
 +def save_to_fits(cube, filename, *, metadata=None):
 +    """Save immutable pixels; formal acquisitions use the shared PLANETES writer."""
 +    if metadata is not None:
-+        from planetes.io.raw import write_raw
++        from planetes.io.acquisition import write_raw
 +
 +        return write_raw(Path(filename), cube, metadata)
 +    # The separate rotation diagnostic still uses its original, unclassified layout.
