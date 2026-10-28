@@ -26,7 +26,8 @@ binning. These describe the actual cube; the separate display binning selector
 is not physical binning. Missing configuration or a type/shutter conflict prevents
 capture. Settings are snapshotted at start; capture controls are locked, known
 camera readbacks are checked during capture, and changes prevent publication.
-The saved pixels retain their original dtype; filenames never overwrite old raw.
+New floating raw arrays are stored as float32; integer pixels retain their type.
+Filenames never overwrite old raw.
 
 The driver currently exposes exposure_time [us], offset_x/y and width/height.
 Those readbacks populate exposure/ROI. Detector/orientation/physical binning are
@@ -83,7 +84,7 @@ when applied to its original source.
 
 On another machine, verify the original hashes, back up all four files and run
 `git apply --check` for each patch from the devel directory before applying.
-Do not apply again to already updated files. Install the matching PLANETES 0.9.0 version
+Do not apply again to already updated files. Install the matching PLANETES 0.10.0 version
 without replacing existing camera/Qt dependencies. To restore, preserve later local
 edits and recover the four original files from:
 
@@ -118,3 +119,9 @@ capture helper uses `CaptureMetadata` from `io.acquisition`; pipeline reading
 returns only physical raw fields. Capture timestamps and configuration sources
 remain recorded in raw format 3. The viewer reads P2VM products without scan
 diagnostics. Fixed telescope pairs come from `instrument.BASELINE_PAIRS`.
+
+Version 0.10.0 promotes raw frames at the FrameReducer input boundary. The
+current-frame dark button also adapts its copied image once, so the scientific
+core receives float64 arrays. Calibrations loaded from FITS are promoted at read;
+floating raw/products are stored as float32 and complex signals as complex64.
+No camera or existing environment dependency was changed.

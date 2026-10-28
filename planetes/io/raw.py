@@ -9,7 +9,7 @@ from astropy.io import fits as afits
 
 from ..instrument import BASELINES, TELESCOPES, DetectorSetup, check_setup
 from . import keywords as kw
-from .hdu import _verify_checksums, _read_json
+from .hdu import _verify_checksums, _read_json, as_compute_array
 
 CHUNK_FRAMES = 16
 
@@ -205,11 +205,11 @@ def identify_raw_exposures(
 
 
 def iter_raw_cube(path: Path, *, hdu: int | str | None = None):
-    """Stream a named/unique detector cube as float32, retaining 16-frame arithmetic."""
+    """Read at most 16 frames and adapt them to computation precision once."""
     with afits.open(path, memmap=True) as hdus:
         data = _detector_hdu(hdus, hdu).data
         for start in range(0, len(data), CHUNK_FRAMES):
-            yield np.asarray(data[start : start + CHUNK_FRAMES], dtype=np.float32)
+            yield as_compute_array(data[start : start + CHUNK_FRAMES])
 
 
 def check_raw_calibrations(raw: RawMetadata, dark, flat=None, *, flat_setup=None):

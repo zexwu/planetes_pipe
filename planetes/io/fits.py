@@ -25,19 +25,19 @@ from ..products import (
     WavelengthReference,
 )
 from . import keywords as kw
-from .hdu import _verify_checksums, _json_hdu, _native, _read_json
+from .hdu import _verify_checksums, _json_hdu, _native, _read_json, _storage_array
 from .keywords import CATEGORIES
 from .publication import publish_outputs
 
 
 def _image(name, value, unit=""):
-    h = afits.ImageHDU(value, name=name)
+    h = afits.ImageHDU(_storage_array(value), name=name)
     h.header["BUNIT"] = unit
     return h
 
 
 def _column(name, values, unit="", dim=None):
-    values = np.asarray(values)
+    values = _storage_array(values)
     kind = {
         "f": "D" if values.dtype.itemsize == 8 else "E",
         "c": "M" if values.dtype.itemsize == 16 else "C",

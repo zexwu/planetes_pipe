@@ -118,6 +118,11 @@ class ESOChainTests(unittest.TestCase):
                 )
                 if isinstance(before, np.ndarray):
                     expected_array = before
+                    if before.dtype.kind in "fc":
+                        stored = (
+                            np.complex64 if before.dtype.kind == "c" else np.float32
+                        )
+                        expected_array = before.astype(stored).astype(before.dtype)
                     np.testing.assert_array_equal(expected_array, after)
                 else:
                     self.assertEqual(before, after)

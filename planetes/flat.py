@@ -134,9 +134,7 @@ def build_flat(
         flat_map_adu=flat_map,
         trace_y_pixels=np.array(ys_list),
         profile_sigma_pixels=np.asarray(sigmas),
-        telescope_flux_adu=np.asarray(
-            [np.sum(image, dtype=np.float64) for image in flat_images]
-        ),
+        telescope_flux_adu=np.asarray([np.sum(image) for image in flat_images]),
     )
     return product
 
@@ -234,8 +232,8 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
                 y_errs[x] = popt[2]
                 continue
 
-            y = y_full[y0:y1][valid].astype(np.float64)
-            z = image[y0:y1, x][valid].astype(np.float64)
+            y = y_full[y0:y1][valid]
+            z = image[y0:y1, x][valid]
 
             if not (y[0] <= popt[1] <= y[-1]):
                 popt[1] = y_curr = y.mean()
@@ -255,7 +253,6 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
     col = image[:, ref_x]
     p0 = np.array(
         [col.max() - np.median(col), ref_y, 3, np.median(col)],
-        dtype=np.float64,
     )
 
     _scan(ref_x, nx, 1, p0)

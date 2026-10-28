@@ -9,7 +9,7 @@ from astropy.time import Time
 
 from ..instrument import DetectorSetup
 from . import keywords as kw
-from .hdu import _json_hdu
+from .hdu import _json_hdu, _storage_array
 from .publication import publish_outputs
 from .raw import CHUNK_FRAMES, verify_raw
 
@@ -112,8 +112,8 @@ def build_raw_header(metadata: CaptureMetadata, shape):
 
 
 def write_raw(path: Path, cube, metadata: CaptureMetadata):
-    """Write original raw values/dtype without overwriting or operating hardware."""
-    cube = np.asarray(cube)
+    """Write floating raw as float32, preserving integer samples and existing files."""
+    cube = _storage_array(cube)
     header = build_raw_header(metadata, cube.shape)
     if cube.dtype.kind not in "uif" or any(
         not np.isfinite(cube[start : start + CHUNK_FRAMES]).all()

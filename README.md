@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.9.0
+# PLANETES pipeline 0.10.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
@@ -149,6 +149,24 @@ and wavelength coverage fail at the calculation/extraction boundary.
 The actual Qt6 viewer integration, recovery instructions and fake-data launch
 are documented in [GUI integration](docs/GUI_INTEGRATION.md).
 
+## Numerical precision
+
+The I/O boundary owns precision: floating arrays are written as **float32**
+(**complex64** for complex signals), and loaded as **float64/complex128** for
+calculation. Integer pixels, indices and flags retain their integer/bool types.
+Existing raw files are never rewritten. FITS headers keep their standard scalar
+representation. `io/hdu.py` contains the policy; numerical algorithms contain no
+precision casts. Array-level Python callers supply calculation arrays, using
+`as_compute_array` from that module once at their input boundary if needed.
+
+Raw reading still processes 16 frames at a time. Dark statistics merge chunk
+means and centered sums of squares, retaining population RMS without subtracting
+large second moments. Wavelength coverage tolerates only the float32 encoding
+error bound (`2**-24` relative); larger coverage gaps are rejected.
+
+Float32 calibration storage introduces measurable rounding through the chain;
+see the controlled comparison in [the change report](docs/CHANGE_REPORT.md).
+
 ## Organization
 
 Each scientific step owns its file entry point, parameters, array calculation and
@@ -170,6 +188,7 @@ science: `measure_dark`, `detect_bad_pixels`, `build_flat`,
 | `qc.py`, `plotting.py` | Descriptive quality measurements and scientific plots |
 | `io/raw.py`, `io/fits.py` | Physical raw fields, product FITS layout and reading |
 | `io/acquisition.py` | Capture metadata, raw header construction and raw writing |
+| `io/hdu.py` | Storage/computation precision, native byte order and shared FITS primitives |
 | `io/keywords.py`, `io/publication.py` | FITS names and non-overwriting publication |
 | `recipes/planetes_*.py` | SOF roles → step call → CPL DFS output registration |
 | `recipes/parameters.py`, `recipes/dfs.py` | Shared CPL translation only; every CPL import stays in recipes/ |
@@ -200,7 +219,7 @@ python -m unittest discover -s tests -v
 ```
 
 Real recipe tests require PyCPL/PyEsoRex and are skipped when unavailable.
-Exact comparisons use the same numerical environment and matching Numba cache
+Numerical comparisons use the same environment and matching Numba cache
 states: the old algorithm itself has a small cold/warm difference. Cache and
 fastmath settings are retained.
 

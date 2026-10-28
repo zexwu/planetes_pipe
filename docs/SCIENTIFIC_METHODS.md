@@ -1,4 +1,4 @@
-# Scientific methods in PLANETES 0.9.0
+# Scientific methods in PLANETES 0.10.0
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
@@ -7,9 +7,12 @@ Python, PyEsoRex and the GUI call the same functions; CPL imports stay in recipe
 
 ## Dark statistics (`dark.py`)
 
-Read the complete raw stack, accumulate sum and squared sum in float64, and
-return float32 temporal mean and population RMS. The variance is
-`max(E[x²] - E[x]², 0)`. Complete calibration requires at least two frames.
+Read the complete raw stack in 16-frame float64 chunks. For each chunk compute
+its mean and centered sum of squares M2; merge chunks using the difference
+between their means (Chan's parallel variance formula). Return the mean and
+`sqrt(M2 / n_frames)`, the population RMS. This avoids subtracting large second
+moments. Complete calibration requires at least two frames. The algorithm does
+not select or convert dtypes; the I/O boundary supplies calculation arrays.
 
 The independent BAD product uses the spatial median of the mean image and of
 the temporal RMS. Mean values above/below median mean ± threshold × median RMS
@@ -58,7 +61,9 @@ by the interpolated flat response to preserve the original flux scale.
 P2VM calibration defines its explicit target grid (default 1.15e-6–1.30e-6 m, 151
 channels). Science and live processing consume this saved grid. Every output
 must cover it fully; detector dimensions, sparse geometry and wavelength ordering
-are checked before extraction. Calibration files are selected explicitly by the caller. No extension of boundary values is accepted.
+are checked before extraction. Calibration files are selected explicitly by the caller. A coverage edge tolerates
+only the float32 storage rounding bound (`2**-24` relative); larger gaps fail.
+Within that encoding allowance, interpolation retains its endpoint behavior.
 
 Photometric telescope flats identify illuminated outputs; modulation in baseline
 cubes identifies four outputs per baseline. Their intersections must agree.
@@ -118,6 +123,12 @@ Flux is instrumental ADU. No new uncertainty model, transfer-function correction
 closure-phase definition or OIFITS/Phase 3 product is introduced here.
 
 ## File representations and QC
+
+Floating input is adapted to float64/complex128 at the I/O or live-frame boundary;
+scientific arrays stay at that precision. New floating files use float32/complex64.
+Integers/flags retain their types. Precision is defined in `io/hdu.py`, not inside
+the numerical steps. This changes rounding compared with 0.9.0; the report
+separates calculation changes from calibration-file and final-output rounding.
 
 Wavelength, OPD and GD use metres throughout calculations and files. There is no
 micrometre/metre conversion or retained-representation cache in the numerical path.

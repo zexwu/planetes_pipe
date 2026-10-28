@@ -115,15 +115,15 @@ def fit_p2vm(
     fit_rms_adu = np.zeros_like(dc_term_adu)
     ellipse_phases = []
     ellipse_radii = []
-    opd_m = np.zeros((N_BASELINES, n_frames), dtype=float)
-    group_delay_m = np.zeros((N_BASELINES, n_frames), dtype=float)
+    opd_m = np.zeros((N_BASELINES, n_frames))
+    group_delay_m = np.zeros((N_BASELINES, n_frames))
 
     for baseline in range(N_BASELINES):
         log.info(f"Processing baseline {baseline + 1}/{N_BASELINES}...")
         baseline_spectra = spectra.baseline_spectra[baseline]
         outputs = spectra.baseline_outputs[baseline]
         # Keep explicit envelope weights for the planned weighted ellipse fit.
-        envelope_weights = np.ones((n_frames, n_wavelengths), dtype=float)
+        envelope_weights = np.ones((n_frames, n_wavelengths))
         log.debug("    Fitting ellipses for phase extraction...")
         ellipse_phase_rad, ellipse_radius = fit_abcd_ellipse(
             baseline_spectra[outputs], envelope_weights
@@ -498,9 +498,7 @@ def extract_p2vm_spectra(
             for name in TELESCOPES
         ]
     )
-    phase_reference_spectra = np.empty(
-        (N_OUTPUTS, 0, len(extractor.wavelength_m)), dtype=np.float64
-    )
+    phase_reference_spectra = np.empty((N_OUTPUTS, 0, len(extractor.wavelength_m)))
     if phase_reference is not None:
         selected_dark = main_dark if phase_dark is None else phase_dark
         raw = read_raw_metadata(phase_reference, category="SINGLE_SCI_RAW")

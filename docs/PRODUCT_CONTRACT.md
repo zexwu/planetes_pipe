@@ -1,4 +1,4 @@
-# PLANETES science products and FITS interface (v0.9.0)
+# PLANETES science products and FITS interface (v0.10.0)
 
 ## Design
 
@@ -18,6 +18,20 @@ Official references:
 
 - [ESO GRAVITY product names](https://www.eso.org/observing/dfo/quality/GRAVITY/pipeline/product_codes.html)
 - [ESO GRAVITY Pipeline User Manual, issue 1.10.2 (12 June 2026)](https://ftp.eso.org/pub/dfs/pipelines/gravity/gravity-pipeline-manual-1.10.2.pdf), §2.4–2.5
+
+## Precision boundary
+
+`io/hdu.py` defines storage as float32/complex64 and computation as
+float64/complex128. Product FITS reads promote floating payloads once; raw reads
+promote each 16-frame block. Writers narrow new floating payloads once. Integer
+raw pixels, indices, flags and labels retain their types. Existing files stay
+unchanged; old double-precision payloads remain readable without narrowing on read.
+FITS header scalars retain their normal textual representation.
+
+The array-level API expects calculation-precision arrays. It does not cast inside
+scientific algorithms. Python/GUI input adapters can use `as_compute_array()` once;
+file entry points and product readers already do this. No dtype setting is stored
+in scientific dataclasses or passed through algorithm parameters.
 
 ## Python objects
 
@@ -98,7 +112,10 @@ trace centers are one-based on disk and zero-based in Python; accepted WAVE_FIT
 X/Y fit samples retain their existing zero-based coordinates. The sparse pixel
 `-1` remains a sentinel. Wavelength and group delay use **metres**, fringe phase
 **radians**, differential phase **degrees**, instrumental counts **ADU**.
-Boolean `FLAG=True` marks an invalid visibility sample.
+Boolean `FLAG=True` marks an invalid visibility sample. Floating binary-table
+columns use E/C and floating image payloads use 32-bit real components. Reads
+return native float64/complex128 arrays, so FITS round trips preserve the stored
+precision rather than the original unrounded calculation arrays.
 
 ## What is checked and where
 
@@ -106,7 +123,9 @@ Boolean `FLAG=True` marks an invalid visibility sample.
   detector/wavelength dimensions are checked before fitting or matrix application.
   This prevents NumPy broadcasting physically incompatible input spectra.
 - Sparse extraction indices and wavelength coverage/order are checked once before
-  Numba gathering and interpolation. V2PM inversion requires full numerical rank
+  Numba gathering and interpolation. Coverage endpoints allow only the relative
+  float32 round-to-nearest error bound (`2**-24`), defined at the I/O boundary;
+  larger gaps are rejected. V2PM inversion requires full numerical rank
   using NumPy matrix_rank; the pseudoinverse algorithm itself is unchanged.
 - At the acquisition/calibration boundary, **known** ROI/DIT/detector
   contradictions fail; missing provisional header fields are *unknown*, not

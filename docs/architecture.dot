@@ -1,13 +1,13 @@
 digraph Architecture {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.9.0 — 每个步骤自己负责输入、参数和计算", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.10.0 — 每个步骤自己负责输入、参数和计算", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.16,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   python [label="Python / examples/reduce.py"];
   recipes [label="PyEsoRex → recipes/\nSOF 角色/数量 · CPL 名称/别名 · DFS\n全部 CPL import 限定在这里"];
   gui [label="Qt6 GUI\n载入标定 → FrameReducer.reduce_frame"];
-  steps [label="五个同级科学步骤\ndark.py · flat.py · wavelength.py · p2vm.py · reduction.py\n\n文件输入 → 调用本文件计算函数 → 返回具名结果\n每个文件保留物理参数、默认值、算法和 helper\n波长 / OPD / GD 全部使用 m", style="rounded,filled", fillcolor="#eff6ff"];
+  steps [label="五个同级科学步骤\ndark.py · flat.py · wavelength.py · p2vm.py · reduction.py\n\n文件输入 → 调用本文件计算函数 → 返回具名结果\n每个文件保留物理参数、默认值、算法和 helper\n波长 / OPD / GD 全部使用 m\n浮点计算 float64 / complex128", style="rounded,filled", fillcolor="#eff6ff"];
   extraction [label="extraction.py\n共用像素提取 · 波数重采样\n16 帧读取/提取，仍拼接全量光谱"];
-  io [label="io/raw.py · io/fits.py\n原始数据元信息 / 产品 FITS\n单位、checksum、不覆盖写入"];
+  io [label="io/raw.py · io/fits.py\n原始数据元信息 / 产品 FITS\n读入升精度 / 写出降精度\n磁盘 float32 ↔ 计算 float64（复数对应）\n单位、checksum、不覆盖写入"];
   acquisition [label="io/acquisition.py\nCaptureMetadata → header / raw FITS\n采集时间与配置来源留在写入侧"];
   products [label="products.py · instrument.py\nDark · Bad · Flat · Wave · P2VM · P2VMRed\n具名数组与固定物理通道约定"];
   qc [label="qc.py → io/keywords.py\n少量可用统计 → FITS keyword\n不修改拟合、mask 或权重"];

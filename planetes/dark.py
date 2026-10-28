@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from .io import keywords as kw
 from .io.fits import read_product
+from .io.hdu import as_compute_array
 from .io.raw import iter_raw_cube, read_raw_metadata
 from .products import (
     Bad,
@@ -30,44 +31,41 @@ def make_dark_products(
     return dark, detect_bad_pixels(dark, threshold=bad_pixel_threshold)
 
 
-def frame_mean(
-    chunks: Iterable[NDArray[np.float32]],
-) -> NDArray[np.float32]:
+def frame_mean(chunks: Iterable[NDArray]) -> NDArray:
     """Compute a temporal mean from frame chunks."""
     total = None
     count = 0
     for chunk in chunks:
         if total is None:
-            total = np.zeros(chunk.shape[1:], dtype=np.float64)
-        total += chunk.sum(axis=0, dtype=np.float64)
+            total = np.zeros(chunk.shape[1:])
+        total += chunk.sum(axis=0)
         count += len(chunk)
     if total is None or count == 0:
         raise ValueError("Cube contains no frames")
-    return (total / count).astype(np.float32)
+    return total / count
 
 
-def frame_statistics(
-    chunks: Iterable[NDArray[np.float32]],
-) -> tuple[NDArray[np.float32], NDArray[np.float32], int]:
-    """Compute temporal mean and population RMS from frame chunks."""
-    total = None
-    total_squared = None
+def frame_statistics(chunks: Iterable[NDArray]) -> tuple[NDArray, NDArray, int]:
+    """Merge chunk means and centered sums of squares; return population RMS."""
+    mean = None
+    m2 = None
     count = 0
     for chunk in chunks:
-        if total is None:
-            total = np.zeros(chunk.shape[1:], dtype=np.float64)
-            total_squared = np.zeros(chunk.shape[1:], dtype=np.float64)
-        total += chunk.sum(axis=0, dtype=np.float64)
-        total_squared += np.square(chunk, dtype=np.float64).sum(
-            axis=0, dtype=np.float64
-        )
-        count += len(chunk)
-    if total is None or total_squared is None or count == 0:
+        n = len(chunk)
+        if n == 0:
+            continue
+        chunk_mean = chunk.mean(axis=0)
+        chunk_m2 = np.sum((chunk - chunk_mean) ** 2, axis=0)
+        if mean is None:
+            mean, m2 = chunk_mean, chunk_m2
+        else:
+            delta = chunk_mean - mean
+            m2 += chunk_m2 + delta**2 * (count * n / (count + n))
+            mean += delta * (n / (count + n))
+        count += n
+    if mean is None:
         raise ValueError("Cube contains no frames")
-
-    mean = total / count
-    variance = np.maximum(total_squared / count - mean**2, 0.0)
-    return mean.astype(np.float32), np.sqrt(variance).astype(np.float32), count
+    return mean, np.sqrt(m2 / count), count
 
 
 def detect_bad_pixels(dark: Dark, *, threshold: float = 5.0) -> Bad:
@@ -93,7 +91,7 @@ def detect_bad_pixels(dark: Dark, *, threshold: float = 5.0) -> Bad:
     return Bad(bpm)
 
 
-def measure_dark(chunks: Iterable[NDArray[np.float32]]) -> Dark:
+def measure_dark(chunks: Iterable[NDArray]) -> Dark:
     """Measure the mean and, with at least two frames, temporal population RMS."""
     mean, rms, count = frame_statistics(chunks)
     return Dark(mean, rms if count >= 2 else None, count)
@@ -123,5 +121,5 @@ def load_dark(path: Path) -> Dark:
             return replace(result, setup=metadata.setup)
         if data.ndim != 2:
             raise ValueError("A GUI dark must be a 2-D image or nonempty cube")
-        result = Dark(np.array(data, dtype=np.float32, copy=True))
+        result = Dark(as_compute_array(data).copy())
     return result

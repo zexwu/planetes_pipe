@@ -36,7 +36,7 @@ class ScienceTests(unittest.TestCase):
             )
 
     def test_sparse_extractor_skips_invalid_sentinels(self) -> None:
-        cube = np.ones((1, 2, 3), dtype=np.float32)
+        cube = np.ones((1, 2, 3))
         cube[0, -1, -1] = 1000.0
         ys = np.array([[0, -1]])
         xs = np.array([[0, -1]])

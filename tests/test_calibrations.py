@@ -24,6 +24,8 @@ class CalibrationTests(unittest.TestCase):
             paths = write_recipe_inputs(root / "versioned")
             flat, wave = read_product(paths["FLAT"]), read_product(paths["WAVE"])
             dark = read_product(paths["DARK"])
+            with self.assertRaisesRegex(ValueError, "outside calibration"):
+                prepare_extraction(flat, wave, np.linspace(1.14e-6, 1.30e-6, 15))
             options = dict(wavelength_channels=15, phase_correction=False)
             expected = make_p2vm(
                 flat,

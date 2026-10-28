@@ -19,6 +19,7 @@ from .instrument import (
     _check_baselines,
 )
 from .io.fits import read_product
+from .io.hdu import as_compute_array
 from .io.raw import check_raw_calibrations, read_raw_metadata
 from .products import (
     Dark,
@@ -134,7 +135,7 @@ def normalize_coherent_flux(
     flux: NDArray,
 ) -> tuple[NDArray, NDArray]:
     """Normalize the six fixed baselines and flag non-positive/non-finite denominators."""
-    visamp = np.full(coherent_flux.shape, np.nan, dtype=float)
+    visamp = np.full(coherent_flux.shape, np.nan)
     flag = np.ones(coherent_flux.shape, dtype=bool)
 
     for baseline, (telescope_1, telescope_2) in enumerate(BASELINE_PAIRS):
@@ -219,7 +220,7 @@ class FrameReducer:
         gd_search_max_m: float = 100e-6,
     ) -> P2VMRed:
         """Reduce one raw frame, subtracting dark once; phase outputs are optional."""
-        cube = np.asarray(raw, dtype=np.float32)[None, :, :]
+        cube = as_compute_array(raw)[None, :, :]
         spectra = self.extractor.extract(cube, dark)
         return reduce_spectra(
             spectra,

@@ -108,7 +108,7 @@ def fit_wavelength_solution(
 
         good = (pn1 > 1) & (pp1 > 1) & (pct > 1) & (abs(2 * _pct - _pp1 - _pn1) > 1)
 
-        p_shift = np.zeros_like(peak_pixels, dtype=float)
+        p_shift = np.zeros(peak_pixels.shape)
         p_shift[good] = 0.5 * (_pp1 - _pn1)[good] / (2 * _pct - _pp1 - _pn1)[good]
         peak_pixels = 1.0 * peak_pixels + p_shift
 
@@ -210,8 +210,8 @@ def match_lines_ransac(
 ) -> tuple[NDArray, tuple[float, ...]]:
     """Match reference wavelengths to detected peak pixels with a quadratic RANSAC fit."""
     # 1. Setup Data
-    obs = np.sort(np.asarray(obs_peaks, dtype=np.float64))
-    mod = np.sort(np.asarray(theoretical_lines, dtype=np.float64))
+    obs = np.sort(obs_peaks)
+    mod = np.sort(theoretical_lines)
 
     n_obs, n_mod = len(obs), len(mod)
     if n_obs < 3 or n_mod < 3:
@@ -260,8 +260,8 @@ def match_peaks_grid(
 ) -> tuple[NDArray, tuple[float, ...]]:
     """Match two sets of spectral peak pixels with a quadratic grid search."""
     # 1. Prepare Data
-    obs = np.sort(np.ascontiguousarray(observed_pixels, dtype=np.float64))
-    mod = np.sort(np.ascontiguousarray(reference_pixels, dtype=np.float64))
+    obs = np.sort(observed_pixels)
+    mod = np.sort(reference_pixels)
 
     # 2. Auto-Calculate Grid Steps
     # We need step sizes small enough so we don't "step over" a valid match.

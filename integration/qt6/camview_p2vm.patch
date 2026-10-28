@@ -9,18 +9,19 @@
  from pathlib import Path
 
  import numpy as np
-@@ -56,7 +56,9 @@
+@@ -56,7 +56,10 @@
  from camview import INIT_REFRESH_RATE, MainWindow, TestbedProxy, rebin
  from planetes.reduction import FrameReducer
  from planetes.dark import load_dark
 -from planetes.models import DarkImage
 +from planetes.reduction import load_reducer
 +from planetes.products import Dark
++from planetes.io.hdu import as_compute_array
 +from scripts import utils as capture_utils
  from planetes.instrument import BASELINES, ABCD_ORDER
 
 
-@@ -202,6 +204,8 @@
+@@ -202,6 +205,8 @@
      reducer
          Loaded ``FrameReducer`` containing flat, wave, and P2VM calibration
          products.  It is called once per displayed frame when P2VM is enabled.
@@ -29,7 +30,7 @@
      source_label
          Short string displayed in the P2VM status label to remind the operator
          whether the viewer is using fake playback or the real bench.
-@@ -240,6 +244,7 @@
+@@ -240,6 +245,7 @@
          reducer: FrameReducer,
          *,
          source_label: str,
@@ -37,7 +38,7 @@
          reducer_dark_path: Path | None = None,
          history_length: int = 500,
          parent=None,
-@@ -262,7 +267,7 @@
+@@ -262,7 +268,7 @@
          self.latest_mean_vis = None
          self.visibility_dirty = False
          self.p2vm_overlay_items = []
@@ -46,7 +47,7 @@
          self.reducer_dark_path = reducer_dark_path
          self.reducer_dark_follows_capture = reducer_dark_path is None
          self.reducer_dark_data = None
-@@ -282,6 +287,7 @@
+@@ -282,6 +288,7 @@
 
          camera_widget = self.takeCentralWidget()
          self._add_p2vm_camera_controls(camera_widget)
@@ -54,7 +55,7 @@
          self.tabs = QtWidgets.QTabWidget()
          self.camera_tab_index = self.tabs.addTab(camera_widget, "Camera")
          self.visibility_tab_index = self.tabs.addTab(
-@@ -295,6 +301,94 @@
+@@ -295,6 +302,94 @@
 
          self._add_calibration_overlays()
          self.p2vm_ready = True
@@ -149,7 +150,7 @@
 
      def _add_p2vm_camera_controls(self, camera_widget: QtWidgets.QWidget) -> None:
          """Add unified dark-source and overlay controls below the Camera tab.
-@@ -403,14 +497,14 @@
+@@ -403,14 +498,14 @@
          self.visibility_curves = []
          self.visibility_value_labels = []
          colors = _plot_colors(self.reducer.n_baselines)
@@ -167,7 +168,7 @@
              plot.setLabel("left", "VISAMP")
              plot.setTitle(f"Baseline {BASELINE_NAMES[bsl]}")
              plot.showGrid(x=True, y=True, alpha=0.25)
-@@ -600,7 +694,7 @@
+@@ -600,7 +695,7 @@
      def _load_reducer_dir(self, path: Path) -> None:
          """Load a new reducer and refresh all calibration-dependent UI state."""
          try:
@@ -176,7 +177,7 @@
          except Exception as exc:
              self.p2vm_ready = False
              self._clear_current_visibility()
-@@ -616,7 +710,7 @@
+@@ -616,7 +711,7 @@
 
          self.p2vm_ready = True
          self.reducer = reducer
@@ -185,7 +186,7 @@
          self.reducer_dir_edit.setText(str(self.reducer_dir))
          self.reducer_dir_status.setText(f"loaded: {self.reducer_dir.name}")
          self._reset_visibility_axes()
-@@ -643,8 +737,8 @@
+@@ -643,8 +738,8 @@
 
      def _reset_visibility_axes(self) -> None:
          """Update wavelength-axis limits after loading a new P2VM directory."""
@@ -196,18 +197,18 @@
          wl_span = wl_max - wl_min
          for plot in self.visibility_plots:
              plot.getViewBox().setRange(
-@@ -737,8 +831,8 @@
+@@ -737,8 +832,8 @@
                  "Waiting for a raw frame before setting dark"
              )
              return
 -        self.memory_dark = DarkImage(
 -            np.array(self.raw_image, dtype=np.float32, copy=True)
 +        self.memory_dark = Dark(
-+            np.array(self.raw_image, dtype=np.float32, copy=True), n_frames=1
++            as_compute_array(self.raw_image).copy(), n_frames=1
          )
          self.reducer_dark_follows_capture = False
          self._clear_dark_cache()
-@@ -769,8 +863,11 @@
+@@ -769,8 +864,11 @@
 
          path = Path(path)
          compact = path.name or str(path)
@@ -221,7 +222,7 @@
          if path.is_dir() and self.reducer_dark_loaded_from is None:
              compact += "/"
          return compact, str(path)
-@@ -814,7 +911,7 @@
+@@ -814,7 +912,7 @@
              return
 
          for bsl, curve in enumerate(self.visibility_curves):
@@ -230,7 +231,7 @@
 
          for bsl, value_label in enumerate(self.visibility_value_labels):
              plot = self.visibility_plots[bsl]
-@@ -949,14 +1046,14 @@
+@@ -949,14 +1047,14 @@
          """Draw calibration overlays on the inherited Camera tab.
 
          ABCD extraction regions are drawn as border-only detector-coordinate
@@ -249,7 +250,7 @@
              for idx, reg in enumerate(regs):
                  reg_labels[int(reg)] = (bsl, ABCD_NAMES[idx])
 
-@@ -992,9 +1089,9 @@
+@@ -992,9 +1090,9 @@
              self.p2vm_overlay_items.append(text)
 
          height = float(self.reducer.extractor.detector_shape[0])
@@ -261,7 +262,7 @@
          ):
              x = int(np.nanargmin(np.abs(mean_wave - wave)))
              pen = pg.mkPen(
-@@ -1005,7 +1102,7 @@
+@@ -1005,7 +1103,7 @@
              self.p2vm_overlay_items.append(line)
 
              text = pg.TextItem(
@@ -270,7 +271,7 @@
                  color=(230, 230, 230),
                  anchor=(0.5, 0),
              )
-@@ -1129,7 +1226,7 @@
+@@ -1129,7 +1227,7 @@
      app = QtWidgets.QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
      _set_dark_palette(app)
 
@@ -279,7 +280,7 @@
      cam, source_label = _make_camera(config)
 
      if config.source == "bench":
-@@ -1140,6 +1237,7 @@
+@@ -1140,6 +1238,7 @@
          cam,
          reducer,
          source_label=source_label,

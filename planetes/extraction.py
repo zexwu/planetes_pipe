@@ -9,6 +9,7 @@ from numpy.typing import NDArray
 
 from .instrument import DetectorSetup
 from .io.raw import iter_raw_cube
+from .io.hdu import STORAGE_RTOL
 from .products import (
     Dark,
     Flat,
@@ -31,7 +32,7 @@ def extract_sparse_spectra(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
     """
     n_frame, _, nx = cube.shape
     n_reg = len(ys)
-    output = np.zeros((n_reg, n_frame, nx), dtype=np.float32)
+    output = np.zeros((n_reg, n_frame, nx))
 
     for o in prange(n_reg):
         y_idx = ys[o]
@@ -141,7 +142,11 @@ def prepare_extraction(
     ):
         raise ValueError("Wavelengths must increase for spectral resampling")
     for output, row in enumerate(wave.wavelength_map_m):
-        if wavelength_m[0] < row[0] or wavelength_m[-1] > row[-1]:
+        # Only tolerate the error of one on-disk rounding at a coverage edge.
+        if (
+            wavelength_m[0] < row[0] - abs(row[0]) * STORAGE_RTOL
+            or wavelength_m[-1] > row[-1] + abs(row[-1]) * STORAGE_RTOL
+        ):
             raise ValueError(
                 f"Output {output}: target {wavelength_m[0]:.9g}..{wavelength_m[-1]:.9g} m outside calibration {row[0]:.9g}..{row[-1]:.9g} m"
             )

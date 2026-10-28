@@ -1,13 +1,35 @@
-"""Shared FITS primitives for native arrays, metadata and checksums."""
+"""I/O precision boundary, FITS metadata and checksums."""
 
 import json
 
 import numpy as np
 from astropy.io import fits as afits
 
+# Relative round-to-nearest error bound for the on-disk real component.
+STORAGE_RTOL = np.finfo(np.float32).eps / 2
+
 
 def _native(values):
-    return np.array(values, dtype=values.dtype.newbyteorder("="), copy=True)
+    """Load floating FITS data at computation precision; preserve integer/flag types."""
+    dtype = {
+        "f": np.float64,
+        "c": np.complex128,
+    }.get(values.dtype.kind, values.dtype.newbyteorder("="))
+    return np.array(values, dtype=dtype, copy=True)
+
+
+def as_compute_array(values):
+    """Adapt raw/Python image input to native float64 or complex128 once."""
+    return np.asarray(
+        values, dtype=np.complex128 if np.iscomplexobj(values) else np.float64
+    )
+
+
+def _storage_array(values):
+    """Store floating payloads as float32/complex64; retain integers, flags and labels."""
+    values = np.asarray(values)
+    dtype = {"f": np.float32, "c": np.complex64}.get(values.dtype.kind)
+    return values if dtype is None else values.astype(dtype, copy=False)
 
 
 def _json_hdu(name, values):

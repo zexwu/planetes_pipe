@@ -31,7 +31,7 @@ class ScienceProductTests(unittest.TestCase):
         science[:, 0] = 0
         cls.product = reduce_spectra(science, p2vm)
 
-    def test_complex_flux_and_invalid_flags_round_trip_exactly(self):
+    def test_complex_flux_and_flags_preserve_storage_precision(self):
         coherent = self.product.coherent_flux_adu.copy()
         coherent[0, 0, 0] = complex(-0.0, -0.0)
         coherent[0, 0, 1] = complex(np.nan, np.nan)
@@ -47,11 +47,17 @@ class ScienceProductTests(unittest.TestCase):
                 )
                 if isinstance(before, np.ndarray):
                     expected = before
+                    if before.dtype.kind in "fc":
+                        stored = (
+                            np.complex64 if before.dtype.kind == "c" else np.float32
+                        )
+                        expected = before.astype(stored).astype(before.dtype)
                     np.testing.assert_array_equal(expected, after)
                 else:
                     self.assertEqual(before, after)
             np.testing.assert_array_equal(
-                coherent.view(np.uint64), loaded.coherent_flux_adu.view(np.uint64)
+                coherent.astype(np.complex64).astype(np.complex128).view(np.uint64),
+                loaded.coherent_flux_adu.view(np.uint64),
             )
             self.assertTrue(loaded.flags[0].all())
             self.assertEqual(loaded.flags.dtype, bool)
@@ -68,7 +74,7 @@ class CalibrationFitsTests(unittest.TestCase):
             cls.spectra, phase_correction=False, keep_diagnostics=True
         )
 
-    def test_fits_round_trip_preserves_all_arrays_and_mappings(self):
+    def test_fits_round_trip_preserves_storage_precision_and_mappings(self):
         for product in [self.flat, self.wave, self.p2vm, self.p2vm_diagnostics]:
             with (
                 self.subTest(product=type(product).__name__),
@@ -84,7 +90,13 @@ class CalibrationFitsTests(unittest.TestCase):
                     )
                     if isinstance(before, np.ndarray):
                         expected = before
+                        if before.dtype.kind in "fc":
+                            stored = (
+                                np.complex64 if before.dtype.kind == "c" else np.float32
+                            )
+                            expected = before.astype(stored).astype(before.dtype)
                         np.testing.assert_array_equal(expected, after)
+                        self.assertEqual(after.dtype, before.dtype)
                         self.assertTrue(after.dtype.isnative)
                     else:
                         self.assertEqual(before, after)
@@ -120,11 +132,18 @@ class RawFitsTests(unittest.TestCase):
                 self.assertNotIn("ESO DET WIN1 DIT1", read_raw_header(path))
                 chunks = list(iter_cube(path))
                 self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
+                self.assertTrue(all(chunk.dtype == np.float64 for chunk in chunks))
                 np.testing.assert_array_equal(np.concatenate(chunks), cube)
                 self.assertEqual(path.read_bytes(), original)
         single = measure_dark([cube[:1]])
         self.assertEqual(single.n_frames, 1)
         self.assertIsNone(single.temporal_rms_adu)
+        samples = np.array([1e12 - 1, 1e12 + 1]).reshape(2, 1, 1)
+        for chunks in ([samples], [samples[:1], samples[1:]]):
+            measured = measure_dark(chunks)
+            self.assertEqual(measured.mean_adu.item(), 1e12)
+            self.assertEqual(measured.temporal_rms_adu.item(), 1.0)
+            self.assertEqual(measured.mean_adu.dtype, np.float64)
         for data, count in ((cube[0], None), (cube[:1], 1)):
             with tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / "dark.fits"
