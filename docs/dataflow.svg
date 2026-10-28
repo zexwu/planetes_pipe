@@ -9,7 +9,7 @@
 <g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 900.46)">
 <title>Dataflow</title>
 <polygon fill="white" stroke="none" points="-18,18 -18,-900.46 1510.05,-900.46 1510.05,18 -18,18"/>
-<text xml:space="preserve" text-anchor="middle" x="746.02" y="-859.46" font-family="PingFang SC" font-size="20.00">PLANETES 0.8.0 — 原始数据、标定与科学结果</text>
+<text xml:space="preserve" text-anchor="middle" x="746.02" y="-859.46" font-family="PingFang SC" font-size="20.00">PLANETES 0.8.1 — 原始数据、标定与科学结果</text>
 <g id="clust6" class="cluster">
 <title>cluster_future</title>
 <polygon fill="white" stroke="#94a3b8" stroke-dasharray="5,2" points="1126.05,-8 1126.05,-217.81 1484.05,-217.81 1484.05,-8 1126.05,-8"/>

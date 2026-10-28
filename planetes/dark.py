@@ -12,10 +12,8 @@ from .io import keywords as kw
 from .io.fits import read_product
 from .io.raw import iter_raw_cube, read_raw_metadata
 from .products import (
-    BadPixelMap,
+    Bad,
     Dark,
-    DarkInput,
-    DarkImage,
 )
 
 BAD_PIXEL_THRESHOLD = 5.0
@@ -23,7 +21,7 @@ BAD_PIXEL_THRESHOLD = 5.0
 
 def make_dark_products(
     path: Path, *, bad_pixel_threshold: float = BAD_PIXEL_THRESHOLD
-) -> tuple[Dark, BadPixelMap]:
+) -> tuple[Dark, Bad]:
     """Measure DARK mean/RMS and BAD flags from a full raw stack; saving is explicit."""
 
     metadata = read_raw_metadata(path, category="DARK_RAW")
@@ -72,8 +70,10 @@ def frame_statistics(
     return mean.astype(np.float32), np.sqrt(variance).astype(np.float32), count
 
 
-def detect_bad_pixels(dark: Dark, *, threshold: float = 5.0) -> BadPixelMap:
+def detect_bad_pixels(dark: Dark, *, threshold: float = 5.0) -> Bad:
     """Build a bad-pixel map from precomputed temporal mean and RMS images."""
+    if dark.temporal_rms_adu is None:
+        raise ValueError("Bad-pixel detection requires measured temporal RMS")
     mean_img, std_img = dark.mean_adu, dark.temporal_rms_adu
     BAD_HOT, BAD_DEAD, BAD_NOISY = 1, 2, 4
 
@@ -90,21 +90,17 @@ def detect_bad_pixels(dark: Dark, *, threshold: float = 5.0) -> BadPixelMap:
     bpm[mean_img < range_min] |= BAD_DEAD
     bpm[std_img > std_max] |= BAD_NOISY
 
-    return BadPixelMap(bpm)
+    return Bad(bpm)
 
 
 def measure_dark(chunks: Iterable[NDArray[np.float32]]) -> Dark:
-    """Measure temporal mean and population RMS from a complete stack."""
+    """Measure the mean and, with at least two frames, temporal population RMS."""
     mean, rms, count = frame_statistics(chunks)
-    if count < 2:
-        raise ValueError(
-            "Complete dark calibration needs at least two frames; use DarkImage for subtraction only"
-        )
-    return Dark(mean, rms, count)
+    return Dark(mean, rms if count >= 2 else None, count)
 
 
-def load_dark(path: Path) -> DarkInput:
-    """GUI loader: complete new DARK, or explicitly selected raw/image subtraction data."""
+def load_dark(path: Path) -> Dark:
+    """Load a DARK product, raw stack or mean-only image; unknown statistics stay None."""
 
     path = Path(path)
     with afits.open(path, memmap=True) as hdus:
@@ -121,13 +117,11 @@ def load_dark(path: Path) -> DarkInput:
         unit = str(hdus[index].header.get("BUNIT", "adu")).lower()
         if unit != "adu":
             raise ValueError("Dark subtraction expects ADU")
-        if data.ndim == 3 and len(data) >= 2:
+        if data.ndim == 3:
             metadata = read_raw_metadata(path, category="DARK_RAW")
             result = measure_dark(iter_raw_cube(path))
             return replace(result, setup=metadata.setup)
-        if data.ndim == 3 and len(data) == 1:
-            data = data[0]
         if data.ndim != 2:
             raise ValueError("A GUI dark must be a 2-D image or nonempty cube")
-        result = DarkImage(np.array(data, dtype=np.float32, copy=True))
+        result = Dark(np.array(data, dtype=np.float32, copy=True))
     return result

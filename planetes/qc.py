@@ -8,7 +8,7 @@ import numpy as np
 
 from .instrument import BASELINES, TELESCOPES
 from .products import (
-    BadPixelMap,
+    Bad,
     Dark,
     Flat,
     P2VM,
@@ -36,15 +36,18 @@ def measure_quality(product):
             np.median(product.mean_adu),
             "[ADU] Spatial median of temporal mean",
         )
-        put(
-            "dark_rms_median_adu",
-            np.median(product.temporal_rms_adu),
-            "[ADU] Spatial median of temporal population RMS",
-        )
+        if product.temporal_rms_adu is None:
+            missing["dark_rms_median_adu"] = "unavailable: temporal RMS not measured"
+        else:
+            put(
+                "dark_rms_median_adu",
+                np.median(product.temporal_rms_adu),
+                "[ADU] Spatial median of temporal population RMS",
+            )
         missing["readout_noise"] = (
             "not applicable: raw temporal RMS is not independently measured readout noise"
         )
-    elif isinstance(product, BadPixelMap):
+    elif isinstance(product, Bad):
         flags = product.bad_pixel_flags
         put(
             "bad_pixel_count",

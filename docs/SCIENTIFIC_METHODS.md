@@ -1,4 +1,4 @@
-# Scientific methods in PLANETES 0.8.0
+# Scientific methods in PLANETES 0.8.1
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
@@ -16,11 +16,13 @@ the temporal RMS. Mean values above/below median mean ± threshold × median RMS
 set hot/dead bits 1/2; RMS above threshold × median RMS sets noisy bit 4.
 The default threshold remains 5. This RMS includes whatever temporal variations
 are present in the stack; it is not independently calibrated readout noise.
-A subtraction-only DarkImage carries neither an RMS nor inferred BPM.
+A single frame returns Dark with n_frames=1 and temporal_rms_adu=None; a
+loaded 2-D image has unknown frame count. Unknown RMS is never replaced by zero.
+Subtraction only consumes mean_adu; BAD detection requires measured temporal RMS.
 
 ## Flat and traces (`flat.py`)
 
-Subtract the explicit complete dark from each telescope's mean flat and average
+Subtract the explicitly selected dark mean from each telescope's mean flat and average
 those four maps. Collapse along dispersion, select the strongest 24 spatial
 peaks, trace a Gaussian centroid column by column, then smooth with the retained
 median filter and cubic fit. Gaussian iteration counts and arithmetic are unchanged.

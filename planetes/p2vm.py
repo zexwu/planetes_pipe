@@ -478,10 +478,6 @@ def extract_p2vm_spectra(
 ) -> P2VMSpectra:
     """Extract calibration files and infer the retained physical output mapping."""
 
-    if not isinstance(main_dark, Dark) or (
-        phase_dark is not None and not isinstance(phase_dark, Dark)
-    ):
-        raise ValueError("Formal file tasks require complete DARK calibrations")
     telescope_flats = identify_raw_exposures(telescope_flats, "FLAT_RAW")
     baseline_cubes = identify_raw_exposures(baseline_cubes, "P2VM_RAW")
     if phase_dark is not None and phase_reference is None:

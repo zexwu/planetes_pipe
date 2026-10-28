@@ -7,7 +7,7 @@ adaptation of gravi_utils.h:131-140, not GRAVITY's hardware numbering.
 
 from ..instrument import BASELINES, TELESCOPES
 from ..products import (
-    BadPixelMap,
+    Bad,
     Dark,
     Flat,
     P2VM,
@@ -50,7 +50,7 @@ PRODUCT_FORMAT = 5
 
 CATEGORIES = {
     Dark: "DARK",
-    BadPixelMap: "BAD",
+    Bad: "BAD",
     Flat: "FLAT",
     Wave: "WAVE",
     P2VM: "P2VM",

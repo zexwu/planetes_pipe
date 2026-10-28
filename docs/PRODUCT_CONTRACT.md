@@ -1,4 +1,4 @@
-# PLANETES science products and FITS interface (v0.8.0)
+# PLANETES science products and FITS interface (v0.8.1)
 
 ## Design
 
@@ -23,9 +23,8 @@ Official references:
 
 | Dataclass | Important contents | Usage |
 | --- | --- | --- |
-| `DarkImage` | `mean_adu` `(y, x)` | Live subtraction only; no measured RMS |
-| `Dark` | `mean_adu`, `temporal_rms_adu` `(y,x)`, `n_frames`, optional `setup` | Formal DARK |
-| `BadPixelMap` | `bad_pixel_flags` `(y,x)` | Bit flags: hot 1, dead 2, noisy 4 |
+| `Dark` | required `mean_adu` `(y,x)`; optional `temporal_rms_adu`, `n_frames`, `setup` | Mean-only or measured dark |
+| `Bad` | `bad_pixel_flags` `(y,x)` | Bit flags: hot 1, dead 2, noisy 4 |
 | `Flat` | sparse `profile_x_pixels`/`profile_y_pixels`, `flat_map_adu`, `trace_y_pixels`; optional sigma/flux/setup | FLAT and extraction geometry |
 | `Wave` | `wavelength_map_m` `(output,x)`; optional fit residuals | WAVE solution |
 | `P2VM` | `matrix` `(16,24,wavelength)` plus wavelength, output/baseline identity, transmission and fit diagnostics | P2VM response/inverse |
@@ -37,8 +36,12 @@ Official references:
 fast live preview (`include_phase=False`). Formal file reductions compute them; only complete
 `P2VMRed` objects can be saved to FITS.
 
-`DarkInput = Dark | DarkImage` is a type alias for subtraction, **not** a
-separate product. `DetectorSetup` is defined in `instrument.py`; unknown
+`DarkImage` and the `DarkInput` union are removed. Subtraction accepts one `Dark`
+type. Temporal RMS is None until measured; frame count is None when unknown and
+1 for a single measured frame. BAD detection requires RMS. QC always measures
+the available mean and records a missing reason for unknown RMS. The existing
+complete DARK file category still requires RMS and a frame count of at least two.
+`DetectorSetup` is defined in `instrument.py`; unknown
 header fields are `None`. Static telescope order is 4,3,2,1; baseline order
 43,42,41,32,31,21; each baseline's outputs are A,C,B,D.
 

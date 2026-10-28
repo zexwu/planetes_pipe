@@ -12,27 +12,17 @@ Array = NDArray
 
 
 @dataclass(slots=True)
-class DarkImage:
-    """Mean image for subtraction only, without a measured temporal RMS."""
-
-    mean_adu: Array  # (y, x)
-
-
-@dataclass(slots=True)
 class Dark:
-    """Full DARK product: mean, temporal RMS and frame count."""
+    """Dark image in ADU; temporal statistics are None when not measured."""
 
     mean_adu: Array  # (y, x)
-    temporal_rms_adu: Array  # (y, x)
-    n_frames: int
+    temporal_rms_adu: Array | None = None  # (y, x)
+    n_frames: int | None = None
     setup: DetectorSetup | None = None
 
 
-DarkInput = Dark | DarkImage
-
-
 @dataclass(slots=True)
-class BadPixelMap:
+class Bad:
     """Bad-pixel flags: hot=1, dead=2, noisy=4."""
 
     bad_pixel_flags: Array  # (y, x)

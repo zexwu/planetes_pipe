@@ -37,9 +37,10 @@ created. External unobservable shutter changes cannot be detected by this interf
 
 Unbinned raw frames feed the common FrameReducer. Dark off, a wrong-category dark
 or incompatible calibration pauses updates and clears the current spectrum.
-Taking the current frame as dark creates subtraction-only DarkImage. Explicitly
-selected 2-D/one-frame darks stay valid for live subtraction; file entry points
-require full measured DARK. Invalid channels remain flagged/gaps in curves.
+Taking the current frame creates `Dark(mean_adu, n_frames=1)` with RMS=None.
+Loaded 2-D images return the same Dark type with unknown RMS/frame count.
+Subtraction only needs the mean; BAD detection needs measured RMS. Complete
+DARK FITS publication retains its measured-statistics requirements. Invalid channels remain flagged/gaps in curves.
 
 ## Automated take_p2vm
 
@@ -82,7 +83,7 @@ when applied to its original source.
 
 On another machine, verify the original hashes, back up all four files and run
 `git apply --check` for each patch from the devel directory before applying.
-Do not apply again to already updated files. Install the matching PLANETES 0.8.0 version
+Do not apply again to already updated files. Install the matching PLANETES 0.8.1 version
 without replacing existing camera/Qt dependencies. To restore, preserve later local
 edits and recover the four original files from:
 
@@ -107,3 +108,7 @@ and manifest match the updated local acquisition helper. Science products use
 The viewer owns `reducer_dir` for its selector/status text; `FrameReducer` no longer
 stores a directory. The viewer reads `baseline_outputs`, and preview reduction
 uses the default `include_phase=False`.
+
+Version 0.8.1 checks the presence of temporal RMS for the status label, rather than
+dispatching on separate Dark/DarkImage classes. The current-frame button stores
+known count 1 and never fabricates a zero noise image.

@@ -1,5 +1,5 @@
 digraph Dataflow {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.8.0 — 原始数据、标定与科学结果", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.8.1 — 原始数据、标定与科学结果", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.15,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   rawdark [label="DARK_RAW\nmain / lamp / science 分别选择"];

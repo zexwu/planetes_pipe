@@ -11,7 +11,6 @@ from .instrument import DetectorSetup
 from .io.raw import iter_raw_cube
 from .products import (
     Dark,
-    DarkInput,
     Flat,
     Wave,
 )
@@ -99,7 +98,7 @@ class SpectralExtractor:
     detector_flat_spectra: NDArray
     resampled_flat_spectra: NDArray
 
-    def extract(self, cube: NDArray, dark: DarkInput) -> NDArray:
+    def extract(self, cube: NDArray, dark: Dark) -> NDArray:
         """Subtract one explicitly supplied dark and extract every frame of this chunk."""
         if (
             cube.ndim != 3

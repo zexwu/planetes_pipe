@@ -9,6 +9,7 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import calibration_arrays, calibration_spectra
 
+from planetes.dark import detect_bad_pixels, load_dark, measure_dark
 from planetes.io.fits import read_product, write_product
 from planetes.io.raw import iter_raw_cube as iter_cube
 from planetes.io.raw import (
@@ -17,6 +18,7 @@ from planetes.io.raw import (
 )
 from planetes.p2vm import fit_p2vm
 from planetes.products import P2VMRed
+from planetes.qc import measure_quality
 from planetes.reduction import reduce_spectra
 
 
@@ -118,3 +120,22 @@ class RawFitsTests(unittest.TestCase):
                 self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
                 np.testing.assert_array_equal(np.concatenate(chunks), cube)
                 self.assertEqual(path.read_bytes(), original)
+        single = measure_dark([cube[:1]])
+        self.assertEqual(single.n_frames, 1)
+        self.assertIsNone(single.temporal_rms_adu)
+        for data, count in ((cube[0], None), (cube[:1], 1)):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "dark.fits"
+                fits.PrimaryHDU(data).writeto(path)
+                dark = load_dark(path)
+                np.testing.assert_array_equal(dark.mean_adu, cube[0])
+                self.assertEqual(dark.n_frames, count)
+                self.assertIsNone(dark.temporal_rms_adu)
+                quality, missing = measure_quality(dark)
+                self.assertEqual(quality["dark_median_adu"][0], np.median(cube[0]))
+                self.assertNotIn("dark_rms_median_adu", quality)
+                self.assertIn("dark_rms_median_adu", missing)
+                with self.assertRaisesRegex(ValueError, "temporal RMS"):
+                    detect_bad_pixels(dark)
+                with self.assertRaisesRegex(ValueError, "Saved DARK"):
+                    write_product(Path(tmp) / "product.fits", dark)

@@ -15,7 +15,7 @@
  from planetes.dark import load_dark
 -from planetes.models import DarkImage
 +from planetes.reduction import load_reducer
-+from planetes.products import DarkImage
++from planetes.products import Dark
 +from scripts import utils as capture_utils
  from planetes.instrument import BASELINES, ABCD_ORDER
 
@@ -196,7 +196,32 @@
          wl_span = wl_max - wl_min
          for plot in self.visibility_plots:
              plot.getViewBox().setRange(
-@@ -814,7 +908,7 @@
+@@ -737,8 +831,8 @@
+                 "Waiting for a raw frame before setting dark"
+             )
+             return
+-        self.memory_dark = DarkImage(
+-            np.array(self.raw_image, dtype=np.float32, copy=True)
++        self.memory_dark = Dark(
++            np.array(self.raw_image, dtype=np.float32, copy=True), n_frames=1
+         )
+         self.reducer_dark_follows_capture = False
+         self._clear_dark_cache()
+@@ -769,8 +863,11 @@
+
+         path = Path(path)
+         compact = path.name or str(path)
+-        if isinstance(self.reducer_dark_calibration, DarkImage):
+-            compact += " (2D; noise not measured)"
++        if (
++            self.reducer_dark_calibration is not None
++            and self.reducer_dark_calibration.temporal_rms_adu is None
++        ):
++            compact += " (RMS not measured)"
+         if path.is_dir() and self.reducer_dark_loaded_from is None:
+             compact += "/"
+         return compact, str(path)
+@@ -814,7 +911,7 @@
              return
 
          for bsl, curve in enumerate(self.visibility_curves):
@@ -205,7 +230,7 @@
 
          for bsl, value_label in enumerate(self.visibility_value_labels):
              plot = self.visibility_plots[bsl]
-@@ -949,14 +1043,14 @@
+@@ -949,14 +1046,14 @@
          """Draw calibration overlays on the inherited Camera tab.
 
          ABCD extraction regions are drawn as border-only detector-coordinate
@@ -224,7 +249,7 @@
              for idx, reg in enumerate(regs):
                  reg_labels[int(reg)] = (bsl, ABCD_NAMES[idx])
 
-@@ -992,9 +1086,9 @@
+@@ -992,9 +1089,9 @@
              self.p2vm_overlay_items.append(text)
 
          height = float(self.reducer.extractor.detector_shape[0])
@@ -236,7 +261,7 @@
          ):
              x = int(np.nanargmin(np.abs(mean_wave - wave)))
              pen = pg.mkPen(
-@@ -1005,7 +1099,7 @@
+@@ -1005,7 +1102,7 @@
              self.p2vm_overlay_items.append(line)
 
              text = pg.TextItem(
@@ -245,7 +270,7 @@
                  color=(230, 230, 230),
                  anchor=(0.5, 0),
              )
-@@ -1129,7 +1223,7 @@
+@@ -1129,7 +1226,7 @@
      app = QtWidgets.QApplication(sys.argv if argv is None else [sys.argv[0], *argv])
      _set_dark_palette(app)
 
@@ -254,7 +279,7 @@
      cam, source_label = _make_camera(config)
 
      if config.source == "bench":
-@@ -1140,6 +1234,7 @@
+@@ -1140,6 +1237,7 @@
          cam,
          reducer,
          source_label=source_label,

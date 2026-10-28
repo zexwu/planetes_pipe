@@ -9,7 +9,6 @@ from astropy.io import fits as afits
 from astropy.time import Time
 
 from ..instrument import BASELINES, TELESCOPES, DetectorSetup
-from ..products import Dark
 from . import keywords as kw
 from .hdu import _verify_checksums, _json_hdu, _read_json
 from .publication import publish_outputs
@@ -323,8 +322,6 @@ def check_raw_calibrations(path, dark, flat=None, *, flat_setup=None, category=N
     """Shared formal task boundary: known DIT/ROI conflicts are scientific errors."""
     from ..instrument import check_setup
 
-    if not isinstance(dark, Dark) or dark.n_frames < 2:
-        raise ValueError("Formal file tasks require complete DARK calibrations")
     raw = read_raw_metadata(path, category=category)
     check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
     geometry = flat.setup if flat is not None else flat_setup

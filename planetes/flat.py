@@ -19,7 +19,7 @@ from .io.raw import (
     read_raw_metadata,
 )
 from .products import (
-    BadPixelMap,
+    Bad,
     Dark,
     Flat,
 )
@@ -30,7 +30,7 @@ APERTURE_WIDTH_PIXELS = 10.0
 def make_flat(
     telescope_flats: Mapping[str, Path] | Iterable[Path],
     dark: Dark,
-    bad: BadPixelMap,
+    bad: Bad,
     *,
     aperture_width_pixels: float = APERTURE_WIDTH_PIXELS,
 ) -> Flat:
@@ -59,7 +59,7 @@ def make_flat(
 
 def build_flat(
     flat_images: list[NDArray],
-    bad: BadPixelMap,
+    bad: Bad,
     *,
     n_outputs: int = N_OUTPUTS,
     aperture_width_pixels: float = APERTURE_WIDTH_PIXELS,

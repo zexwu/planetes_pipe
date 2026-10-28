@@ -4,7 +4,7 @@ from cpl import ui
 
 from planetes import __version__
 from planetes.flat import make_flat
-from planetes.products import BadPixelMap, Dark
+from planetes.products import Bad, Dark
 from planetes.recipes.dfs import (
     save_product,
     load_recipe_inputs,
@@ -39,7 +39,7 @@ class PlanetesFlat(ui.PyRecipe):
         options = read_parameters(self, settings, PARAMETERS)
         paths, cal, used = load_recipe_inputs(
             frameset,
-            {"DARK": Dark, "BAD": BadPixelMap, "FLAT_RAW": None},
+            {"DARK": Dark, "BAD": Bad, "FLAT_RAW": None},
             multiple={"FLAT_RAW": 4},
         )
         product = make_flat(paths["FLAT_RAW"], cal["DARK"], cal["BAD"], **options)

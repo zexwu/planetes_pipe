@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.8.0
+# PLANETES pipeline 0.8.1
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
@@ -48,11 +48,14 @@ explicit Python identity mappings below.
 | `planetes_p2vm` | `DARK`, `FLAT`, `WAVE`, `FLAT_RAW` × 4, `P2VM_RAW` × 6 | `PHASE_REFERENCE`, `PHASE_DARK_CALIB` | `planetes_p2vm.fits` |
 | `planetes_reduce` | `DARK`, `FLAT`, `WAVE`, `P2VM`, `SINGLE_SCI_RAW` | — | `planetes_reduced.fits` |
 
-All file entry points require a complete `Dark` with measured temporal RMS and at
-least two frames. Select the appropriate DARK and BAD explicitly. Generate
-separate darks for main calibration, lamp and science where appropriate. Known
-exposure/ROI/detector conflicts fail before subtraction; missing bench fields stay
-unknown. `DarkImage` contains a mean image for live subtraction only.
+`Dark` always contains `mean_adu`; `temporal_rms_adu` and `n_frames` are None
+when unknown. One measured frame has `n_frames=1` and no measured RMS; a standalone
+2-D dark image has unknown frame count. Python subtraction/reduction only needs the
+mean image. `detect_bad_pixels` requires temporal RMS, and `make_dark_products`
+therefore needs a multi-frame stack to return both Dark and Bad. Existing complete
+DARK FITS products require RMS and a measured frame count (at least two).
+Select appropriate darks for main calibration, lamp and science. Known exposure,
+ROI and detector contradictions fail before subtraction; missing fields stay unknown.
 A supplied phase reference keeps its SINGLE_SCI_RAW classification and uses the
 independently selected phase DARK, or records reuse of the main DARK. A disabled
 reference is excluded from the calculation and DFS used inputs.
@@ -209,6 +212,11 @@ Version 0.8.0 adopts the workflow/array API above, `P2VM.matrix`,
 skips group delay and differential phase in live previews. `trace_spectrum` always
 returns centers, position errors and Gaussian sigma. The existing CPL parameter
 name/alias `planetes.calib.profile-width` / `--profile-width` remains unchanged.
+
+Version 0.8.1 merges DarkImage into `Dark` and shortens BadPixelMap to `Bad`.
+The old classes and DarkInput union are removed without compatibility aliases.
+Mean-only darks remain usable without fabricating zero RMS; QC reports available
+mean statistics and marks missing temporal RMS as unavailable.
 
 Products stay at FITS format **5**; format **4** remains readable. Full structured
 raw files stay at format **3**. Product data layout and units remain documented in

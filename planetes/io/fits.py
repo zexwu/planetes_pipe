@@ -15,7 +15,7 @@ from ..instrument import (
     _check_baselines,
 )
 from ..products import (
-    BadPixelMap,
+    Bad,
     Dark,
     Flat,
     P2VM,
@@ -111,7 +111,9 @@ def encode_product(product, header=None, *, quality=None):
     hdus = [afits.PrimaryHDU(header=h)]
     if isinstance(product, Dark):
         if (
-            product.n_frames < 2
+            product.temporal_rms_adu is None
+            or product.n_frames is None
+            or product.n_frames < 2
             or product.mean_adu.shape != product.temporal_rms_adu.shape
         ):
             raise ValueError("Saved DARK requires measured RMS and at least two frames")
@@ -121,7 +123,7 @@ def encode_product(product, header=None, *, quality=None):
             _image(kw.RAW_IMAGE, product.mean_adu, "adu"),
             _image(kw.DARK_RMS, product.temporal_rms_adu, "adu"),
         ]
-    elif isinstance(product, BadPixelMap):
+    elif isinstance(product, Bad):
         image = _image(kw.RAW_IMAGE, product.bad_pixel_flags)
         image.header["HIERARCH " + kw.BAD_BITS] = "hot=1,dead=2,noisy=4"
         hdus.append(image)
@@ -333,7 +335,7 @@ def read_product(path: Path, cls=None):
                 temporal_rms_adu=image(kw.DARK_RMS, "adu"),
                 n_frames=h["NFRAMES"],
             )
-        elif actual is BadPixelMap:
+        elif actual is Bad:
             if hdus[kw.RAW_IMAGE].header.get(kw.BAD_BITS) != "hot=1,dead=2,noisy=4":
                 raise ValueError("Invalid BAD flag definition")
             values["bad_pixel_flags"] = image(kw.RAW_IMAGE, "")

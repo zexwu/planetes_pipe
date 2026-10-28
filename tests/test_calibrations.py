@@ -2,7 +2,6 @@
 
 import tempfile
 import unittest
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -15,7 +14,7 @@ from planetes.p2vm import (
     make_p2vm,
     extract_p2vm_spectra,
 )
-from planetes.products import DarkImage
+from planetes.products import Dark
 
 
 class CalibrationTests(unittest.TestCase):
@@ -71,8 +70,8 @@ class CalibrationTests(unittest.TestCase):
                 read_product(inputs["WAVE"]),
             )
             main = read_product(inputs["DARK"])
-            phase = replace(
-                main, mean_adu=np.full(main.mean_adu.shape, 7, dtype=np.float32)
+            phase = Dark(
+                np.full(main.mean_adu.shape, 7, dtype=np.float32), setup=main.setup
             )
             spectra = extract_p2vm_spectra(
                 flat,
@@ -89,7 +88,5 @@ class CalibrationTests(unittest.TestCase):
             prepared = prepare_extraction(
                 flat, wave, np.linspace(1.15e-6, 1.30e-6, 151)
             )
-            expected = prepared.extract(
-                corrected, DarkImage(np.zeros_like(phase.mean_adu))
-            )
+            expected = prepared.extract(corrected, Dark(np.zeros_like(phase.mean_adu)))
             np.testing.assert_array_equal(spectra.phase_reference, expected)

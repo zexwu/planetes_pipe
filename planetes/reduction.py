@@ -22,7 +22,6 @@ from .io.fits import read_product
 from .io.raw import check_raw_calibrations
 from .products import (
     Dark,
-    DarkInput,
     Flat,
     P2VM,
     P2VMRed,
@@ -217,7 +216,7 @@ class FrameReducer:
         self,
         raw: NDArray,
         *,
-        dark: DarkInput,
+        dark: Dark,
         include_phase: bool = False,
         gd_search_min_m: float = -100e-6,
         gd_search_max_m: float = 100e-6,

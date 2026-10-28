@@ -1,19 +1,22 @@
-# PLANETES 0.8.0：简单科学产品与明确的步骤 API
+# PLANETES 0.8.1：简单科学产品与明确的步骤 API
 
-0.7已将`products.py`从401行缩减到119行；0.8保持这些普通数据类，
-统一步骤、字段和参数名称。
+0.7曾将`products.py`从401行缩减到119行；0.8统一步骤、字段和参数名称，
+0.8.1合并Dark类型后为109行，继续使用普通数据类。
 每个物理步骤仍在自己的文件中定义输入、参数、计算与局部 helper。
 
 | 原名称 | 当前名称 | 内容 |
 | --- | --- | --- |
-| DarkCalibration | Dark | mean、temporal RMS、frame count 和可选 detector setup |
+| DarkCalibration / DarkImage | Dark | 必需 mean，可选 temporal RMS、frame count 和 detector setup |
+| BadPixelMap | Bad | hot=1、dead=2、noisy=4 的坏像素 flags |
 | FlatCalibration | Flat | detector flat、trace 和稀疏提取几何 |
 | WavelengthCalibration | Wave | 逐输出波长图及可选拟合诊断 |
 | P2VMCalibration | P2VM | 完整24输出响应、逆矩阵及扫描诊断 |
 | VisibilityObservables / ReducedObservables | P2VMRed | 逐帧仪器信号；实时预览可以省略 GD/差分相位 |
 
-旧名称直接替换，没有兼容别名。`DarkImage` 只包含减暗用的平均图像，
-与完整 `Dark` 分开。`DarkInput = Dark | DarkImage` 只是减暗函数的类型标注。
+旧名称直接替换，没有兼容别名。0.8.1统一使用Dark，删除DarkImage和DarkInput，
+并将坏像素产品简称Bad。Dark的mean_adu必需，temporal_rms_adu和n_frames
+未知时为None；单帧记录n_frames=1，RMS仍为None。减暗只用均值，BAD检测
+要求RMS；完整DARK文件写出仍要求已测RMS和至少两帧。
 
 ## 删除的机制
 
@@ -85,10 +88,13 @@ QC 仍由发布入口的 `include_qc` 选择，保留当前 Python/recipe 默认
 
 ## 验证
 
-保留12项开发测试，不恢复补丁中的整批测试或 golden NPZ。完整真实数据的新旧
-冷/热对照保留74个科学数组的字节；20份产品的物理映射、DFS 参数、used inputs
-和 QC 值相同。六种相位参照/实时预览情形共138个数组逐字节一致。
-10份旧 format-4 产品可读并转存为 format 5，数组、几何与 detector setup 相同。
+保留12项开发测试，不恢复补丁中的整批测试或 golden NPZ。0.8.1与0.8.0各用
+15份真实raw运行一轮全部五个recipe，37个科学数组逐字节一致；10份产品的
+物理映射、detector setup、DFS参数、used inputs和QC值相同。实际Qt窗口验证
+完整暗场与相同均值的二维暗场给出相同visibility数组，单帧暗场按钮可用。
+
+[0.8.0报告](https://github.com/zexwu/planetes_pipe/blob/8e62fad201c469d68594cfa4488627dc5a86f166/docs/CHANGE_REPORT.md)
+记录前次命名整理的冷/热对照、相位参照和旧格式验证。
 
 [当前修改报告](CHANGE_REPORT.md)记录证据位置；
 [产品接口](PRODUCT_CONTRACT.md)列出字段、文件布局和参数。

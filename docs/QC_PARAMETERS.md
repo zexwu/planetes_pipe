@@ -33,7 +33,8 @@ QC 在发布入口选择：`write_product(..., include_qc=True)` 保留原默认
 | P2VM_MINCOHERENCE_SC43 / MAXCOHERENCE_SC43 等 | 每输出先按光谱排序，取 floor(0.05 N) / floor(0.95 N) 元素，再跨四输出取 min/max | 同上及 gravi_cpl.c:2510；不是 NumPy 插值分位数，N=nwave |
 
 Dark temporal RMS 使用 population 定义；上述谱域/残差 sample stdev 使用 N−1。
-两者不同是参考定义和物理统计对象不同。波长残差来自本次拟合实际保留点，
+两者不同是参考定义和物理统计对象不同。Dark 未测 temporal RMS 时仍可报告均值
+统计，RMS 标记为不可用，不填零。波长残差来自本次拟合实际保留点，
 其定义为 lamp 标定残差；不能将它解释为独立实测的天文波长准确度。
 
 没有充分物理依据的数值不填 0，而在 PLANETES_META 的 qc_status 中说明：
