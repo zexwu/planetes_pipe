@@ -32,11 +32,12 @@ def build_raw_header(metadata: CaptureMetadata, shape):
     """ESO ICD exposure/window fields; private shutter provenance stays explicit."""
     if metadata.category not in kw.RAW_TYPES or len(shape) != 3 or min(shape) < 1:
         raise ValueError("Expected a supported raw category and nonempty 3-D cube")
+    raw_type = kw.RAW_TYPES[metadata.category]
     if (
         metadata.shutters is None
         or len(metadata.shutters) != 4
         or any(not isinstance(v, (bool, np.bool_)) for v in metadata.shutters)
-        or sum(metadata.shutters) != kw.RAW_TYPES[metadata.category][3]
+        or sum(metadata.shutters) != raw_type["open_shutters"]
     ):
         raise ValueError("Raw category requires explicit, consistent shutter states")
     setup = metadata.setup
@@ -75,11 +76,10 @@ def build_raw_header(metadata: CaptureMetadata, shape):
         raise ValueError("Exposure must be positive finite seconds")
     h = afits.Header()
     h["INSTRUME"] = "PLANETES"
-    category, kind, technique, _ = kw.RAW_TYPES[metadata.category]
     for key, value in (
-        (kw.DPR_CATEGORY, category),
-        (kw.DPR_TYPE, kind),
-        (kw.DPR_TECHNIQUE, technique),
+        (kw.DPR_CATEGORY, raw_type["dpr_category"]),
+        (kw.DPR_TYPE, raw_type["dpr_type"]),
+        (kw.DPR_TECHNIQUE, raw_type["dpr_technique"]),
     ):
         h["HIERARCH " + key] = value
     h["HIERARCH " + kw.FORMAT_KEY] = kw.RAW_FORMAT

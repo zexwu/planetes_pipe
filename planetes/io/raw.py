@@ -59,13 +59,19 @@ def read_raw_header(path: Path) -> afits.Header:
 
 def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetadata:
     """Read recognized bench fields; missing metadata stays unknown, not inferred."""
-    kind = str(header.get(kw.DPR_TYPE, "")).strip().upper()
-    declared = next((name for name, v in kw.RAW_TYPES.items() if v[1] == kind), None)
-    category = declared if category is None else category
+    dpr_type = str(header.get(kw.DPR_TYPE, "")).strip().upper()
+    declared_category = None
+    for raw_category, definition in kw.RAW_TYPES.items():
+        if definition["dpr_type"] == dpr_type:
+            declared_category = raw_category
+            break
+    category = declared_category if category is None else category
     if category not in kw.RAW_TYPES:
         raise ValueError("Raw category is unknown; supply an explicit category")
-    if declared is not None and declared != category:
-        raise ValueError(f"Expected raw category {category}, header declares {kind}")
+    if declared_category is not None and declared_category != category:
+        raise ValueError(
+            f"Expected raw category {category}, header declares {dpr_type}"
+        )
     if len(shape) != 3 or min(shape) < 1:
         raise ValueError("Expected a nonempty three-dimensional raw detector cube")
 
@@ -74,7 +80,8 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
         raise ValueError("Recorded shutter states must be boolean")
     known_open = sum(value is True for value in shutter_values)
     unknown = shutter_values.count(None)
-    if not known_open <= kw.RAW_TYPES[category][3] <= known_open + unknown:
+    expected_open_shutters = kw.RAW_TYPES[category]["open_shutters"]
+    if not known_open <= expected_open_shutters <= known_open + unknown:
         raise ValueError("Raw category and recorded shutter states conflict")
 
     roi = {name: header.get(key) for name, key in kw.ROI_KEYS.items()}
@@ -163,7 +170,8 @@ def read_raw_metadata(
             for first, second in zip(raw.shutters, shutters, strict=True)
         )
         active = sum(state is True for state in shutters)
-        if not active <= kw.RAW_TYPES[raw.category][3] <= active + shutters.count(None):
+        expected_open_shutters = kw.RAW_TYPES[raw.category]["open_shutters"]
+        if not active <= expected_open_shutters <= active + shutters.count(None):
             raise ValueError("Raw category and recorded shutter states conflict")
         return RawMetadata(raw.category, shutters, DetectorSetup(**values))
 
