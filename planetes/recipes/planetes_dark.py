@@ -4,7 +4,7 @@ from cpl import ui
 
 from planetes import __version__
 from planetes.dark import make_dark_products
-from planetes.recipes.dfs import save_products, load_recipe_inputs
+from planetes.recipes.dfs import read_sof, save_products
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
@@ -38,11 +38,8 @@ class PlanetesDark(ui.PyRecipe):
 
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
-        paths, _, used = load_recipe_inputs(frameset, {"DARK_RAW": None})
-        dark, bad = make_dark_products(paths["DARK_RAW"], **options)
+        paths, used = read_sof(frameset, {"DARK_RAW": 1})
+        dark, bad = make_dark_products(paths["DARK_RAW"][0], **options)
         return save_products(
-            [("planetes_dark.fits", dark), ("planetes_bad.fits", bad)],
-            used,
-            self,
-            include_qc=True,
+            [("planetes_dark.fits", dark), ("planetes_bad.fits", bad)], used, self
         )

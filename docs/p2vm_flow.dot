@@ -1,8 +1,8 @@
 digraph P2VM {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.4, fontname="PingFang SC", fontsize=20, label="PLANETES 0.11.0 · P2VM 科学流程", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.4, fontname="PingFang SC", fontsize=20, label="PLANETES 0.12.0 · P2VM 科学流程", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=13, color="#64748b", margin="0.16,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
-  files [label="make_p2vm / extract_p2vm_spectra\n读取所选 DARK、FLAT、WAVE 和 raw\n提取光谱；核对 flat 照明与扫描调制的 output 身份"];
+  files [label="make_p2vm / extract_p2vm_spectra\n接收所选标定与具名 raw 路径映射\n提取光谱；核对 flat 照明与扫描调制的 output 身份"];
   spectra [label="P2VMSpectra · 计算精度数组\n扫描 (6, 24, frame, wavelength)\ntelescope flats (4, 24, frame, wavelength)\n可选 reference (24, frame, wavelength)", style="rounded,filled", fillcolor="#f8fafc"];
   scan [label="1 · 扫描响应拟合\nA,C,B,D → ellipse phase / radius\n中央半波段 → OPD / GD [m] → OPD 零点\n全部 24 outputs → c + a cos(phi) + b sin(phi)", style="rounded,filled", fillcolor="#eff6ff"];
   transmission [label="2 · Transmission\n各 telescope 的 frame-median spectrum\n保留原来的全局归一化", style="rounded,filled", fillcolor="#eff6ff"];

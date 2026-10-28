@@ -3,9 +3,10 @@
 from cpl import ui
 
 from planetes import __version__
+from planetes.io.fits import read_product
 from planetes.flat import make_flat
 from planetes.products import Bad, Dark
-from planetes.recipes.dfs import save_product, load_recipe_inputs
+from planetes.recipes.dfs import read_sof, save_products, read_shutter_id
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
@@ -39,10 +40,9 @@ class PlanetesFlat(ui.PyRecipe):
 
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
-        paths, cal, used = load_recipe_inputs(
-            frameset,
-            {"DARK": Dark, "BAD": Bad, "FLAT_RAW": None},
-            multiple={"FLAT_RAW": 4},
-        )
-        product = make_flat(paths["FLAT_RAW"], cal["DARK"], cal["BAD"], **options)
-        return save_product("planetes_flat.fits", product, used, self, include_qc=True)
+        paths, used = read_sof(frameset, {"DARK": 1, "BAD": 1, "FLAT_RAW": 4})
+        dark = read_product(paths["DARK"][0], Dark)
+        bad = read_product(paths["BAD"][0], Bad)
+        flats = {read_shutter_id(path, "FLAT_RAW"): path for path in paths["FLAT_RAW"]}
+        product = make_flat(flats, dark, bad, **options)
+        return save_products([("planetes_flat.fits", product)], used, self)

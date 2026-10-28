@@ -1,6 +1,6 @@
 """FLAT step: telescope inputs, extraction aperture, detector response and traces."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,14 +12,14 @@ from scipy.signal import find_peaks, medfilt
 from . import log
 from .dark import frame_mean
 from .instrument import N_OUTPUTS, TELESCOPES, check_setup
-from .io.raw import check_raw_calibrations, identify_raw_exposures, iter_raw_cube
+from .io.raw import check_raw_calibrations, iter_raw_cube, read_raw_metadata
 from .products import Bad, Dark, Flat
 
 APERTURE_WIDTH_PIXELS = 10.0
 
 
 def make_flat(
-    telescope_flats: Mapping[str, Path] | Iterable[Path],
+    telescope_flats: Mapping[str, Path],
     dark: Dark,
     bad: Bad,
     *,
@@ -28,16 +28,26 @@ def make_flat(
     """Read four telescope flats with their DARK/BAD; return response and geometry.
 
     ``aperture_width_pixels`` is the full extraction aperture in detector pixels.
-    For incomplete bench headers, supply a {telescope: path} mapping.
+    Supply the fixed {telescope: path} mapping, with keys 4,3,2,1 as strings.
     """
 
-    telescope_flats = identify_raw_exposures(telescope_flats, "FLAT_RAW")
+    if set(telescope_flats) != set(TELESCOPES):
+        raise ValueError("Telescope flats require a path for each of 4,3,2,1")
+    if len({Path(path) for path in telescope_flats.values()}) != len(TELESCOPES):
+        raise ValueError("Each telescope requires a different flat file")
     maps = []
-    setup = telescope_flats[TELESCOPES[0]][1].setup
+    setup = None
     for name in TELESCOPES:
-        path, raw = telescope_flats[name]
+        path = telescope_flats[name]
+        raw = read_raw_metadata(path, category="FLAT_RAW")
+        for telescope, state in enumerate(raw.shutters, 1):
+            if state is not None and state != (str(telescope) in name):
+                raise ValueError(
+                    f"Flat for T{name} conflicts with recorded shutters: {path}"
+                )
         check_raw_calibrations(raw, dark)
-
+        if setup is None:
+            setup = raw.setup
         check_setup(raw.setup, setup, exposure=False, role="flat sequence")
         maps.append(frame_mean(iter_raw_cube(path)) - dark.mean_adu)
     result = build_flat(maps, bad, aperture_width_pixels=aperture_width_pixels)

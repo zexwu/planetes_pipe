@@ -42,8 +42,8 @@ def reduce_science(
 
     raw = read_raw_metadata(path, category="SINGLE_SCI_RAW")
     check_raw_calibrations(raw, dark, flat)
-    reducer = FrameReducer(flat, wave, p2vm)
-    spectra = extract_spectra_from_file(path, reducer.extractor, dark)
+    extractor = prepare_extraction(flat, wave, p2vm.wavelength_m)
+    spectra = extract_spectra_from_file(path, extractor, dark)
     return reduce_spectra(
         spectra, p2vm, gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m
     )

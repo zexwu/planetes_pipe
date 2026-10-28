@@ -1,6 +1,6 @@
 """P2VM calibration: scan response, photometric normalization and phase reference."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -20,7 +20,7 @@ from .instrument import (
     TELESCOPES,
     _check_baselines,
 )
-from .io.raw import check_raw_calibrations, identify_raw_exposures, read_raw_metadata
+from .io.raw import check_raw_calibrations, read_raw_metadata
 from .products import P2VMSpectra, Dark, Flat, P2VM, Wave
 from .reduction import estimate_group_delay
 
@@ -455,8 +455,8 @@ def make_p2vm(
     wave: Wave,
     main_dark: Dark,
     *,
-    telescope_flats: Mapping[str, Path] | Iterable[Path],
-    baseline_cubes: Mapping[str, Path] | Iterable[Path],
+    telescope_flats: Mapping[str, Path],
+    baseline_cubes: Mapping[str, Path],
     phase_reference: Path | None = None,
     phase_dark: Dark | None = None,
     phase_correction: bool = True,
@@ -500,34 +500,51 @@ def extract_p2vm_spectra(
     wave: Wave,
     main_dark: Dark,
     *,
-    telescope_flats: Mapping[str, Path] | Iterable[Path],
-    baseline_cubes: Mapping[str, Path] | Iterable[Path],
+    telescope_flats: Mapping[str, Path],
+    baseline_cubes: Mapping[str, Path],
     wavelength_m: NDArray,
     phase_reference: Path | None = None,
     phase_dark: Dark | None = None,
 ) -> P2VMSpectra:
-    """Extract calibration files and infer the retained physical output mapping."""
+    """Extract explicit telescope/baseline file maps and identify detector outputs."""
 
-    telescope_flats = identify_raw_exposures(telescope_flats, "FLAT_RAW")
-    baseline_cubes = identify_raw_exposures(baseline_cubes, "P2VM_RAW")
+    if set(telescope_flats) != set(TELESCOPES):
+        raise ValueError("Telescope flats require a path for each of 4,3,2,1")
+    if set(baseline_cubes) != set(BASELINES):
+        raise ValueError("Baseline scans require a path for each of 43,42,41,32,31,21")
+    if len({Path(path) for path in telescope_flats.values()}) != N_TELESCOPES:
+        raise ValueError("Each telescope requires a different flat file")
+    if len({Path(path) for path in baseline_cubes.values()}) != N_BASELINES:
+        raise ValueError("Each baseline requires a different scan file")
     if phase_dark is not None and phase_reference is None:
         raise ValueError("phase_dark requires phase_reference")
     extractor = prepare_extraction(flat, wave, wavelength_m)
-    for exposures in (telescope_flats, baseline_cubes):
-        for _, raw in exposures.values():
-            check_raw_calibrations(raw, main_dark, flat)
-    baseline_spectra = np.asarray(
-        [
-            extract_spectra_from_file(baseline_cubes[name][0], extractor, main_dark)
-            for name in BASELINES
-        ]
-    )
-    telescope_spectra = np.asarray(
-        [
-            extract_spectra_from_file(telescope_flats[name][0], extractor, main_dark)
-            for name in TELESCOPES
-        ]
-    )
+
+    baseline_spectra = []
+    for baseline in BASELINES:
+        path = baseline_cubes[baseline]
+        raw = read_raw_metadata(path, category="P2VM_RAW")
+        for telescope, state in enumerate(raw.shutters, 1):
+            if state is not None and state != (str(telescope) in baseline):
+                raise ValueError(
+                    f"Scan for {baseline} conflicts with recorded shutters: {path}"
+                )
+        check_raw_calibrations(raw, main_dark, flat)
+        baseline_spectra.append(extract_spectra_from_file(path, extractor, main_dark))
+    baseline_spectra = np.asarray(baseline_spectra)
+
+    telescope_spectra = []
+    for name in TELESCOPES:
+        path = telescope_flats[name]
+        raw = read_raw_metadata(path, category="FLAT_RAW")
+        for telescope, state in enumerate(raw.shutters, 1):
+            if state is not None and state != (str(telescope) in name):
+                raise ValueError(
+                    f"Flat for T{name} conflicts with recorded shutters: {path}"
+                )
+        check_raw_calibrations(raw, main_dark, flat)
+        telescope_spectra.append(extract_spectra_from_file(path, extractor, main_dark))
+    telescope_spectra = np.asarray(telescope_spectra)
     reference_spectra = np.empty((N_OUTPUTS, 0, len(extractor.wavelength_m)))
     if phase_reference is not None:
         selected_dark = main_dark if phase_dark is None else phase_dark

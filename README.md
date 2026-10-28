@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.11.0
+# PLANETES pipeline 0.12.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
@@ -197,6 +197,12 @@ science: `measure_dark`, `detect_bad_pixels`, `build_flat`,
 | `recipes/planetes_*.py` | SOF roles → step call → CPL DFS output registration |
 | `recipes/parameters.py`, `recipes/dfs.py` | Shared CPL translation only; every CPL import stays in recipes/ |
 
+FLAT/P2VM Python file inputs are explicit `Mapping[str, Path]` values:
+`telescope_flats` has keys `4,3,2,1`; `baseline_cubes` has keys
+`43,42,41,32,31,21`. Their values remain paths throughout the workflow.
+In PyEsoRex, repeated SOF entries are mapped from shutter metadata at the recipe
+boundary. Each recipe then reads its DARK/FLAT/WAVE/P2VM products explicitly.
+
 There is one implementation per step. Python, GUI and PyEsoRex use those same
 functions. No task dispatcher, separate calibration layer or identity module is
 needed. Scientific parameters and defaults belong to the step functions. Each
@@ -210,7 +216,8 @@ pixel indices are zero-based; the FITS boundary writes the GRAVITY one-based
 coordinates. GRAVITY's existing `... UM SC` QC cards are emitted alongside their
 metre equivalents at the file boundary.
 
-[Code style](docs/CODE_STYLE.md) defines local scientific names and table alignment.
+[Code style](docs/CODE_STYLE.md) puts direct data flow and fixed input forms before
+local names and table alignment.
 [Simplification notes](docs/SIMPLIFICATION.md) explain the product interfaces.
 [Change report and diagrams](docs/CHANGE_REPORT.md) record the migration and
 full-data evidence. [Scientific methods](docs/SCIENTIFIC_METHODS.md) describe retained numerical
@@ -253,6 +260,14 @@ products no longer store `baseline_telescopes`. Actual `baseline_outputs` remain
 in the products. P2VM scan/ellipse/DC/residual diagnostics are omitted by default;
 use `keep_diagnostics=True` in Python or `--keep-diagnostics=true` in PyEsoRex
 to retain them. This does not alter calibration or reduction.
+
+Version 0.12.0 requires explicit file mappings in Python FLAT/P2VM workflows.
+Replace former raw-file lists with `{identity: path}` mappings; SOF syntax is
+unchanged. The former `identify_raw_exposures`, `load_recipe_inputs` and
+`save_product` helpers are removed. Recipes use `read_sof` (path lists plus DFS
+frames), explicit `read_product` calls, and the single `save_products` entry.
+Raw format-3 metadata keeps its existing interpretation with one explicit
+header-first physical-field selection and saved source flags.
 
 Version 0.11.0 makes the P2VM fit follow the physical stages above. Call
 `fit_abcd_ellipse(spec)` without the removed unit `envs` argument; the existing

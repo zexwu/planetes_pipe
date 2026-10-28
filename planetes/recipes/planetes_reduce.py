@@ -3,8 +3,9 @@
 from cpl import ui
 
 from planetes import __version__
+from planetes.io.fits import read_product
 from planetes.products import Dark, Flat, P2VM, Wave
-from planetes.recipes.dfs import save_product, load_recipe_inputs
+from planetes.recipes.dfs import read_sof, save_products
 from planetes.recipes.parameters import make_parameters, read_parameters
 from planetes.reduction import reduce_science
 
@@ -45,24 +46,14 @@ class PlanetesReduce(ui.PyRecipe):
 
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
-        paths, cal, used = load_recipe_inputs(
-            frameset,
-            {
-                "SINGLE_SCI_RAW": None,
-                "DARK": Dark,
-                "FLAT": Flat,
-                "WAVE": Wave,
-                "P2VM": P2VM,
-            },
+        paths, used = read_sof(
+            frameset, {"SINGLE_SCI_RAW": 1, "DARK": 1, "FLAT": 1, "WAVE": 1, "P2VM": 1}
         )
+        dark = read_product(paths["DARK"][0], Dark)
+        flat = read_product(paths["FLAT"][0], Flat)
+        wave = read_product(paths["WAVE"][0], Wave)
+        p2vm = read_product(paths["P2VM"][0], P2VM)
         product = reduce_science(
-            paths["SINGLE_SCI_RAW"],
-            cal["DARK"],
-            cal["FLAT"],
-            cal["WAVE"],
-            cal["P2VM"],
-            **options,
+            paths["SINGLE_SCI_RAW"][0], dark, flat, wave, p2vm, **options
         )
-        return save_product(
-            "planetes_reduced.fits", product, used, self, include_qc=True
-        )
+        return save_products([("planetes_reduced.fits", product)], used, self)

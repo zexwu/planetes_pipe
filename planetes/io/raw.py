@@ -1,13 +1,12 @@
 """Raw FITS streaming, known bench metadata and calibration compatibility."""
 
-from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits as afits
 
-from ..instrument import BASELINES, TELESCOPES, DetectorSetup, check_setup
+from ..instrument import DetectorSetup, check_setup
 from . import keywords as kw
 from .hdu import _verify_checksums, _read_json, as_compute_array
 
@@ -120,7 +119,11 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
 def read_raw_metadata(
     path: Path, *, category=None, hdu: int | str | None = None
 ) -> RawMetadata:
-    """Read known physical fields; acquisition timing/provenance is not parsed."""
+    """Use known physical header values, filling gaps from saved format-3 JSON.
+
+    Saved JSON also retains exposure-source and legacy flags. Contradictions in
+    known physical fields fail; acquisition timestamps are not read here.
+    """
     with afits.open(path, memmap=True) as hdus:
         header = hdus[0].header
         if kw.PRO_CATEGORY in header:
@@ -131,85 +134,73 @@ def read_raw_metadata(
         ):
             raise ValueError(f"Unsupported PLANETES raw format: {path}")
         image = _detector_hdu(hdus, hdu)
-        info = _read_json(hdus, kw.META_EXT) if kw.META_EXT in hdus else {}
-        raw = parse_raw_header(
+        saved = _read_json(hdus, kw.META_EXT) if kw.META_EXT in hdus else {}
+        header_meta = parse_raw_header(
             header,
             image.shape,
-            category=category if category is not None else info.get("category"),
+            category=category if category is not None else saved.get("category"),
         )
-        if info.get("category", raw.category) != raw.category:
+        if saved.get("category", header_meta.category) != header_meta.category:
             raise ValueError("Raw header and metadata disagree: category")
-        if not info:
-            return raw
-        # Old format-3 files retain physical fields in PLANETES_META. Ignore
-        # capture timestamps, configuration sources and original-header records.
-        setup = DetectorSetup(**{**asdict(raw.setup), **info.get("setup", {})})
-        check_setup(raw.setup, setup, exposure=True, role="raw metadata")
-        if raw.setup.exposure_s is not None and "exposure_source" in info.get(
-            "setup", {}
-        ):
-            recorded_dit = setup.exposure_source in ("readback", "legacy-property")
+        if not saved:
+            return header_meta
+
+        # Format-3 files, including current acquisitions, also store setup in JSON.
+        header_setup = header_meta.setup
+        saved_fields = saved.get("setup", {})
+        saved_setup = DetectorSetup(**saved_fields)
+        check_setup(header_setup, saved_setup, exposure=True, role="raw metadata")
+        if header_setup.exposure_s is not None and "exposure_source" in saved_fields:
+            recorded_dit = saved_setup.exposure_source in (
+                "readback",
+                "legacy-property",
+            )
             if recorded_dit != (kw.DIT in header):
                 raise ValueError("Raw header and metadata disagree: exposure source")
-        known = {
-            key: value
-            for key, value in asdict(raw.setup).items()
-            if value is not None and key not in ("legacy", "exposure_source")
-        }
-        values = {**asdict(setup), **known}
-        shutters = tuple(info.get("shutters", raw.shutters))
-        if len(shutters) != 4 or any(
-            state is not None and type(state) is not bool for state in shutters
+
+        physical = {}
+        for name in (
+            "exposure_s",
+            "origin_x",
+            "origin_y",
+            "width",
+            "height",
+            "binning_x",
+            "binning_y",
+            "detector",
+            "orientation",
+        ):
+            value = getattr(header_setup, name)
+            physical[name] = value if value is not None else getattr(saved_setup, name)
+
+        saved_shutters = tuple(saved.get("shutters", header_meta.shutters))
+        if len(saved_shutters) != 4 or any(
+            state is not None and type(state) is not bool for state in saved_shutters
         ):
             raise ValueError("Recorded shutter states must be four booleans or unknown")
-        for first, second in zip(raw.shutters, shutters, strict=True):
-            if first is not None and second is not None and first != second:
+        shutters = []
+        for header_state, saved_state in zip(
+            header_meta.shutters, saved_shutters, strict=True
+        ):
+            if (
+                header_state is not None
+                and saved_state is not None
+                and header_state != saved_state
+            ):
                 raise ValueError("Raw header and metadata disagree: shutters")
-        shutters = tuple(
-            first if first is not None else second
-            for first, second in zip(raw.shutters, shutters, strict=True)
-        )
+            shutters.append(header_state if header_state is not None else saved_state)
         active = sum(state is True for state in shutters)
-        expected_open = kw.RAW_TYPES[raw.category]["open_shutters"]
+        expected_open = kw.RAW_TYPES[header_meta.category]["open_shutters"]
         if not active <= expected_open <= active + shutters.count(None):
             raise ValueError("Raw category and recorded shutter states conflict")
-        return RawMetadata(raw.category, shutters, DetectorSetup(**values))
-
-
-def identify_raw_exposures(
-    paths: Mapping[str, Path] | Iterable[Path], category: str
-) -> dict[str, tuple[Path, RawMetadata]]:
-    """Read once and retain physical identity with each path and its metadata."""
-    expected = set(TELESCOPES if category == "FLAT_RAW" else BASELINES)
-    explicit = isinstance(paths, Mapping)
-    entries = paths.items() if explicit else ((None, path) for path in paths)
-    result = {}
-    for identity, path in entries:
-        path = Path(path)
-        raw = read_raw_metadata(path, category=category)
-        if explicit:
-            identity = str(identity)
-            for telescope, state in enumerate(raw.shutters, 1):
-                if state is not None and state != (str(telescope) in identity):
-                    raise ValueError(
-                        f"Explicit identity {identity} conflicts with recorded shutters: {path}"
-                    )
-        else:
-            if None in raw.shutters:
-                raise ValueError(
-                    f"Unknown shutters for {path}; supply an explicit identity mapping"
-                )
-            identity = "".join(str(n) for n in range(4, 0, -1) if raw.shutters[n - 1])
-        if identity in result:
-            raise ValueError(
-                f"Duplicate shutter configuration {identity} for {category}"
-            )
-        result[identity] = (path, raw)
-    if set(result) != expected:
-        raise ValueError(f"Expected {category} identities {sorted(expected)}")
-    if len({path for path, _ in result.values()}) != len(result):
-        raise ValueError("Each physical identity requires a different raw file")
-    return result
+        setup = DetectorSetup(
+            **physical,
+            exposure_source=saved_fields.get(
+                "exposure_source", header_setup.exposure_source
+            ),
+            legacy=saved_fields.get("legacy", header_setup.legacy),
+        )
+        return RawMetadata(header_meta.category, tuple(shutters), setup)
 
 
 def iter_raw_cube(path: Path, *, hdu: int | str | None = None):
@@ -220,12 +211,11 @@ def iter_raw_cube(path: Path, *, hdu: int | str | None = None):
             yield as_compute_array(data[start : start + CHUNK_FRAMES])
 
 
-def check_raw_calibrations(raw: RawMetadata, dark, flat=None, *, flat_setup=None):
-    """Check known DIT/ROI conflicts using metadata already read by the caller."""
+def check_raw_calibrations(raw: RawMetadata, dark, flat=None):
+    """Check known DIT/ROI conflicts against the selected DARK and FLAT."""
     check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
-    geometry = flat.setup if flat is not None else flat_setup
-    if flat is not None or flat_setup is not None:
-        check_setup(raw.setup, geometry, exposure=False, role="FLAT")
+    if flat is not None:
+        check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
 
 
 def verify_raw(path):

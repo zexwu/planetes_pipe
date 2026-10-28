@@ -1,4 +1,4 @@
-# PLANETES science products and FITS interface (v0.11.0)
+# PLANETES science products and FITS interface (v0.12.0)
 
 ## Design
 
@@ -149,7 +149,9 @@ Each recipe declares canonical names and aliases in its own `PARAMETERS` diction
 Python step functions own scientific arguments, units and defaults.
 `recipes/parameters.py` translates the recipe declarations and reads defaults from
 the function signature; science modules contain no CPL parameter registry.
-Repeated SOF counts are declared by the flat/P2VM recipes, not by the shared loader.
+Each recipe passes its required tag/count pairs to `read_sof`. The result contains
+one path list per tag and classified DFS input frames. Product loading is explicit
+in the recipe; the SOF helper neither reads products nor changes value types.
 
 | Python keyword | Canonical CPL name | Default |
 | --- | --- | --- |
@@ -174,6 +176,18 @@ used inputs. Repeated FLAT_RAW/P2VM_RAW tags remain unchanged; duplicate physica
 shutter combinations or incomplete sets fail.
 
 ## Step APIs
+
+FLAT/P2VM file arguments accept only explicit `Mapping[str, Path]`: telescope
+keys `4,3,2,1` and baseline keys `43,42,41,32,31,21`. Known shutter contradictions,
+missing identities and repeated file assignments are rejected. Files with unknown
+shutters remain usable with those explicit Python mappings. Repeated SOF raw files
+are identified by `read_shutter_id` at the recipe boundary; unknown shutters need
+an explicit Python mapping. No path/metadata tuples flow into scientific steps.
+
+Raw metadata keeps the existing format-3 contract: known physical header fields
+win, JSON fills missing physical fields, and saved exposure-source/legacy flags
+are retained. Known contradictions fail. The raw writer and FITS formats are
+unchanged.
 
 Raw-file workflows are `make_dark_products`, `make_flat`, `make_wave`,
 `make_p2vm` and `reduce_science`. They return products and leave saving explicit.

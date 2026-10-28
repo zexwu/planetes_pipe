@@ -10,6 +10,7 @@ from p2vm_fixture import write_recipe_inputs
 
 from planetes.extraction import prepare_extraction
 from planetes.io.fits import read_product
+from planetes.instrument import BASELINES, TELESCOPES
 from planetes.p2vm import make_p2vm, extract_p2vm_spectra
 from planetes.products import Dark
 
@@ -28,8 +29,8 @@ class CalibrationTests(unittest.TestCase):
                 flat,
                 wave,
                 dark,
-                telescope_flats=paths["FLAT_RAW"],
-                baseline_cubes=paths["P2VM_RAW"],
+                telescope_flats=dict(zip(TELESCOPES, paths["FLAT_RAW"], strict=True)),
+                baseline_cubes=dict(zip(BASELINES, paths["P2VM_RAW"], strict=True)),
                 **options,
             )
 
@@ -72,8 +73,8 @@ class CalibrationTests(unittest.TestCase):
                 flat,
                 wave,
                 main,
-                telescope_flats=inputs["FLAT_RAW"],
-                baseline_cubes=inputs["P2VM_RAW"],
+                telescope_flats=dict(zip(TELESCOPES, inputs["FLAT_RAW"], strict=True)),
+                baseline_cubes=dict(zip(BASELINES, inputs["P2VM_RAW"], strict=True)),
                 wavelength_m=np.linspace(1.15e-6, 1.30e-6, 151),
                 phase_reference=reference,
                 phase_dark=phase,

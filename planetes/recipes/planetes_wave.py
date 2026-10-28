@@ -3,8 +3,9 @@
 from cpl import ui
 
 from planetes import __version__
+from planetes.io.fits import read_product
 from planetes.products import Dark, Flat, WavelengthReference
-from planetes.recipes.dfs import save_product, load_recipe_inputs
+from planetes.recipes.dfs import read_sof, save_products
 from planetes.recipes.parameters import make_parameters, read_parameters
 from planetes.wavelength import make_wave, wavelength_reference_path
 
@@ -38,20 +39,13 @@ class PlanetesWave(ui.PyRecipe):
             frames.append(
                 ui.Frame(file=str(wavelength_reference_path()), tag="LINE_LIST")
             )
-        paths, cal, used = load_recipe_inputs(
-            frames,
-            {
-                "WAVELAMP_RAW": None,
-                "DARK": Dark,
-                "FLAT": Flat,
-                "LINE_LIST": WavelengthReference,
-            },
+        paths, used = read_sof(
+            frames, {"WAVELAMP_RAW": 1, "DARK": 1, "FLAT": 1, "LINE_LIST": 1}
         )
+        dark = read_product(paths["DARK"][0], Dark)
+        flat = read_product(paths["FLAT"][0], Flat)
+        reference = read_product(paths["LINE_LIST"][0], WavelengthReference)
         product = make_wave(
-            paths["WAVELAMP_RAW"],
-            cal["DARK"],
-            cal["FLAT"],
-            reference=cal["LINE_LIST"],
-            **options,
+            paths["WAVELAMP_RAW"][0], dark, flat, reference=reference, **options
         )
-        return save_product("planetes_wave.fits", product, used, self, include_qc=True)
+        return save_products([("planetes_wave.fits", product)], used, self)

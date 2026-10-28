@@ -1,4 +1,4 @@
-# Scientific methods in PLANETES 0.11.0
+# Scientific methods in PLANETES 0.12.0
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
@@ -64,6 +64,11 @@ must cover it fully; detector dimensions, sparse geometry and wavelength orderin
 are checked before extraction. Calibration files are selected explicitly by the caller. A coverage edge tolerates
 only the float32 storage rounding bound (`2**-24` relative); larger gaps fail.
 Within that encoding allowance, interpolation retains its endpoint behavior.
+
+File workflows receive explicit telescope/baseline path mappings. SOF shutter
+identification is performed by the recipe before calling these workflows. Each
+file loop reads its metadata, checks the selected calibrations and extracts its
+spectra; it does not convert paths into nested path/metadata tuples.
 
 Photometric telescope flats identify illuminated outputs; modulation in baseline
 cubes identifies four outputs per baseline. Their intersections must agree.

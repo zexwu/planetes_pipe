@@ -1,4 +1,4 @@
-# PLANETES 0.11.0：简单科学产品与明确的步骤 API
+# PLANETES 0.12.0：简单科学产品与明确的步骤 API
 
 0.7曾将`products.py`从401行缩减到119行；0.8统一步骤、字段和参数名称，
 0.8.1合并Dark类型后为109行；0.9.0移除固定配对副本后为106行，继续使用普通数据类。
@@ -91,7 +91,8 @@ QC 仍由发布入口的 `include_qc` 选择，保留当前 Python/recipe 默认
 
 `RawMetadata`仅含category、四个可未知的shutter状态、setup；reader不再重建采集记录。
 `CaptureMetadata`在`io/acquisition.py`中保存采集时间和配置来源，并由writer使用。
-标定入口复用身份识别时读取的metadata，不再为同一文件重复解析。
+0.9曾通过嵌套path/metadata tuple复用解析结果；0.12改为入口显式映射，
+步骤按各自文件循环读取metadata，避免让这一优化决定科学接口。
 ROI、曝光来源、detector、单位和已知shutter矛盾检查保留。
 
 固定配对只在`instrument.BASELINE_PAIRS`定义；从三个产品类删除
@@ -125,3 +126,18 @@ phase reference明确用T4及43/42/41，不再通过`telescope-1`隐含配对。
 
 [P2VM流程图](p2vm_flow.png) · [科学约定](SCIENTIFIC_METHODS.md) ·
 [产品接口](PRODUCT_CONTRACT.md)
+
+## 0.12.0 的直接文件流程
+
+FLAT/P2VM只接受`{identity: Path}`。移除支持Mapping/Iterable两种模式的
+`identify_raw_exposures`，路径在科学步骤中保持同一含义。SOF侧用
+`read_shutter_id`确定重复raw项的身份；Python直接提供映射。
+
+`read_sof`只分组路径、检查数量和分类DFS frames；每组始终是路径列表。
+各recipe明确读取DARK/FLAT/WAVE等产品，不再通过共享加载器返回objects字典。
+保存统一调用`save_products`；离线reduction直接准备extractor。
+
+raw reader分别解释header和保存的setup，一次选择最终物理字段。header已知值
+优先、JSON补缺、来源标志按保存记录保留；已知矛盾继续报错。
+
+[修改报告](CHANGE_REPORT.md)列出本轮接口变化、备份和数值对照。

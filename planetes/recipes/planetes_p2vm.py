@@ -3,9 +3,10 @@
 from cpl import ui
 
 from planetes import __version__
+from planetes.io.fits import read_product
 from planetes.p2vm import make_p2vm
 from planetes.products import Dark, Flat, Wave
-from planetes.recipes.dfs import save_product, load_recipe_inputs
+from planetes.recipes.dfs import read_sof, save_products, read_shutter_id
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
@@ -70,30 +71,33 @@ class PlanetesP2VM(ui.PyRecipe):
 
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
-        roles = {
-            "DARK": Dark,
-            "FLAT": Flat,
-            "WAVE": Wave,
-            "FLAT_RAW": None,
-            "P2VM_RAW": None,
-        }
-        paths, cal, used = load_recipe_inputs(
+        paths, used = read_sof(
             frameset,
-            roles,
-            {"PHASE_REFERENCE": None, "PHASE_DARK_CALIB": Dark},
-            multiple={"FLAT_RAW": 4, "P2VM_RAW": 6},
+            {"DARK": 1, "FLAT": 1, "WAVE": 1, "FLAT_RAW": 4, "P2VM_RAW": 6},
+            optional=("PHASE_REFERENCE", "PHASE_DARK_CALIB"),
         )
+        dark = read_product(paths["DARK"][0], Dark)
+        flat = read_product(paths["FLAT"][0], Flat)
+        wave = read_product(paths["WAVE"][0], Wave)
+        reference = paths["PHASE_REFERENCE"][0] if "PHASE_REFERENCE" in paths else None
+        phase_dark = (
+            read_product(paths["PHASE_DARK_CALIB"][0], Dark)
+            if "PHASE_DARK_CALIB" in paths
+            else None
+        )
+        flats = {read_shutter_id(path, "FLAT_RAW"): path for path in paths["FLAT_RAW"]}
+        scans = {read_shutter_id(path, "P2VM_RAW"): path for path in paths["P2VM_RAW"]}
         product = make_p2vm(
-            cal["FLAT"],
-            cal["WAVE"],
-            cal["DARK"],
-            telescope_flats=paths["FLAT_RAW"],
-            baseline_cubes=paths["P2VM_RAW"],
-            phase_reference=paths.get("PHASE_REFERENCE"),
-            phase_dark=cal.get("PHASE_DARK_CALIB"),
+            flat,
+            wave,
+            dark,
+            telescope_flats=flats,
+            baseline_cubes=scans,
+            phase_reference=reference,
+            phase_dark=phase_dark,
             **options,
         )
-        if not (options["phase_correction"] and "PHASE_REFERENCE" in paths):
+        if not (options["phase_correction"] and reference is not None):
             used = ui.FrameSet(
                 [
                     frame
@@ -101,4 +105,4 @@ class PlanetesP2VM(ui.PyRecipe):
                     if frame.tag not in ("PHASE_REFERENCE", "PHASE_DARK_CALIB")
                 ]
             )
-        return save_product("planetes_p2vm.fits", product, used, self, include_qc=True)
+        return save_products([("planetes_p2vm.fits", product)], used, self)
