@@ -89,7 +89,7 @@ class PlanetesP2VM(ui.PyRecipe):
             phase_dark=cal.get("PHASE_DARK_CALIB"),
             **options,
         )
-        if not product.provenance.parameters["phase_reference_applied"]:
+        if not (options["phase_correction"] and "PHASE_REFERENCE" in paths):
             used = ui.FrameSet(
                 [
                     frame
@@ -97,4 +97,4 @@ class PlanetesP2VM(ui.PyRecipe):
                     if frame.tag not in ("PHASE_REFERENCE", "PHASE_DARK_CALIB")
                 ]
             )
-        return save_product("planetes_p2vm.fits", product, used, self)
+        return save_product("planetes_p2vm.fits", product, used, self, include_qc=True)

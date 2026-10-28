@@ -45,4 +45,4 @@ class PlanetesFlat(ui.PyRecipe):
         product = calibrate_flat_file(
             paths["FLAT_RAW"], cal["DARK"], cal["BAD"], **options
         )
-        return save_product("planetes_flat.fits", product, used, self)
+        return save_product("planetes_flat.fits", product, used, self, include_qc=True)

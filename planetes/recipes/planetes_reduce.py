@@ -65,4 +65,6 @@ class PlanetesReduce(ui.PyRecipe):
             cal["P2VM"],
             **options,
         )
-        return save_product("planetes_reduced.fits", product, used, self)
+        return save_product(
+            "planetes_reduced.fits", product, used, self, include_qc=True
+        )

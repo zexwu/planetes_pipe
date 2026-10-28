@@ -61,12 +61,29 @@ The established camera exposure_time property is microseconds. Host start/end UT
 are separately sourced in metadata. DATE-OBS/MJD-OBS are emitted only for an actual
 camera exposure-start UTC; neither saving time nor GUI refresh rate supplies it.
 
-Legacy data must be standardized into separate files using an explicit adopted
-role/shutter map. Width/height come from the actual image, known header settings
+Publishing legacy data as raw format 3 requires separate files with an explicit
+adopted role/shutter map. Width/height come from the actual image, known header settings
 are retained with source, and unrecoverable settings stay None. Legacy is explicit;
 missing association fields are returned as `provenance.unverified`. Original
 EXP_TIME, DATE/TIME and other available header values remain in original metadata;
 historical local saving times do not become observation timestamps.
+
+Unversioned bench FITS can also be read directly while acquisition headers are
+unfinished. Category comes from the Python caller, SOF role or recognized DPR TYPE;
+telescope/baseline identity comes from complete shutter readback or an explicit
+Python mapping (`{"4": path, ...}` / `{"43": path, ...}`). Partial shutter readback
+cannot assign an identity, but any known state must agree with an explicit mapping.
+SOF categories remain unchanged and require shutter readback for repeated roles.
+Missing detector fields remain None and association checks record unknowns.
+
+The detector cube is the named IMAGING_DATA_SC image, otherwise the unique nonempty
+3-D image in the primary/extensions. Ambiguity requires explicit low-level `hdu`
+selection. A known non-ADU BUNIT is rejected in both metadata and cube reads;
+missing BUNIT follows the provisional bench ADU convention and records RAW.BUNIT
+as unverified. `read_raw_header()` preserves the primary header for inspection.
+Declaring a private format or metadata extension selects the strict reader: an
+incomplete version-3 file cannot fall back to the bench parser. Original files
+are never rewritten by these readers.
 
 ## Products and layouts
 
@@ -77,6 +94,10 @@ fingerprints, unverified associations and unavailable QC reasons. Known DARK/FLA
 ROI/exposure cards are also exposed in the primary and checked against metadata.
 CPL products additionally carry its DFS recipe, parameters, all used frames and
 signature. Standalone Python uses the same payload, units, QC and validation.
+`write_product(..., include_qc=True)` preserves the existing QC default; setting
+False skips measurement and attachment. Recipes explicitly request QC at their
+publication call. `encode_product(..., quality=...)` serializes supplied
+measurements/missing reasons and never calls the numerical QC routines itself.
 
 | Python class / category | Extensions and quantities |
 | --- | --- |

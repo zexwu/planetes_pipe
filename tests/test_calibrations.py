@@ -8,14 +8,25 @@ from unittest.mock import patch
 
 import numpy as np
 from astropy.io import fits
-from p2vm_fixture import calibration_arrays, calibration_spectra, metadata, setup
+from p2vm_fixture import (
+    calibration_arrays,
+    calibration_spectra,
+    metadata,
+    setup,
+    write_recipe_inputs,
+)
 
 from planetes.dark import calibrate_dark_file, compute_badpix, load_dark
 from planetes.extraction import prepare_extraction
 from planetes.flat import compute_flat
 from planetes.io.fits import read_product, write_product
 from planetes.io.raw import write_raw
-from planetes.p2vm import compute_p2vm, extract_calibration_files, wavelength_grid
+from planetes.p2vm import (
+    calibrate_p2vm_file,
+    compute_p2vm,
+    extract_calibration_files,
+    wavelength_grid,
+)
 from planetes.products import (
     DarkCalibration,
     DarkImage,
@@ -26,6 +37,47 @@ from planetes.reduction import FrameReducer, reduce_file
 
 
 class CalibrationTests(unittest.TestCase):
+    def test_p2vm_file_interface_accepts_explicit_bench_identities(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            paths = write_recipe_inputs(root / "versioned")
+            flat, wave = read_product(paths["FLAT"]), read_product(paths["WAVE"])
+            dark = read_product(paths["DARK"])
+            options = dict(wavelength_channels=15, phase_correction=False)
+            expected = calibrate_p2vm_file(
+                flat,
+                wave,
+                dark,
+                telescope_flats=paths["FLAT_RAW"],
+                baseline_cubes=paths["P2VM_RAW"],
+                **options,
+            )
+
+            def bench_files(role, identities):
+                result = {}
+                for identity, path in zip(identities, paths[role], strict=True):
+                    target = root / f"{role}_{identity}.fits"
+                    with fits.open(path) as hdus:
+                        fits.PrimaryHDU(hdus[1].data).writeto(target)
+                    result[identity] = target
+                return result
+
+            actual = calibrate_p2vm_file(
+                flat,
+                wave,
+                dark,
+                telescope_flats=bench_files("FLAT_RAW", ("4", "3", "2", "1")),
+                baseline_cubes=bench_files(
+                    "P2VM_RAW", ("43", "42", "41", "32", "31", "21")
+                ),
+                **options,
+            )
+            np.testing.assert_array_equal(actual.p2vm, expected.p2vm)
+            self.assertEqual(actual.baseline_regions, expected.baseline_regions)
+            self.assertEqual(fingerprint(actual), fingerprint(expected))
+            self.assertIn("DARK.exposure_s", actual.provenance.unverified)
+            self.assertIn("RAW.BUNIT", actual.provenance.unverified)
+
     @classmethod
     def setUpClass(cls):
         cls.values = calibration_arrays(n_wave=15)

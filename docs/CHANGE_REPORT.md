@@ -1,3 +1,91 @@
+# PLANETES：台架输入和 QC 发布接口整理
+
+本轮基于 `0e5b00d`，参考用户提供的 v0.6.0 包，吸收台架 FITS 输入和
+recipe 解耦的改进。当前 P2VM 数学实现、软件版本 0.5.1、产品 format 4、
+正式 raw format 3 保持一致。
+
+## 修改内容
+
+| 位置 | 修改及原因 |
+| --- | --- |
+| `io/raw.py` | 分开读取 cube 与解释已知 header；支持 primary/普通 image extension，缺失的曝光、ROI 等信息保持 None |
+| `io/raw.py::identify_raw` | 支持显式 telescope/baseline → path 字典；完整快门记录仍可识别普通列表，不使用文件名或排序推断身份 |
+| `flat.py`、`p2vm.py` 文件入口 | 接收上述字典；把已知类别传给 raw reader，使没有 DPR TYPE 的台架文件也能处理 |
+| `dark.py::load_dark` | 多帧台架 DARK 共用 raw 元数据读取和16帧分块统计；保留单帧/二维 subtraction-only 行为 |
+| `recipes/planetes_p2vm.py` | 从输入和 phase_correction 参数选择 DFS used inputs；不读取返回产品内的 phase_reference_applied 字段 |
+| `io/fits.py` | encoder 只编码传入的 QC 测量；write_product 在发布入口选择是否调用 QC，默认保留原输出 |
+| `recipes/dfs.py`、五个 recipe | 发布接口接收 QC 选择；所有正式 recipe 显式选择 True，保留 DFS 登记和签名 |
+| `examples/reduce.py` | 用物理身份字典展示台架调用，显式选择 QC 输出 |
+
+原始数据只读。若有 `IMAGING_DATA_SC`，按具名 detector cube 读取；否则必须只有
+一个非空三维 image。多个候选时，低层 `read_raw_metadata`、`iter_raw_cube` 要求
+显式 `hdu=...`。已知非 ADU 单位在读取时拒绝；缺 BUNIT 的台架文件按 ADU 约定
+处理，并在 provenance 中记录 `RAW.BUNIT` 未核实。
+
+部分已知快门也必须符合调用者给定的物理身份。已知曝光、ROI 和类别矛盾仍报错。
+声明 raw format 3 的文件继续走完整元数据检查，不会降级为宽松的台架读取。
+正式 SOF 标签保持原类别；缺快门的 telescope/baseline 序列使用 Python 显式字典。
+
+## 现在的调用流程
+
+```mermaid
+flowchart TD
+    Python["Python：类别与物理身份映射"] --> Entry["calibrate_*_file / reduce_file"]
+    SOF["PyEsoRex：现有 SOF 与参数"] --> Recipe["recipe：选择输入、调用步骤、登记 DFS"]
+    Recipe --> Entry
+    Entry --> Raw["io.raw：读取 cube 与已知元数据"]
+    Raw --> Compute["各 step：现有科学计算"]
+    Compute --> Product["具名科学产品"]
+    Product --> Publish["write_product / save_product(s)"]
+    Publish --> QC["按 include_qc 选择 QC 测量"]
+    QC --> Encode["encode_product：编码数组与传入 QC"]
+    Publish --> Encode
+    Encode --> FITS["FITS 产品；recipe 继续 DFS 签名"]
+```
+
+科学标定链仍是 DARK/BAD → FLAT → WAVE → P2VM；科学处理消费自己的 DARK、
+FLAT、WAVE 和 P2VM。仪器相位参照仍可单独选择 DARK，与天文传递函数标定分开。
+
+`write_product(path, product)` 保留原 QC；`include_qc=False` 跳过 QC 计算和附加。
+`qc.measure_quality(product)` 可以单独调用。`encode_product(..., quality=...)`
+只编码已经算好的数值和不可用原因。QC 选择不改变科学数组或内容指纹。
+
+## 验证结果
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 测试 | 65项通过，包括实际 PyCPL/PyEsoRex 集成；没有跳过项 |
+| 台架输入 | primary/extension cube、17帧分块、缺失元数据、显式身份及部分快门冲突、单位错误、多cube选择、损坏正式格式拒绝 |
+| 台架计算 | 相同像素制作的无完整header样例，通过Python字典生成FLAT与P2VM；数值与正式输入相同，未知信息被保留 |
+| 真实数据 | 15份既有标准化raw，三份DARK、FLAT、WAVE、P2VM及science，新旧各跑冷/热两轮完整链 |
+| 科学数组 | 每轮37项，共74个数组的dtype、shape和字节完全一致 |
+| 产品语义及QC | 两轮共20份产品的内容指纹、实际参数、父标定和全部ESO QC值一致 |
+| 相位参照分支 | 启用/禁用/缺失 × 15/17通道，非默认GD范围；66个数组及内容指纹/参数完全一致 |
+| 静态检查 | Ruff、格式及diff空白检查通过 |
+
+对照使用冻结的原版本、同一数值环境和分别匹配的冷/热缓存。
+这些结果验证本轮接口调整保持已有科学结果；实际台架采集的最终关键词映射仍需
+结合新采集文件确认。临时header兼容不代表ESO数据字典或最终产品已获批准。
+
+## 范围与后续
+
+未整包覆盖v0.6.0：保留当前已验证的P2VM辅助函数和物理命名，不新增临时SOF标签，
+不引入golden NPZ。新增的必要检查留在raw/I/O边界，未扩展科学循环中的guard代码。
+
+本轮完成raw接口、recipe输入选择与QC发布边界。现有`products.py`以及部分
+`compute_*`内的provenance/父标定指纹还保留；下一轮可以按计算步骤逐个移到文件
+组装边界。WAVE/REDUCE可读性整理也继续按原计划单独处理。
+
+修改前源码及一次性回归脚本：
+
+`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261028_171800_bench_interface/`
+
+本轮日志、数据产品与比较结果：
+
+`reduced/bench_interface/20261028_171800/`
+
+---
+
 # PLANETES：P2VM 可读性整理，第1步
 
 本轮基于 `2cc9e95`（0.5.1），完成计划中的第1步：整理 p2vm.py 的科学流程与

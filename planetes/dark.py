@@ -8,7 +8,6 @@ import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from .instrument import DetectorSetup
 from .io import keywords as kw
 from .io.fits import read_product
 from .io.raw import iter_raw_cube, read_raw_metadata
@@ -37,7 +36,9 @@ def calibrate_dark_file(
         dark,
         setup=metadata.setup,
         provenance=replace(
-            dark.provenance, inputs={"dark_raw": str(Path(path).absolute())}
+            dark.provenance,
+            inputs={"dark_raw": str(Path(path).absolute())},
+            unverified=tuple(metadata.original.get("unverified", ())),
         ),
     )
     return dark, compute_badpix(dark, threshold=bad_pixel_threshold)
@@ -148,22 +149,15 @@ def load_dark(path: Path) -> Dark:
         if unit != "adu":
             raise ValueError("Dark subtraction expects ADU")
         if data.ndim == 3 and len(data) >= 2:
-            result = compute_dark(
-                np.asarray(data[i : i + 16], dtype=np.float32)
-                for i in range(0, len(data), 16)
-            )
-            setup = (
-                read_raw_metadata(path).setup
-                if kw.FORMAT_KEY in head
-                else DetectorSetup(
-                    width=data.shape[2], height=data.shape[1], legacy=True
-                )
-            )
+            metadata = read_raw_metadata(path, category="DARK_RAW")
+            result = compute_dark(iter_raw_cube(path))
             return replace(
                 result,
-                setup=setup,
+                setup=metadata.setup,
                 provenance=replace(
-                    result.provenance, inputs={"dark_raw": str(path.absolute())}
+                    result.provenance,
+                    inputs={"dark_raw": str(path.absolute())},
+                    unverified=tuple(metadata.original.get("unverified", ())),
                 ),
             )
         if data.ndim == 3 and len(data) == 1:

@@ -1,6 +1,6 @@
 """FLAT step: telescope inputs, extraction aperture, detector response and traces."""
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
 
@@ -33,7 +33,7 @@ PROFILE_WIDTH = 10.0
 
 
 def calibrate_flat_file(
-    telescope_flats: Iterable[Path],
+    telescope_flats: Mapping[str, Path] | Iterable[Path],
     dark: DarkCalibration,
     bad: BadPixelMap,
     *,
@@ -42,18 +42,21 @@ def calibrate_flat_file(
     """Read four telescope flats with their DARK/BAD; return response and geometry.
 
     ``profile_width`` is the full extraction aperture in detector pixels.
+    With incomplete shutter headers, supply an explicit telescope-to-path mapping.
     """
 
     telescope_flats = identify_raw(telescope_flats, "FLAT_RAW")
     unknown = []
     maps = []
-    setup = read_raw_metadata(telescope_flats[TELESCOPES[0]]).setup
+    setup = read_raw_metadata(telescope_flats[TELESCOPES[0]], category="FLAT_RAW").setup
     for name in TELESCOPES:
-        unknown.extend(check_raw_calibrations(telescope_flats[name], dark))
+        unknown.extend(
+            check_raw_calibrations(telescope_flats[name], dark, category="FLAT_RAW")
+        )
 
         unknown.extend(
             check_setup(
-                read_raw_metadata(telescope_flats[name]).setup,
+                read_raw_metadata(telescope_flats[name], category="FLAT_RAW").setup,
                 setup,
                 exposure=False,
                 role="flat sequence",

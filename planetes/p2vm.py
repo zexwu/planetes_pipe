@@ -40,8 +40,8 @@ def calibrate_p2vm_file(
     wave: WavelengthCalibration,
     main_dark: DarkCalibration,
     *,
-    telescope_flats: Iterable[Path],
-    baseline_cubes: Iterable[Path],
+    telescope_flats: Mapping[str, Path] | Iterable[Path],
+    baseline_cubes: Mapping[str, Path] | Iterable[Path],
     phase_reference: Path | None = None,
     phase_dark: DarkCalibration | None = None,
     phase_correction: bool = True,
@@ -487,8 +487,8 @@ def extract_calibration_files(
     wave: WavelengthCalibration,
     main_dark: DarkCalibration,
     *,
-    telescope_flats: Iterable[Path],
-    baseline_cubes: Iterable[Path],
+    telescope_flats: Mapping[str, Path] | Iterable[Path],
+    baseline_cubes: Mapping[str, Path] | Iterable[Path],
     wavelength_m: NDArray,
     phase_reference: Path | None = None,
     phase_dark: DarkCalibration | None = None,
@@ -505,8 +505,14 @@ def extract_calibration_files(
         raise ValueError("phase_dark requires phase_reference")
     extractor = prepare_extraction(flat, wave, wavelength_m)
     unknown = []
-    for path in [*telescope_flats.values(), *baseline_cubes.values()]:
-        unknown.extend(check_raw_calibrations(path, main_dark, flat))
+    for category, paths in (
+        ("FLAT_RAW", telescope_flats),
+        ("P2VM_RAW", baseline_cubes),
+    ):
+        for path in paths.values():
+            unknown.extend(
+                check_raw_calibrations(path, main_dark, flat, category=category)
+            )
     baseline_spectra = np.asarray(
         [extract_file(baseline_cubes[name], extractor, main_dark) for name in BASELINES]
     )

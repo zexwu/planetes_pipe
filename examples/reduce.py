@@ -1,6 +1,6 @@
 """Edit the three directories below, then run this file for instrumental reduction."""
 
-# %% Select standardized raw inputs and a new output directory.
+# %% Select raw inputs and a new output directory (bench values follow the ADU convention).
 from pathlib import Path
 
 from planetes.dark import calibrate_dark_file
@@ -21,10 +21,11 @@ lamp_dark, _ = calibrate_dark_file(calibration_raw / "wave_dark.fits")
 science_dark, _ = calibrate_dark_file(science_raw / "sci_dark.fits")
 
 # %% Calibrate extraction geometry, wavelengths and the instrumental response.
-telescope_flats = [calibration_raw / f"tel{n}.fits" for n in ("4", "3", "2", "1")]
-baseline_cubes = [
-    calibration_raw / f"bsl{n}.fits" for n in ("43", "42", "41", "32", "31", "21")
-]
+# These dictionaries explicitly assign physical identities, even without shutter headers.
+telescope_flats = {n: calibration_raw / f"tel{n}.fits" for n in ("4", "3", "2", "1")}
+baseline_cubes = {
+    n: calibration_raw / f"bsl{n}.fits" for n in ("43", "42", "41", "32", "31", "21")
+}
 flat = calibrate_flat_file(telescope_flats, main_dark, bad)
 wave = calibrate_wavelength_file(calibration_raw / "wave.fits", lamp_dark, flat)
 # Add an explicit phase_reference and matching phase_dark here when available.
@@ -50,4 +51,4 @@ for filename, product in [
     ("planetes_p2vm.fits", p2vm),
     ("planetes_reduced.fits", frames),
 ]:
-    write_product(output / filename, product)
+    write_product(output / filename, product, include_qc=True)

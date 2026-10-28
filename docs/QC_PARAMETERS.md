@@ -7,6 +7,12 @@ QC 计算本身不拼装 FITS keyword，Python 与 CPL 写出共用同一映射�
 `/Users/zexwu/software/gravi_pipeline/gravity-1.9.6/gravi/`；关键词见 gravi_pfits.h。
 SC 仅指本仪器唯一光谱相机。指标名称相同不代表已通过 ESO 的 PLANETES 字典审核。
 
+QC 在发布入口选择：`write_product(..., include_qc=True)` 保留原默认行为，
+`include_qc=False` 跳过 QC 计算和附加。所有正式 recipe 显式选择 `include_qc=True`，
+继续使用相同定义、关键词和不可用原因。`encode_product(..., quality=...)` 只编码
+传入的测量结果；不再在 FITS 编码过程中自动调用 `measure_quality()`。
+独立调用 `measure_quality(product)` 仍可用于台架检查。QC 不改变科学数组或内容指纹。
+
 | 关键词（省略 ESO QC 前缀） | 定义、单位与统计对象 | 参考实现 / 本仪器差异 |
 | --- | --- | --- |
 | MEDIANDARK SC | temporal mean 图像的空间 median，ADU；样本数为全部探测器像素 | gravi_calib.c:183；原始 dark 全帧均值不变 |

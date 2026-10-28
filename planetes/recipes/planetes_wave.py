@@ -59,4 +59,4 @@ class PlanetesWave(ui.PyRecipe):
             reference=cal["LINE_LIST"],
             **options,
         )
-        return save_product("planetes_wave.fits", product, used, self)
+        return save_product("planetes_wave.fits", product, used, self, include_qc=True)

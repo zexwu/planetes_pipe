@@ -14,7 +14,13 @@ from planetes.dark import frame_statistics
 from planetes.io.fits import read_product, write_product
 from planetes.io.publication import destinations
 from planetes.io.raw import iter_raw_cube as iter_cube
-from planetes.io.raw import write_raw
+from planetes.io.raw import (
+    identify_raw,
+    parse_raw_header,
+    read_raw_header,
+    read_raw_metadata,
+    write_raw,
+)
 from planetes.p2vm import compute_p2vm
 from planetes.products import ReducedObservables
 from planetes.reduction import reduce_spectra
@@ -170,8 +176,134 @@ class CalibrationFitsTests(unittest.TestCase):
                 write_product(path, self.wave)
             self.assertEqual(path.read_bytes(), original)
 
+    def test_qc_choice_preserves_scientific_content_and_default_output(self):
+        for include_qc in (True, False):
+            with (
+                self.subTest(include_qc=include_qc),
+                tempfile.TemporaryDirectory() as tmp,
+            ):
+                path = Path(tmp) / "p2vm.fits"
+                if include_qc:
+                    write_product(path, self.p2vm)  # Existing callers keep QC.
+                else:
+                    with patch(
+                        "planetes.qc.measure_quality",
+                        side_effect=AssertionError("QC ran"),
+                    ):
+                        write_product(path, self.p2vm, include_qc=False)
+                actual = read_product(path)
+                np.testing.assert_array_equal(actual.p2vm, self.p2vm.p2vm)
+                self.assertEqual(
+                    actual.provenance.dependencies, self.p2vm.provenance.dependencies
+                )
+                with fits.open(path) as hdus:
+                    self.assertEqual(
+                        "ESO QC P2VM_COHERENCE_AVG_SC" in hdus[0].header, include_qc
+                    )
+                self.assertEqual(bool(actual.provenance.qc_status), include_qc)
+
 
 class RawFitsTests(unittest.TestCase):
+    def test_bench_cubes_keep_missing_metadata_and_all_frames(self):
+        cube = np.arange(17 * 3 * 5, dtype=np.int16).reshape(17, 3, 5)
+        for primary in (True, False):
+            with self.subTest(primary=primary), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "bench.fits"
+                hdus = (
+                    [fits.PrimaryHDU(cube)]
+                    if primary
+                    else [fits.PrimaryHDU(), fits.ImageHDU(cube)]
+                )
+                fits.HDUList(hdus).writeto(path)
+                original = path.read_bytes()
+                raw = read_raw_metadata(path, category="DARK_RAW")
+                self.assertIsNone(raw.shutters)
+                self.assertIsNone(raw.setup.exposure_s)
+                self.assertEqual((raw.setup.height, raw.setup.width), (3, 5))
+                self.assertTrue(raw.setup.legacy)
+                self.assertIn("RAW.BUNIT", raw.original["unverified"])
+                self.assertNotIn("ESO DET WIN1 DIT1", read_raw_header(path))
+                chunks = list(iter_cube(path))
+                self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
+                np.testing.assert_array_equal(np.concatenate(chunks), cube)
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_multiple_cubes_require_an_explicit_hdu(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "two_cubes.fits"
+            cube = np.ones((2, 3, 5))
+            fits.HDUList(
+                [fits.PrimaryHDU(cube), fits.ImageHDU(7 * cube, name="DETECTOR")]
+            ).writeto(path)
+            with self.assertRaisesRegex(ValueError, "Multiple raw detector cubes"):
+                read_raw_metadata(path, category="DARK_RAW")
+            with self.assertRaisesRegex(ValueError, "Multiple raw detector cubes"):
+                list(iter_cube(path))
+            read_raw_metadata(path, category="DARK_RAW", hdu="DETECTOR")
+            np.testing.assert_array_equal(
+                next(iter_cube(path, hdu="DETECTOR")), 7 * cube
+            )
+
+    def test_known_non_adu_values_are_rejected_before_processing(self):
+        for primary_unit in (True, False):
+            with (
+                self.subTest(primary_unit=primary_unit),
+                tempfile.TemporaryDirectory() as tmp,
+            ):
+                path = Path(tmp) / "electrons.fits"
+                hdus = fits.HDUList(
+                    [fits.PrimaryHDU(), fits.ImageHDU(np.ones((2, 3, 5)))]
+                )
+                hdus[0 if primary_unit else 1].header["BUNIT"] = "electron"
+                hdus.writeto(path)
+                with self.assertRaisesRegex(ValueError, "must be ADU"):
+                    read_raw_metadata(path, category="DARK_RAW")
+                with self.assertRaisesRegex(ValueError, "must be ADU"):
+                    list(iter_cube(path))
+
+    def test_bench_header_reads_known_values_and_rejects_contradictions(self):
+        header = fits.Header({"ESO DET WIN1 DIT1": 0.02, "ESO DET WIN1 STRX": 5})
+        raw = parse_raw_header(header, (2, 3, 5), category="FLAT_RAW")
+        self.assertEqual(raw.setup.exposure_s, 0.02)
+        self.assertEqual(raw.setup.origin_x, 4)
+        self.assertIsNone(raw.setup.binning_x)
+        for key, value in (
+            ("ESO DET WIN1 DIT1", -1),
+            ("ESO DET WIN1 NX", 6),
+            ("PLANETES INS SHUT1 ST", "OPEN"),
+            ("ESO DPR TYPE", "DARK"),
+        ):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                parse_raw_header(
+                    fits.Header({**dict(header), key: value}),
+                    (2, 3, 5),
+                    category="FLAT_RAW",
+                )
+
+    def test_explicit_identity_mapping_checks_partial_shutter_readback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {}
+            for index, identity in enumerate(("2", "4", "1", "3")):
+                path = Path(tmp) / f"arbitrary_{index}.fits"
+                fits.PrimaryHDU(np.ones((2, 3, 5))).writeto(path)
+                paths[identity] = path
+            self.assertEqual(identify_raw(paths, "FLAT_RAW"), paths)
+            with self.assertRaisesRegex(ValueError, "explicit identity mapping"):
+                identify_raw(paths.values(), "FLAT_RAW")
+            with fits.open(paths["4"], mode="update") as hdus:
+                hdus[0].header["HIERARCH PLANETES INS SHUT1 ST"] = True
+            with self.assertRaisesRegex(ValueError, "conflicts with recorded shutters"):
+                identify_raw(paths, "FLAT_RAW")
+
+    def test_versioned_raw_cannot_fall_back_to_provisional_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "incomplete.fits"
+            hdu = fits.PrimaryHDU(np.ones((2, 3, 5)))
+            hdu.header["HIERARCH PLANETES FORMAT"] = 3
+            hdu.writeto(path)
+            with self.assertRaisesRegex(ValueError, "complete PLANETES raw format"):
+                read_raw_metadata(path, category="DARK_RAW")
+
     def test_fits_cube_iteration_and_statistics_use_the_full_cube(self) -> None:
         cube = np.arange(17 * 3 * 5, dtype=np.int16).reshape(17, 3, 5)
 

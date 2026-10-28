@@ -13,6 +13,7 @@ from planetes.io.fits import (
 )
 from planetes.io.keywords import CATEGORIES, PRO_CATEGORY
 from planetes.io.publication import destinations
+from planetes.qc import measure_quality
 from planetes.products import (
     P2VMCalibration,
     ReducedObservables,
@@ -76,7 +77,7 @@ def select_inputs(frameset, required, optional=None, *, multiple=None):
     return paths, objects, used
 
 
-def save_products(outputs, used, recipe):
+def save_products(outputs, used, recipe, *, include_qc: bool = True):
     """Sign all outputs before publication; rollback only newly owned links on failure."""
     prepared = []
     for output, product in outputs:
@@ -101,7 +102,8 @@ def save_products(outputs, used, recipe):
                 f"planetes/{__version__}",
                 str(path),
             )
-            fill_dfs_product(path, product)
+            quality = measure_quality(product) if include_qc else None
+            fill_dfs_product(path, product, quality=quality)
             products.append(
                 ui.Frame(
                     file=str(path),
@@ -126,12 +128,12 @@ def save_products(outputs, used, recipe):
     )
 
 
-def save_product(output, product, used, recipe):
+def save_product(output, product, used, recipe, *, include_qc: bool = True):
     """Single-product call using the same multi-output publication boundary."""
-    return save_products([(output, product)], used, recipe)
+    return save_products([(output, product)], used, recipe, include_qc=include_qc)
 
 
-def fill_dfs_product(path: Path, product):
+def fill_dfs_product(path: Path, product, *, quality=None):
     """Fill only a freshly created DFS stub with the shared payload encoding."""
     with afits.open(path) as hdus:
         if (
@@ -141,7 +143,7 @@ def fill_dfs_product(path: Path, product):
             or "ESO PRO REC1 ID" not in hdus[0].header
         ):
             raise ValueError("Expected a new empty DFS product")
-        encoded = encode_product(product, hdus[0].header)
+        encoded = encode_product(product, hdus[0].header, quality=quality)
     with afits.open(path, mode="update") as hdus:
         hdus[0].header = encoded[0].header
         for item in encoded[1:]:

@@ -177,6 +177,23 @@ class P2VMRecipeTests(unittest.TestCase):
         )
         self.recipe = PlanetesP2VM()
 
+    def test_dfs_input_selection_does_not_inspect_science_result(self):
+        for correction in (True, False):
+            with (
+                self.subTest(phase_correction=correction),
+                patch(
+                    "planetes.recipes.planetes_p2vm.calibrate_p2vm_file",
+                    return_value=object(),
+                ),
+                patch("planetes.recipes.planetes_p2vm.save_product") as save,
+            ):
+                self.recipe.run(
+                    self.frames, {"planetes.calib.phase-correction": correction}
+                )
+                tags = {frame.tag for frame in save.call_args.args[2]}
+                self.assertEqual("PHASE_REFERENCE" in tags, correction)
+                self.assertEqual("PHASE_DARK_CALIB" in tags, correction)
+
     def test_shuffled_tagged_inputs_match_direct_scientific_calculation(self):
         flat = read_product(self.paths["FLAT"], FlatCalibration)
         wave = read_product(self.paths["WAVE"], WavelengthCalibration)
@@ -211,6 +228,7 @@ class P2VMRecipeTests(unittest.TestCase):
             self.assertEqual(header["ESO PRO REC1 PARAM1 VALUE"], "true")
             self.assertTrue(actual.provenance.parameters["phase_reference_applied"])
             self.assertTrue(header["DATAMD5"])
+            self.assertIn("ESO QC P2VM_COHERENCE_AVG_SC", header)
             self.assertFalse(any(key.startswith("ESO DPR ") for key in header))
             recorded = [value for key, value in header.items() if key.endswith(" NAME")]
             for _, path in input_rows(self.paths):
@@ -410,3 +428,25 @@ class DFSFailureTests(unittest.TestCase):
             flat = read_product(Path("planetes_flat.fits"))
             self.assertEqual(flat.provenance.parameters["profile_width"], 3.5)
             self.assertEqual(flat.profile_x_pixels.shape[0], 24)
+            from planetes.flat import calibrate_flat_file
+
+            bench = {}
+            for name in ("4", "3", "2", "1"):
+                path = Path(f"bench_{name}.fits")
+                fits.PrimaryHDU(image[None] + dark).writeto(path)
+                bench[name] = path
+            measured = calibrate_flat_file(
+                bench,
+                read_product(Path("planetes_dark.fits")),
+                read_product(Path("planetes_bad.fits")),
+                profile_width=3.5,
+            )
+            for field in fields(flat):
+                original, actual = (
+                    getattr(flat, field.name),
+                    getattr(measured, field.name),
+                )
+                if isinstance(original, np.ndarray):
+                    np.testing.assert_array_equal(actual, original)
+            self.assertIsNone(measured.setup.exposure_s)
+            self.assertIn("RAW.BUNIT", measured.provenance.unverified)

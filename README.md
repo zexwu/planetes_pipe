@@ -37,6 +37,8 @@ pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes/recipes planetes_
 Use a new directory per invocation. Fill the absolute paths in `examples/*.sof.in`
 before using them. Tags describe categories; repeated FLAT_RAW/P2VM_RAW entries are
 identified by physical shutter metadata, independently of order and filenames.
+SOF categories are unchanged. For bench files without shutter readback, use the
+explicit Python identity mappings below.
 
 | Recipe | Required SOF roles | Optional roles | Output |
 | --- | --- | --- | --- |
@@ -91,8 +93,8 @@ raw = Path('/absolute/raw')
 main_dark, bad = calibrate_dark_file(raw / 'dark.fits')
 wave_dark, _ = calibrate_dark_file(raw / 'wave_dark.fits')
 science_dark, _ = calibrate_dark_file(raw / 'sci_dark.fits')
-telescopes = [raw / f'tel{n}.fits' for n in ('4', '3', '2', '1')]
-baselines = [raw / f'bsl{n}.fits' for n in ('43', '42', '41', '32', '31', '21')]
+telescopes = {n: raw / f'tel{n}.fits' for n in ('4', '3', '2', '1')}
+baselines = {n: raw / f'bsl{n}.fits' for n in ('43', '42', '41', '32', '31', '21')}
 flat = calibrate_flat_file(telescopes, main_dark, bad)
 wave = calibrate_wavelength_file(raw / 'wave.fits', wave_dark, flat)
 p2vm = calibrate_p2vm_file(
@@ -105,8 +107,25 @@ write_product(Path('/absolute/new-output/planetes_reduced.fits'), result)
 For an instrumental phase reference, explicitly pass its raw path as
 `phase_reference` and its selected DARK as `phase_dark` to `calibrate_p2vm_file`.
 
+Unversioned bench FITS may store their cube in the primary or an image extension
+and omit unfinished acquisition keywords. Known exposure, ROI and shutter
+contradictions still fail; missing metadata stays unknown. The dictionaries above
+state physical identities explicitly: filenames and list order never assign them.
+Lists remain supported when the headers record all four shutter states.
+
+The reader selects `IMAGING_DATA_SC` when present, otherwise the unique 3-D image.
+Multiple unnamed cubes require `hdu=...` in the low-level `read_raw_metadata()` and
+`iter_raw_cube()` calls. Values must follow the bench ADU convention: absent BUNIT
+is recorded as `RAW.BUNIT` in unverified provenance; a declared different unit is
+rejected. `read_raw_header()` returns the unchanged primary header. Files declaring
+raw format 3 still require their complete metadata and named detector extension.
+
 Save each calibration with the same `write_product` function when needed. Read it
-with `read_product(path, ExpectedClass)` from `planetes.io.fits`. For single frames:
+with `read_product(path, ExpectedClass)` from `planetes.io.fits`. QC is retained by
+default; `write_product(path, product, include_qc=False)` saves without computing
+QC. Formal recipes explicitly retain QC. The FITS encoder only serializes supplied
+measurements; `qc.measure_quality(product)` is available independently.
+For single frames:
 
 ```python
 from planetes.reduction import FrameReducer

@@ -66,8 +66,8 @@ def _detector(product):
     return _table(kw.DETECTOR_DATA, [_column("REGNAME", np.asarray(labels))])
 
 
-def encode_product(product, header=None):
-    """Encode GRAVITY-derived fields and named necessary PLANETES extensions."""
+def encode_product(product, header=None, *, quality=None):
+    """Encode arrays and supplied QC measurements without running scientific diagnostics."""
     validate(product)
     if type(product) not in CATEGORIES:
         raise TypeError(
@@ -264,31 +264,30 @@ def encode_product(product, header=None):
         if getattr(product, "setup", None) is not None
         else None,
     }
+    if quality is not None:
+        measurements, missing = quality
+        for metric, (number, comment) in measurements.items():
+            hdus[0].header["HIERARCH " + kw.QC_KEYWORDS[metric]] = (number, comment)
+            if metric in (
+                "wavelength_min_m",
+                "wavelength_max_m",
+                "wavelength_residual_std_m",
+            ):
+                key = kw.QC_KEYWORDS[metric].replace(" SC", " UM SC")
+                hdus[0].header["HIERARCH " + key] = (
+                    number * 1e6,
+                    comment.replace("[m]", "[um]"),
+                )
+        metadata["provenance"]["qc_status"] = {
+            **info["qc_status"],
+            **{
+                kw.QC_STATUS_KEYS.get(
+                    metric, kw.QC_KEYWORDS.get(metric, metric)
+                ): reason
+                for metric, reason in missing.items()
+            },
+        }
     hdus.append(_json_hdu(kw.META_EXT, metadata))
-    # The same QC measurements are written for Python and CPL products.
-    from ..qc import measure_quality
-
-    quality, missing = measure_quality(product)
-    for metric, (number, comment) in quality.items():
-        hdus[0].header["HIERARCH " + kw.QC_KEYWORDS[metric]] = (number, comment)
-        if metric in (
-            "wavelength_min_m",
-            "wavelength_max_m",
-            "wavelength_residual_std_m",
-        ):
-            key = kw.QC_KEYWORDS[metric].replace(" SC", " UM SC")
-            hdus[0].header["HIERARCH " + key] = (
-                number * 1e6,
-                comment.replace("[m]", "[um]"),
-            )
-    metadata["provenance"]["qc_status"] = {
-        **info["qc_status"],
-        **{
-            kw.QC_STATUS_KEYS.get(metric, kw.QC_KEYWORDS.get(metric, metric)): reason
-            for metric, reason in missing.items()
-        },
-    }
-    hdus[-1] = _json_hdu(kw.META_EXT, metadata)
     return afits.HDUList(hdus)
 
 
@@ -470,8 +469,11 @@ def read_product(path: Path, cls=None):
         return product
 
 
-def write_product(path: Path, product):
-    """Explicitly save one scientific product, preserving all existing destinations."""
-    encoded = encode_product(product)
+def write_product(path: Path, product, *, include_qc: bool = True):
+    """Save a product with optional descriptive QC; existing destinations are preserved."""
+    from ..qc import measure_quality
+
+    quality = measure_quality(product) if include_qc else None
+    encoded = encode_product(product, quality=quality)
     with destinations([path], verify=read_product) as temporary:
         encoded.writeto(temporary[0], checksum=True)

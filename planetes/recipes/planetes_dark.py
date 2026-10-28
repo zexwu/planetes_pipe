@@ -39,5 +39,8 @@ class PlanetesDark(ui.PyRecipe):
         paths, _, used = select_inputs(frameset, {"DARK_RAW": None})
         dark, bad = calibrate_dark_file(paths["DARK_RAW"], **options)
         return save_products(
-            [("planetes_dark.fits", dark), ("planetes_bad.fits", bad)], used, self
+            [("planetes_dark.fits", dark), ("planetes_bad.fits", bad)],
+            used,
+            self,
+            include_qc=True,
         )
