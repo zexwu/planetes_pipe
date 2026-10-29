@@ -52,5 +52,8 @@ class PlanetesWave(ui.PyRecipe):
             paths["WAVELAMP_RAW"][0], dark, flat, reference=reference, **options
         )
         return save_products(
-            [("planetes_wave.fits", product, measure_quality(product))], used, self
+            [("planetes_wave.fits", product, measure_quality(product))],
+            used,
+            self,
+            reference=paths["WAVELAMP_RAW"][0],
         )

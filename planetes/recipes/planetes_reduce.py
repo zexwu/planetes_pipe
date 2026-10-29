@@ -60,5 +60,8 @@ class PlanetesReduce(ui.PyRecipe):
             paths["SINGLE_SCI_RAW"][0], dark, flat, wave, p2vm, **options
         )
         return save_products(
-            [("planetes_reduced.fits", product, measure_quality(product))], used, self
+            [("planetes_reduced.fits", product, measure_quality(product))],
+            used,
+            self,
+            reference=paths["SINGLE_SCI_RAW"][0],
         )

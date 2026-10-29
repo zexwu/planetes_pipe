@@ -1,5 +1,24 @@
 # PLANETES 0.15.0：让I/O直接表达读了什么、写了什么
 
+## 后续维护：保留 raw 文件名中的时间信息
+
+在 mba 的 `/Users/zexwu/PLANETES_new/planetes_pipe` 开发。默认命名沿用
+GRAVITY 的 reference-raw 规则：完整 raw stem 加小写、去下划线的 PRO CATG。
+五种 recipe 显式选择命名参考：DARK/BAD、WAVE 和 science 分别使用本步 raw；
+FLAT 使用 T4，P2VM 使用 43 基线，使 SOF 排序不影响文件名。DFS header
+也从同一份 reference raw 继承，保留已有 DATE-OBS 等观测时间卡。
+`--static-name=true` 保留此前固定名称，不改变禁止覆盖的写入行为。
+
+Python 增加 `product_filename(reference, product)`，示例和 SOF 模板同步更新。
+`write_product` 仍严格使用调用者给定的路径，不自动改名。时间戳、毫秒和
+`TUNKNOWN.000x` 按原样保留，不从当前时间或 mtime 补造 DATE-OBS/时区。
+
+在 mba 建立独立 `.venv` 与 CPL 7.4 安装，使用 Python 3.13.11、PyCPL
+1.0.4.post1、PyEsoRex 1.0.4。17 项测试全部通过，无跳过；涵盖动态/固定命名、
+反序 SOF 的 P2VM 参考选择、科学数组和 DFS 输入记录。Ruff 与格式检查通过。
+另只读核对 `2026_02_05/raw` 的物理 header 和 8 个已有产品，确认命名对应关系。
+科学计算未改，已有 raw/product 未重命名或覆盖，bench 环境未修改。
+
 ## 后续维护：尺寸检查、ESO日志与函数说明
 
 基于 `276c1ff`，补齐两处实际运行问题：FLAT 在减暗前核对 DARK 数组尺寸，

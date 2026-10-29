@@ -6,11 +6,12 @@ from astropy.io import fits as afits
 from cpl import core, dfs, ui
 
 from planetes import __version__
-from planetes.io.fits import encode_product
+from planetes.io.fits import encode_product, product_filename
 from planetes.io.keywords import CATEGORIES, PRO_CATEGORY, RAW_TYPES
 from planetes.io.hdu import new_fits_file
 from planetes.io.raw import read_raw_metadata
 from planetes.products import P2VM, P2VMRed, Wave, WavelengthReference
+from planetes.recipes.parameters import STATIC_NAME
 
 
 def cpl_frame_type(cls):
@@ -117,18 +118,24 @@ def read_shutter_id(path: Path, category: str) -> str:
     return "".join(str(n) for n in range(4, 0, -1) if raw.shutters[n - 1])
 
 
-def save_products(outputs, used, recipe):
+def save_products(outputs, used, recipe, *, reference: Path):
     """Write, sign and register the products of one ESO recipe invocation.
 
     Parameters
     ----------
     outputs : iterable of tuple
-        (filename, product, quality) for each output. quality is the already
-        measured QC mapping or None; no statistics are computed by the writer.
+        (static_filename, product, quality) for each output. The fixed name is
+        used only with static-name=True. quality is the already measured QC
+        mapping or None; no statistics are computed by the writer.
     used : cpl.ui.FrameSet
         Actual raw/calibration inputs used by the recipe, excluding disabled inputs.
     recipe : cpl.ui.PyRecipe
         Recipe name and current ParameterList for DFS provenance recording.
+    reference : Path
+        Raw input used for output naming and DFS header inheritance. Its stem is
+        preserved, including any timestamp or UNKNOWN marker. Recipes choose a
+        fixed physical input for multi-file calibrations, independently of SOF
+        order. Existing observation-time cards are inherited without invention.
 
     Returns
     -------
@@ -142,8 +149,19 @@ def save_products(outputs, used, recipe):
     file is published. Existing paths are never overwritten. A later failure does
     not remove an earlier completed output.
     """
+    inherit = next(frame for frame in used if Path(frame.file) == reference)
+    # CPL takes primary observation cards from the first RAW even when inherit
+    # is supplied. GRAVITY puts its reference first for this same reason.
+    used = ui.FrameSet(
+        [inherit] + [frame for frame in used if Path(frame.file) != reference]
+    )
     products = ui.FrameSet()
-    for output, product, quality in outputs:
+    for static_filename, product, quality in outputs:
+        output = (
+            static_filename
+            if recipe.parameters[STATIC_NAME].value
+            else product_filename(reference, product)
+        )
         with new_fits_file(output) as path:
             properties = core.PropertyList()
             properties.append(
@@ -157,6 +175,7 @@ def save_products(outputs, used, recipe):
                 properties,
                 f"planetes/{__version__}",
                 str(path),
+                inherit=inherit,
             )
             with afits.open(path, mode="update") as hdus:
                 encoded = encode_product(product, hdus[0].header, quality=quality)

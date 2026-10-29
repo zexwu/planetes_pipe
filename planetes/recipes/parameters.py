@@ -4,6 +4,8 @@ from inspect import signature
 
 from cpl import ui
 
+STATIC_NAME = "planetes.dfs.static-name"
+
 
 def make_parameters(definitions, function):
     """Declare CPL parameters using the scientific function's existing defaults.
@@ -18,7 +20,8 @@ def make_parameters(definitions, function):
     Returns
     -------
     parameters : cpl.ui.ParameterList
-        Executor-facing parameters with explicit aliases and shared Python defaults.
+        Executor-facing science parameters with shared Python defaults, followed by
+        the common static-name output option (False by default).
     """
     defaults = signature(function).parameters
     parameters = []
@@ -32,6 +35,14 @@ def make_parameters(definitions, function):
         )
         parameter.cli_alias = alias
         parameters.append(parameter)
+    static_name = ui.ParameterValue(
+        name=STATIC_NAME,
+        context="planetes.dfs",
+        description="Use fixed recipe output names instead of reference raw filenames",
+        default=False,
+    )
+    static_name.cli_alias = "static-name"
+    parameters.append(static_name)
     return ui.ParameterList(parameters)
 
 

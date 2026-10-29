@@ -150,7 +150,7 @@ def build_flat(
 
     log.info("Building sparse extraction profiles...")
     for i, ref_y in enumerate(ref_ys):
-        log.debug(f"    Tracing spectrum {i+1}/{n_outputs} at Y={ref_y}...")
+        log.debug(f"    Tracing spectrum {i + 1}/{n_outputs} at Y={ref_y}...")
         xs = np.arange(w)
         ys, ys_err, sigma = trace_spectrum(
             flat_map, bad_map, ref_x=w // 2, ref_y=ref_y, range_y=h_half

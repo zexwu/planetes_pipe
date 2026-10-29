@@ -1,5 +1,5 @@
-/absolute/dark-output/planetes_dark.fits DARK
-/absolute/dark-output/planetes_bad.fits BAD
+/absolute/dark-output/dark_dark.fits DARK
+/absolute/dark-output/dark_bad.fits BAD
 /absolute/raw/tel4.fits FLAT_RAW
 /absolute/raw/tel3.fits FLAT_RAW
 /absolute/raw/tel2.fits FLAT_RAW

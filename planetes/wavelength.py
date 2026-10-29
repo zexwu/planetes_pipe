@@ -207,7 +207,7 @@ def fit_wavelength_solution(
     deg = SURFACE_DEGREE
     log.info("Fitting 2D wavelength solution...")
     design = surface_design_matrix(fit_x, fit_y, max_deg=deg)
-    terms = [f"x{d-i}y{i}" for d in range(deg + 1) for i in range(d + 1)]
+    terms = [f"x{d - i}y{i}" for d in range(deg + 1) for i in range(d + 1)]
     log.debug("Kernel used for wavelength_map_m fit: ")
     log.debug(", ".join(terms))
     coeffs, _, _, _ = np.linalg.lstsq(design, fit_wave_m, rcond=None)

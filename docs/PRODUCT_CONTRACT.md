@@ -163,7 +163,8 @@ in the calling script; they do not build a product provenance graph.
 
 ## Parameters
 
-Each recipe declares canonical names and aliases locally. Scientific parameters
+Each recipe declares scientific parameter names and aliases locally. The common
+`planetes.dfs.static-name` output option is declared in `recipes/parameters.py`. Scientific parameters
 are listed in its `PARAMETERS` dictionary; the P2VM file-selection switch
 `phase-correction` is declared directly on that recipe.
 Python step functions own scientific arguments, units and defaults.
@@ -225,3 +226,20 @@ separate from Gaussian sigma. Its existing CPL name/alias remains
 differential phase together: True for complete file reduction, False by default
 for FrameReducer preview. The deleted wavelength-grid helper is replaced by
 `np.linspace` at the call site; the fit retains its central-band sampling check.
+
+## Product filenames
+
+`io.fits.product_filename(reference_raw, product)` preserves the raw filename
+stem and appends the lowercase `ESO PRO CATG` with underscores removed, following
+GRAVITY's dynamic naming convention. A `TUNKNOWN.0006` marker stays literal;
+names do not establish a UTC observation time or create a `DATE-OBS` value.
+
+Recipes default to dynamic names (`planetes.dfs.static-name=False`, CLI
+`--static-name`). DARK/BAD anchor to DARK_RAW, WAVE to WAVELAMP_RAW, and science
+to SINGLE_SCI_RAW. FLAT uses the T4 raw and P2VM the 43-baseline raw, selected by
+physical identity independently of SOF order. DFS header inheritance uses this
+same reference, preserving its existing observation-time cards. `--static-name=true` retains the
+fixed `planetes_*.fits` output names listed in README. It does not allow overwrites.
+
+Python scripts choose the reference explicitly and pass the resulting path to
+`write_product`. Existing explicit paths are honored without automatic renaming.

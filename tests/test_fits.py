@@ -10,7 +10,7 @@ from astropy.io import fits
 from p2vm_fixture import calibration_arrays, calibration_spectra, metadata, write_raw
 
 from planetes.dark import detect_bad_pixels, measure_dark
-from planetes.io.fits import read_product, write_product
+from planetes.io.fits import product_filename, read_product, write_product
 from planetes.io.hdu import as_compute_array
 from planetes.io.raw import iter_raw_cube as iter_cube
 from planetes.io.raw import read_raw_metadata
@@ -28,6 +28,23 @@ class ScienceProductTests(unittest.TestCase):
         science = calibration_arrays(n_wave=15)[2]
         science[:, 0] = 0
         cls.product = reduce_spectra(science, p2vm)
+
+    def test_product_filename_preserves_reference_identity(self):
+        for stem in (
+            "PLANETES.2026-02-05T210609",
+            "PLANETES.2026-02-05T21:06:09.123",
+            "PLANETES.2026-02-05TUNKNOWN.0006",
+        ):
+            with self.subTest(stem=stem):
+                reference = Path("/unread/raw") / f"{stem}.fits"
+                self.assertEqual(
+                    product_filename(reference, self.product),
+                    f"{stem}_singlescip2vmred.fits",
+                )
+                self.assertEqual(
+                    product_filename(reference, Dark(np.zeros((2, 3)))),
+                    f"{stem}_dark.fits",
+                )
 
     def test_complex_flux_and_flags_preserve_storage_precision(self):
         coherent = self.product.coherent_flux_adu.copy()

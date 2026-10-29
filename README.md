@@ -25,9 +25,8 @@ Use a separate environment and an explicit CPL prefix:
 UV_PROJECT_ENVIRONMENT=/path/to/new-venv CPLDIR=/path/to/cpl uv sync --locked --extra eso
 ```
 
-The local validated executor is `reduced/eso_pilot/runtime/venv/bin/pyesorex`:
-Python 3.13, CPL 7.4, PyCPL 1.0.4.post1 and PyEsoRex 1.0.4. The original `.venv`
-is retained. Qt and PyCPL are optional; the numerical modules import neither.
+The ESO recipe tests use Python 3.13, CPL 7.4, PyCPL 1.0.4.post1 and PyEsoRex
+1.0.4. Qt and PyCPL are optional; the numerical modules import neither.
 
 ## Run with PyEsoRex
 
@@ -44,13 +43,33 @@ identified by physical shutter metadata, independently of order and filenames.
 SOF categories are unchanged. For bench files without shutter readback, use the
 explicit Python identity mappings below.
 
-| Recipe | Required SOF roles | Optional roles | Output |
+| Recipe | Required SOF roles | Optional roles | Output with `--static-name=true` |
 | --- | --- | --- | --- |
 | `planetes_dark` | `DARK_RAW` | — | `planetes_dark.fits` + `planetes_bad.fits` |
 | `planetes_flat` | `DARK`, `BAD`, `FLAT_RAW` × 4 | — | `planetes_flat.fits` |
 | `planetes_wave` | `DARK`, `FLAT`, `WAVELAMP_RAW` | `LINE_LIST` | `planetes_wave.fits` |
 | `planetes_p2vm` | `DARK`, `FLAT`, `WAVE`, `FLAT_RAW` × 4, `P2VM_RAW` × 6 | `PHASE_REFERENCE`, `PHASE_DARK_CALIB` | `planetes_p2vm.fits` |
 | `planetes_reduce` | `DARK`, `FLAT`, `WAVE`, `P2VM`, `SINGLE_SCI_RAW` | — | `planetes_reduced.fits` |
+
+Default product names follow GRAVITY's reference-raw convention:
+`<raw stem>_<PRO CATG lowercased without underscores>.fits`. The raw stem is
+kept exactly, including timestamps, fractional seconds and explicit `UNKNOWN`
+markers. For example:
+
+```text
+PLANETES.2026-02-05T210609.fits
+→ PLANETES.2026-02-05T210609_singlescip2vmred.fits
+PLANETES.2026-02-05TUNKNOWN.0006.fits
+→ PLANETES.2026-02-05TUNKNOWN.0006_p2vm.fits
+```
+
+DARK/BAD use their DARK_RAW input, WAVE uses WAVELAMP_RAW, and science uses
+SINGLE_SCI_RAW. FLAT explicitly uses the T4 flat and P2VM uses the 43-baseline
+scan; changing SOF order therefore does not change their product names.
+The same raw supplies the inherited DFS header, including observation-time
+cards when present. `--static-name=true` selects the fixed names in the table above. No observation
+time or timezone is invented from the current clock, file mtime or UNKNOWN text.
+The SOF templates use dynamic names derived from their example raw filenames.
 
 `Dark` always contains `mean_adu`; `temporal_rms_adu` and `n_frames` are None
 when unknown. One measured frame has `n_frames=1` and no measured RMS; a standalone
@@ -99,7 +118,7 @@ from planetes.flat import make_flat
 from planetes.wavelength import make_wave, wavelength_reference_path
 from planetes.p2vm import make_p2vm
 from planetes.reduction import reduce_science
-from planetes.io.fits import read_product, write_product
+from planetes.io.fits import product_filename, read_product, write_product
 from planetes.products import WavelengthReference
 from planetes.qc import measure_quality
 
@@ -117,7 +136,8 @@ p2vm = make_p2vm(
 )
 p2vmred = reduce_science(raw / 'sci.fits', science_dark, flat, wave, p2vm)
 write_product(
-    Path('/absolute/new-output/planetes_reduced.fits'), p2vmred,
+    Path('/absolute/new-output') / product_filename(raw / 'sci.fits', p2vmred),
+    p2vmred,
     quality=measure_quality(p2vmred),
 )
 ```
@@ -176,8 +196,13 @@ Read calibrations with `read_product(path, ExpectedClass)`. Save them with
 
 ```python
 quality = measure_quality(product)
+path = output_directory / product_filename(reference_raw, product)
 write_product(path, product, quality=quality)
 ```
+
+`product_filename` is shared with the recipes and preserves the selected raw
+stem. `write_product` still uses exactly the path supplied by the caller; it
+neither renames explicit destinations nor chooses a reference raw implicitly.
 
 The writer only encodes its inputs. Recipes explicitly measure the existing QC
 set before calling the DFS writer. `qc.measure_quality(product)` returns available
@@ -269,10 +294,11 @@ local names and table alignment.
 [Simplification notes](docs/SIMPLIFICATION.md) explain the product interfaces.
 [Change report and diagrams](docs/CHANGE_REPORT.md) record the migration and
 full-data evidence. [Scientific methods](docs/SCIENTIFIC_METHODS.md) describe retained numerical
-definitions. The 15 focused tests cover core scientific calculations, a synthetic
+definitions. The 17 focused tests cover core scientific calculations, a synthetic
 raw DARK→FLAT→WAVE chain with known traces and dispersion, rejection of mismatched
 DARK dimensions, bench P2VM inputs, FITS round trips/non-overwriting writes and
-optional PyEsoRex P2VM-to-science/logging checks. One-off migration scripts
+timestamp/UNKNOWN filename preservation and optional PyEsoRex
+P2VM-to-science/logging and dynamic/static naming checks. One-off migration scripts
 and logs are kept in Git history and the local archive referenced in the report.
 
 ```bash

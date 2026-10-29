@@ -49,5 +49,8 @@ class PlanetesFlat(ui.PyRecipe):
         flats = {read_shutter_id(path, "FLAT_RAW"): path for path in paths["FLAT_RAW"]}
         product = make_flat(flats, dark, bad, **options)
         return save_products(
-            [("planetes_flat.fits", product, measure_quality(product))], used, self
+            [("planetes_flat.fits", product, measure_quality(product))],
+            used,
+            self,
+            reference=flats["4"],
         )

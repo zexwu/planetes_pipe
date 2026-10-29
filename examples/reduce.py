@@ -5,7 +5,7 @@ from pathlib import Path
 
 from planetes.dark import make_dark_products
 from planetes.flat import make_flat
-from planetes.io.fits import read_product, write_product
+from planetes.io.fits import product_filename, read_product, write_product
 from planetes.p2vm import make_p2vm
 from planetes.reduction import reduce_science
 from planetes.products import WavelengthReference
@@ -44,14 +44,17 @@ p2vm = make_p2vm(
 p2vmred = reduce_science(science_raw / "sci.fits", science_dark, flat, wave, p2vm)
 
 # %% Save the selected calibrations and per-frame instrumental observables.
-for filename, product in [
-    ("planetes_dark.fits", main_dark),
-    ("planetes_bad.fits", bad),
-    ("planetes_lamp_dark.fits", lamp_dark),
-    ("planetes_science_dark.fits", science_dark),
-    ("planetes_flat.fits", flat),
-    ("planetes_wave.fits", wave),
-    ("planetes_p2vm.fits", p2vm),
-    ("planetes_reduced.fits", p2vmred),
+# Keep the selected raw stem, including its timestamp or UNKNOWN marker.
+# Fixed physical anchors make FLAT/P2VM names independent of dictionary order.
+for reference_path, product in [
+    (calibration_raw / "dark.fits", main_dark),
+    (calibration_raw / "dark.fits", bad),
+    (calibration_raw / "wave_dark.fits", lamp_dark),
+    (science_raw / "sci_dark.fits", science_dark),
+    (telescope_flats["4"], flat),
+    (calibration_raw / "wave.fits", wave),
+    (baseline_cubes["43"], p2vm),
+    (science_raw / "sci.fits", p2vmred),
 ]:
+    filename = product_filename(reference_path, product)
     write_product(output / filename, product, quality=measure_quality(product))

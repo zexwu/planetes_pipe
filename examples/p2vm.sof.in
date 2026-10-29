@@ -1,6 +1,6 @@
-/absolute/dark-output/planetes_dark.fits DARK
-/absolute/flat-output/planetes_flat.fits FLAT
-/absolute/wave-output/planetes_wave.fits WAVE
+/absolute/dark-output/dark_dark.fits DARK
+/absolute/flat-output/tel4_flat.fits FLAT
+/absolute/wave-output/wave_wave.fits WAVE
 /absolute/raw/tel4.fits FLAT_RAW
 /absolute/raw/tel3.fits FLAT_RAW
 /absolute/raw/tel2.fits FLAT_RAW
@@ -12,4 +12,4 @@
 /absolute/raw/bsl31.fits P2VM_RAW
 /absolute/raw/bsl21.fits P2VM_RAW
 /absolute/raw/phase_reference.fits PHASE_REFERENCE
-/absolute/phase-dark-output/planetes_dark.fits PHASE_DARK_CALIB
+/absolute/phase-dark-output/phase_dark_dark.fits PHASE_DARK_CALIB

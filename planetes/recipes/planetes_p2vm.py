@@ -130,5 +130,8 @@ class PlanetesP2VM(ui.PyRecipe):
             **options,
         )
         return save_products(
-            [("planetes_p2vm.fits", product, measure_quality(product))], used, self
+            [("planetes_p2vm.fits", product, measure_quality(product))],
+            used,
+            self,
+            reference=scans["43"],
         )

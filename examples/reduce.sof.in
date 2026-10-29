@@ -1,5 +1,5 @@
 /absolute/raw/science.fits SINGLE_SCI_RAW
-/absolute/science-dark-output/planetes_dark.fits DARK
-/absolute/flat-output/planetes_flat.fits FLAT
-/absolute/wave-output/planetes_wave.fits WAVE
-/absolute/p2vm-output/planetes_p2vm.fits P2VM
+/absolute/science-dark-output/sci_dark_dark.fits DARK
+/absolute/flat-output/tel4_flat.fits FLAT
+/absolute/wave-output/wave_wave.fits WAVE
+/absolute/p2vm-output/bsl43_p2vm.fits P2VM

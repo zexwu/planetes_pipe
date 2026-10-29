@@ -46,7 +46,7 @@ def _table(name, columns):
 
 
 def _detector_table(product):
-    labels = [f"REG{i+1:02d}" for i in range(24)]
+    labels = [f"REG{i + 1:02d}" for i in range(24)]
     if isinstance(product, (P2VM, P2VMRed)):
         _check_baselines(product.baseline_outputs)
         for baseline, outputs in product.baseline_outputs.items():
@@ -164,7 +164,7 @@ def encode_product(product, header=None, *, quality=None):
             _table(
                 kw.WAVE_DATA,
                 [
-                    _column(f"DATA{i+1}", row[None], "m")
+                    _column(f"DATA{i + 1}", row[None], "m")
                     for i, row in enumerate(product.wavelength_map_m)
                 ],
             ),
@@ -357,7 +357,7 @@ def read_product(path: Path, cls=None):
                 values["telescope_flux_adu"] = image(kw.FLAT_FLUX, "adu")
         elif actual is Wave:
             values["wavelength_map_m"] = np.stack(
-                [column(kw.WAVE_DATA, f"DATA{i+1}", "m")[0] for i in range(24)]
+                [column(kw.WAVE_DATA, f"DATA{i + 1}", "m")[0] for i in range(24)]
             )
             if kw.WAVE_FIT in hdus:
                 values.update(
@@ -447,6 +447,33 @@ def read_product(path: Path, cls=None):
             if any(value is not None for value in setup.values()):
                 values["setup"] = DetectorSetup(**setup)
         return actual(**values)
+
+
+def product_filename(reference: Path, product) -> str:
+    """Build a GRAVITY-style product name from its explicitly selected raw input.
+
+    Parameters
+    ----------
+    reference : Path
+        Reference raw filename. Its complete stem, including a recorded timestamp
+        or an explicit UNKNOWN marker, is retained without interpretation.
+    product : Dark, Bad, Flat, Wave, WavelengthReference, P2VM or P2VMRed
+        Product whose ESO PRO CATG defines the suffix.
+
+    Returns
+    -------
+    filename : str
+        <raw stem>_<lowercase category without underscores>.fits, without a
+        directory. For example, PLANETES.2026-02-05T210609_singlescip2vmred.fits.
+
+    Notes
+    -----
+    This uses the input name, not the current time or file modification time.
+    It does not create DATE-OBS or infer a timezone. For multiple-input products,
+    callers explicitly choose the reference; SOF ordering need not define it.
+    """
+    category = CATEGORIES[type(product)].lower().replace("_", "")
+    return f"{reference.stem}_{category}.fits"
 
 
 def write_product(path: Path, product, *, quality=None):

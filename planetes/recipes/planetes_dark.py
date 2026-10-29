@@ -50,4 +50,5 @@ class PlanetesDark(ui.PyRecipe):
             ],
             used,
             self,
+            reference=paths["DARK_RAW"][0],
         )
