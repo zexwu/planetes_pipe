@@ -7,14 +7,13 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
-from p2vm_fixture import calibration_arrays, calibration_spectra, metadata
+from p2vm_fixture import calibration_arrays, calibration_spectra, metadata, write_raw
 
 from planetes.dark import detect_bad_pixels, measure_dark
 from planetes.io.fits import read_product, write_product
-from planetes.io.acquisition import write_raw
 from planetes.io.hdu import as_compute_array
 from planetes.io.raw import iter_raw_cube as iter_cube
-from planetes.io.raw import read_raw_header, read_raw_metadata
+from planetes.io.raw import read_raw_metadata
 from planetes.p2vm import fit_p2vm
 from planetes.products import Dark, P2VMRed
 from planetes.qc import measure_quality
@@ -79,8 +78,12 @@ class CalibrationFitsTests(unittest.TestCase):
             ):
                 path = Path(tmp) / "calibration.fits"
                 write_product(path, product)
-                with fits.open(path) as hdus:
+                with fits.open(path, mode="update") as hdus:
                     self.assertNotIn("PLANETES_META", hdus)
+                    self.assertNotIn("PLANETES FORMAT", hdus[0].header)
+                    # Product layout, not a private version number, determines reading.
+                    hdus[0].header["HIERARCH PLANETES FORMAT"] = -1
+                    hdus[0].add_checksum()
                 loaded = read_product(path, type(product))
                 for field in fields(product):
                     before, after = (
@@ -104,10 +107,20 @@ class CalibrationFitsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "wave.fits"
             write_product(path, self.wave)
+            self.assertFalse(
+                any(key.startswith("ESO QC ") for key in fits.getheader(path))
+            )
+            qc_path = Path(tmp) / "wave_with_qc.fits"
+            write_product(qc_path, self.wave, quality=measure_quality(self.wave))
+            header = fits.getheader(qc_path)
+            self.assertEqual(
+                header["ESO QC MINWAVE UM SC"], header["ESO QC MINWAVE SC"] * 1e6
+            )
             original = path.read_bytes()
             with self.assertRaises(OSError):
                 write_product(path, self.wave)
             self.assertEqual(path.read_bytes(), original)
+            self.assertEqual(list(Path(tmp).glob(".planetes-*")), [])
 
 
 class RawFitsTests(unittest.TestCase):
@@ -123,12 +136,14 @@ class RawFitsTests(unittest.TestCase):
                 )
                 fits.HDUList(hdus).writeto(path)
                 original = path.read_bytes()
-                raw = read_raw_metadata(path, category="DARK_RAW")
+                raw = read_raw_metadata(
+                    path, category="DARK_RAW", hdu=0 if primary else 1
+                )
                 self.assertEqual(raw.shutters, (None,) * 4)
                 self.assertIsNone(raw.setup.exposure_s)
                 self.assertEqual((raw.setup.height, raw.setup.width), (3, 5))
-                self.assertNotIn("ESO DET WIN1 DIT1", read_raw_header(path))
-                chunks = list(iter_cube(path))
+                self.assertNotIn("ESO DET WIN1 DIT1", fits.getheader(path))
+                chunks = list(iter_cube(path, hdu=0 if primary else 1))
                 self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
                 self.assertTrue(all(chunk.dtype == np.float64 for chunk in chunks))
                 np.testing.assert_array_equal(np.concatenate(chunks), cube)
@@ -137,7 +152,7 @@ class RawFitsTests(unittest.TestCase):
             path = Path(tmp) / "raw.fits"
             physical = metadata("DARK_RAW", n_wave=5, height=3)
             write_raw(path, cube, physical)
-            self.assertEqual(read_raw_metadata(path), physical)
+            self.assertEqual(read_raw_metadata(path, category="DARK_RAW"), physical)
             with fits.open(path) as hdus:
                 self.assertEqual(
                     [hdu.name for hdu in hdus], ["PRIMARY", "IMAGING_DATA_SC"]

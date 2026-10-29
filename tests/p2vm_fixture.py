@@ -4,10 +4,11 @@ from itertools import combinations
 from pathlib import Path
 
 import numpy as np
+from astropy.io import fits
 
 from planetes.instrument import BASELINES, TELESCOPES, DetectorSetup
 from planetes.io.fits import write_product
-from planetes.io.acquisition import write_raw
+from planetes.io import keywords as kw
 from planetes.io.raw import RawMetadata
 from planetes.products import P2VMSpectra, Dark, Flat, Wave
 
@@ -80,6 +81,24 @@ def metadata(category, active=(), n_wave=151, height=24):
     return RawMetadata(
         category, tuple(str(n) in active for n in range(1, 5)), setup(n_wave, height)
     )
+
+
+def write_raw(path: Path, cube, physical: RawMetadata):
+    """Write only the known physical cards needed by these synthetic fixtures."""
+    definition = kw.RAW_TYPES[physical.category]
+    header = fits.Header()
+    header["INSTRUME"] = "PLANETES"
+    header["HIERARCH " + kw.DPR_TYPE] = definition["dpr_type"]
+    header["HIERARCH " + kw.DIT] = physical.setup.exposure_s
+    header["HIERARCH " + kw.DETECTOR_ID] = physical.setup.detector
+    for name, key in kw.ROI_KEYS.items():
+        value = getattr(physical.setup, name)
+        header["HIERARCH " + key] = value + (1 if name.startswith("origin_") else 0)
+    for key, state in zip(kw.SHUTTER_KEYS, physical.shutters, strict=True):
+        header["HIERARCH " + key] = state
+    image = fits.ImageHDU(cube, name=kw.RAW_IMAGE)
+    image.header["BUNIT"] = "adu"
+    fits.HDUList([fits.PrimaryHDU(header=header), image]).writeto(path, checksum=True)
 
 
 def input_rows(paths):

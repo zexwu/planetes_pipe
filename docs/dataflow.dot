@@ -1,10 +1,10 @@
 digraph Dataflow {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.14.0 — 原始数据、标定与科学结果\n浮点数组：存盘32位 / 计算64位", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.15.0 — 原始数据、标定与科学结果\n浮点数组：存盘32位 / 计算64位", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.15,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   rawdark [label="DARK_RAW\nmain / lamp / science 分别选择"];
   dark [label="dark.py / planetes_dark\nmake_dark_products\n完整多帧 mean + temporal RMS", style="rounded,filled", fillcolor="#eff6ff"];
-  darkfits [label="DARK + 独立 BAD\n保留 hot/dead/noisy 判据\n两份写出后发布", shape=folder];
+  darkfits [label="DARK + 独立 BAD\n保留 hot/dead/noisy 判据\nDARK / BAD 各自写出并发布", shape=folder];
   rawflat [label="FLAT_RAW × 4\nPython 具名路径映射 / SOF shutter 身份"];
   flat [label="flat.py / planetes_flat\nmake_flat → build_flat\n响应 · trace · 稀疏提取几何", style="rounded,filled", fillcolor="#eff6ff"];
   flatfits [label="FLAT\n所选 DARK/BAD · 探测器几何", shape=folder];

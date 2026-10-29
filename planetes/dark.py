@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from .io.keywords import RAW_IMAGE
 from .io.raw import iter_raw_cube, read_raw_metadata
 from .products import Bad, Dark
 
@@ -14,12 +15,15 @@ BAD_PIXEL_THRESHOLD = 5.0
 
 
 def make_dark_products(
-    path: Path, *, bad_pixel_threshold: float = BAD_PIXEL_THRESHOLD
+    path: Path,
+    *,
+    hdu: int | str = RAW_IMAGE,
+    bad_pixel_threshold: float = BAD_PIXEL_THRESHOLD,
 ) -> tuple[Dark, Bad]:
     """Measure DARK mean/RMS and BAD flags from a full raw stack; saving is explicit."""
 
-    metadata = read_raw_metadata(path, category="DARK_RAW")
-    dark = measure_dark(iter_raw_cube(path))
+    metadata = read_raw_metadata(path, category="DARK_RAW", hdu=hdu)
+    dark = measure_dark(iter_raw_cube(path, hdu=hdu))
     dark = replace(dark, setup=metadata.setup)
     return dark, detect_bad_pixels(dark, threshold=bad_pixel_threshold)
 

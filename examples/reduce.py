@@ -9,6 +9,7 @@ from planetes.io.fits import read_product, write_product
 from planetes.p2vm import make_p2vm
 from planetes.reduction import reduce_science
 from planetes.products import WavelengthReference
+from planetes.qc import measure_quality
 from planetes.wavelength import make_wave, wavelength_reference_path
 
 calibration_raw = Path("/absolute/calibration-raw")
@@ -53,4 +54,4 @@ for filename, product in [
     ("planetes_p2vm.fits", p2vm),
     ("planetes_reduced.fits", p2vmred),
 ]:
-    write_product(output / filename, product, include_qc=True)
+    write_product(output / filename, product, quality=measure_quality(product))

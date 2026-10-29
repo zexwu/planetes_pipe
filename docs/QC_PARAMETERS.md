@@ -23,8 +23,10 @@ GRAVITY GD rejection、最终平均 VIS 等不适用指标的占位说明。原 
 数组仍保留；可选 P2VM diagnostics 保存拟合中间量，均不变成自动剔除规则。
 
 `qc.diagnostics()` 仍可单独返回逆矩阵条件数、visibility flag fraction 和均值，
-不写成自行命名的 ESO QC。Python `write_product` 和正式 recipe 默认附加上述
-少量 QC；`include_qc=False` 可关闭。`encode_product(..., quality=...)` 只编码传入结果。
+不写成自行命名的 ESO QC。脚本/recipe先调用`measure_quality(product)`，再将
+结果显式传给`write_product(..., quality=quality)`或DFS writer；省略quality就不写QC。
+writer和encoder只编码传入结果，不测量统计。现有m/um QC名称在keywords.py中逐项声明，
+不通过字符串替换派生keyword。
 
 0.10.0 的 QC 在存盘舍入前的计算结果上测量；科学数组随后按统一策略存为32位。
 Dark RMS 改用中心平方和的分块合并算法，仍是 population RMS，判坏阈值不变。

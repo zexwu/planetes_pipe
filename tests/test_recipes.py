@@ -10,11 +10,10 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
-from p2vm_fixture import input_rows, metadata, write_recipe_inputs
+from p2vm_fixture import input_rows, metadata, write_raw, write_recipe_inputs
 
 import planetes
 from planetes.io.fits import read_product, write_product
-from planetes.io.acquisition import write_raw
 from planetes.products import Flat, P2VM, P2VMRed, Wave
 from planetes.reduction import reduce_science
 

@@ -17,9 +17,11 @@ from .instrument import (
     N_TELESCOPES,
     REAL_SLICE,
     _check_baselines,
+    check_setup,
 )
 from .io.hdu import as_compute_array
-from .io.raw import check_raw_calibrations, read_raw_metadata
+from .io.keywords import RAW_IMAGE
+from .io.raw import read_raw_metadata
 from .products import Dark, Flat, P2VM, P2VMRed, Wave
 
 
@@ -30,6 +32,7 @@ def reduce_science(
     wave: Wave,
     p2vm: P2VM,
     *,
+    hdu: int | str = RAW_IMAGE,
     gd_search_min_m: float = -100e-6,
     gd_search_max_m: float = 100e-6,
 ) -> P2VMRed:
@@ -39,10 +42,11 @@ def reduce_science(
     fluxes are ADU, GD and its search bounds are metres, differential phase is deg.
     """
 
-    raw = read_raw_metadata(path, category="SINGLE_SCI_RAW")
-    check_raw_calibrations(raw, dark, flat)
+    raw = read_raw_metadata(path, category="SINGLE_SCI_RAW", hdu=hdu)
+    check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
+    check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
     extractor = prepare_extraction(flat, wave, p2vm.wavelength_m)
-    spectra = extract_spectra_from_file(path, extractor, dark)
+    spectra = extract_spectra_from_file(path, extractor, dark, hdu=hdu)
     return reduce_spectra(
         spectra, p2vm, gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m
     )

@@ -8,9 +8,8 @@ from cpl import core, dfs, ui
 from planetes import __version__
 from planetes.io.fits import encode_product
 from planetes.io.keywords import CATEGORIES, PRO_CATEGORY, RAW_TYPES
-from planetes.io.publication import publish_outputs
+from planetes.io.hdu import new_fits_file
 from planetes.io.raw import read_raw_metadata
-from planetes.qc import measure_quality
 from planetes.products import P2VM, P2VMRed, Wave, WavelengthReference
 
 
@@ -73,12 +72,11 @@ def read_shutter_id(path: Path, category: str) -> str:
     return "".join(str(n) for n in range(4, 0, -1) if raw.shutters[n - 1])
 
 
-def save_products(outputs, used, recipe, *, include_qc: bool = True):
-    """Sign all outputs before publication; rollback only newly owned links on failure."""
-    prepared = [(Path(output), product) for output, product in outputs]
-    with publish_outputs([p for p, _ in prepared]) as temporary:
-        products = ui.FrameSet()
-        for (output, product), path in zip(prepared, temporary, strict=True):
+def save_products(outputs, used, recipe):
+    """Write/sign each (filename, product, quality) independently; never overwrite."""
+    products = ui.FrameSet()
+    for output, product, quality in outputs:
+        with new_fits_file(output) as path:
             properties = core.PropertyList()
             properties.append(
                 core.Property(PRO_CATEGORY, core.Type.STRING, CATEGORIES[type(product)])
@@ -92,7 +90,6 @@ def save_products(outputs, used, recipe, *, include_qc: bool = True):
                 f"planetes/{__version__}",
                 str(path),
             )
-            quality = measure_quality(product) if include_qc else None
             with afits.open(path, mode="update") as hdus:
                 encoded = encode_product(product, hdus[0].header, quality=quality)
                 hdus[0].header = encoded[0].header
@@ -100,25 +97,14 @@ def save_products(outputs, used, recipe, *, include_qc: bool = True):
                     hdus.append(item)
                 for item in hdus:
                     item.add_checksum()
-            products.append(
-                ui.Frame(
-                    file=str(path),
-                    tag=CATEGORIES[type(product)],
-                    group=ui.Frame.FrameGroup.PRODUCT,
-                    level=ui.Frame.FrameLevel.FINAL,
-                    frameType=cpl_frame_type(type(product)),
-                )
-            )
-        products.sign_products()
-    return ui.FrameSet(
-        [
-            ui.Frame(
-                file=str(output),
+            frame = ui.Frame(
+                file=str(path),
                 tag=CATEGORIES[type(product)],
                 group=ui.Frame.FrameGroup.PRODUCT,
                 level=ui.Frame.FrameLevel.FINAL,
                 frameType=cpl_frame_type(type(product)),
             )
-            for output, product in prepared
-        ]
-    )
+            ui.FrameSet([frame]).sign_products()
+        frame.file = str(output)
+        products.append(frame)
+    return products

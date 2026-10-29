@@ -12,7 +12,8 @@ from scipy.signal import find_peaks, medfilt
 from . import log
 from .dark import frame_mean
 from .instrument import N_OUTPUTS, TELESCOPES, check_setup
-from .io.raw import check_raw_calibrations, iter_raw_cube, read_raw_metadata
+from .io.keywords import RAW_IMAGE
+from .io.raw import iter_raw_cube, read_raw_metadata
 from .products import Bad, Dark, Flat
 
 APERTURE_WIDTH_PIXELS = 10.0
@@ -23,6 +24,7 @@ def make_flat(
     dark: Dark,
     bad: Bad,
     *,
+    hdu: int | str = RAW_IMAGE,
     aperture_width_pixels: float = APERTURE_WIDTH_PIXELS,
 ) -> Flat:
     """Read four telescope flats with their DARK/BAD; return response and geometry.
@@ -39,17 +41,17 @@ def make_flat(
     setup = None
     for name in TELESCOPES:
         path = telescope_flats[name]
-        raw = read_raw_metadata(path, category="FLAT_RAW")
+        raw = read_raw_metadata(path, category="FLAT_RAW", hdu=hdu)
         for telescope, state in enumerate(raw.shutters, 1):
             if state is not None and state != (str(telescope) in name):
                 raise ValueError(
                     f"Flat for T{name} conflicts with recorded shutters: {path}"
                 )
-        check_raw_calibrations(raw, dark)
+        check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
         if setup is None:
             setup = raw.setup
         check_setup(raw.setup, setup, exposure=False, role="flat sequence")
-        maps.append(frame_mean(iter_raw_cube(path)) - dark.mean_adu)
+        maps.append(frame_mean(iter_raw_cube(path, hdu=hdu)) - dark.mean_adu)
     result = build_flat(maps, bad, aperture_width_pixels=aperture_width_pixels)
     return replace(result, setup=setup)
 

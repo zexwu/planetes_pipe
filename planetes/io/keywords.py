@@ -59,45 +59,16 @@ P2VM_FIT_RMS       = "PLANETES_P2VM_FIT_RMS"
 SCIENCE_FLUX       = "PLANETES_FLUX"
 SCIENCE_VISIBILITY = "PLANETES_VIS"
 
-# Private header keywords and versions, outside the ESO dictionary.
-FORMAT_KEY   = "PLANETES FORMAT"
-BAD_BITS     = "PLANETES BAD BITS"
+# Physical shutter identities, outside the ESO dictionary.
 SHUTTER_KEYS = tuple(f"PLANETES INS SHUT{n} ST" for n in range(1, 5))
 
-PRODUCT_FORMAT = 7
-
-# Raw exposure definitions: DPR values plus the number of open physical shutters.
+# Raw category -> declared DPR type and open physical shutters.
 RAW_TYPES = {
-    "DARK_RAW": {
-        "dpr_category":  "CALIB",
-        "dpr_type":      "DARK",
-        "dpr_technique": "IMAGE",
-        "open_shutters": 0,
-    },
-    "FLAT_RAW": {
-        "dpr_category":  "CALIB",
-        "dpr_type":      "FLAT",
-        "dpr_technique": "SPECTRUM",
-        "open_shutters": 1,
-    },
-    "P2VM_RAW": {
-        "dpr_category":  "CALIB",
-        "dpr_type":      "P2VM",
-        "dpr_technique": "INTERFEROMETRY",
-        "open_shutters": 2,
-    },
-    "WAVELAMP_RAW": {
-        "dpr_category":  "CALIB",
-        "dpr_type":      "WAVE,LAMP",
-        "dpr_technique": "SPECTRUM",
-        "open_shutters": 4,
-    },
-    "SINGLE_SCI_RAW": {
-        "dpr_category":  "SCIENCE",
-        "dpr_type":      "OBJECT,SINGLE",
-        "dpr_technique": "INTERFEROMETRY",
-        "open_shutters": 4,
-    },
+    "DARK_RAW":       {"dpr_type": "DARK",          "open_shutters": 0},
+    "FLAT_RAW":       {"dpr_type": "FLAT",          "open_shutters": 1},
+    "P2VM_RAW":       {"dpr_type": "P2VM",          "open_shutters": 2},
+    "WAVELAMP_RAW":   {"dpr_type": "WAVE,LAMP",     "open_shutters": 4},
+    "SINGLE_SCI_RAW": {"dpr_type": "OBJECT,SINGLE", "open_shutters": 4},
 }
 
 # Scientific product class -> DFS product category.
@@ -135,6 +106,13 @@ QC_KEYWORDS = {
     "p2vm_coherence_mean_b32": "ESO QC P2VM_COHERENCE_SC32",
     "p2vm_coherence_mean_b31": "ESO QC P2VM_COHERENCE_SC31",
     "p2vm_coherence_mean_b21": "ESO QC P2VM_COHERENCE_SC21",
+}
+
+# Existing wavelength QC cards in micrometres; list each output name explicitly.
+QC_UM_KEYWORDS = {
+    "wavelength_residual_std_m": "ESO QC RMSWAVE UM SC",
+    "wavelength_min_m":          "ESO QC MINWAVE UM SC",
+    "wavelength_max_m":          "ESO QC MAXWAVE UM SC",
 }
 
 # fmt: on

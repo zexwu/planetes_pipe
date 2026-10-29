@@ -4,8 +4,10 @@ import numpy as np
 from cpl import ui
 
 from planetes import __version__
+from planetes.qc import measure_quality
 from planetes.io.fits import read_product
-from planetes.io.raw import check_raw_calibrations, read_raw_metadata
+from planetes.instrument import check_setup
+from planetes.io.raw import read_raw_metadata
 from planetes.extraction import extract_spectra_from_file, prepare_extraction
 from planetes.p2vm import make_p2vm
 from planetes.products import Dark, Flat, Wave
@@ -97,7 +99,8 @@ class PlanetesP2VM(ui.PyRecipe):
                 else dark
             )
             raw = read_raw_metadata(path, category="SINGLE_SCI_RAW")
-            check_raw_calibrations(raw, selected_dark, flat)
+            check_setup(raw.setup, selected_dark.setup, exposure=True, role="DARK")
+            check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
             grid = np.linspace(
                 options["wavelength_min_m"],
                 options["wavelength_max_m"],
@@ -124,4 +127,6 @@ class PlanetesP2VM(ui.PyRecipe):
             phase_reference=reference,
             **options,
         )
-        return save_products([("planetes_p2vm.fits", product)], used, self)
+        return save_products(
+            [("planetes_p2vm.fits", product, measure_quality(product))], used, self
+        )

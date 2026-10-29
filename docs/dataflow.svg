@@ -9,7 +9,7 @@
 <g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(18 949.96)">
 <title>Dataflow</title>
 <polygon fill="white" stroke="none" points="-18,18 -18,-949.96 1597.92,-949.96 1597.92,18 -18,18"/>
-<text xml:space="preserve" text-anchor="middle" x="789.96" y="-908.96" font-family="PingFang SC" font-size="20.00">PLANETES 0.14.0 — 原始数据、标定与科学结果</text>
+<text xml:space="preserve" text-anchor="middle" x="789.96" y="-908.96" font-family="PingFang SC" font-size="20.00">PLANETES 0.15.0 — 原始数据、标定与科学结果</text>
 <text xml:space="preserve" text-anchor="middle" x="789.96" y="-879.71" font-family="PingFang SC" font-size="20.00">浮点数组：存盘32位 / 计算64位</text>
 <g id="clust6" class="cluster">
 <title>cluster_future</title>
@@ -48,16 +48,16 @@
 <!-- darkfits -->
 <g id="node3" class="node">
 <title>darkfits</title>
-<polygon fill="none" stroke="#64748b" points="778.22,-865.46 775.22,-869.46 754.22,-869.46 751.22,-865.46 591.62,-865.46 591.62,-787.43 778.22,-787.43 778.22,-865.46"/>
-<text xml:space="preserve" text-anchor="middle" x="684.92" y="-843.52" font-family="PingFang SC" font-size="14.00">DARK + 独立 BAD</text>
-<text xml:space="preserve" text-anchor="middle" x="684.92" y="-823.27" font-family="PingFang SC" font-size="14.00">保留 hot/dead/noisy 判据</text>
-<text xml:space="preserve" text-anchor="middle" x="684.92" y="-803.02" font-family="PingFang SC" font-size="14.00">两份写出后发布</text>
+<polygon fill="none" stroke="#64748b" points="800.1,-865.46 797.1,-869.46 776.1,-869.46 773.1,-865.46 591.75,-865.46 591.75,-787.43 800.1,-787.43 800.1,-865.46"/>
+<text xml:space="preserve" text-anchor="middle" x="695.92" y="-843.52" font-family="PingFang SC" font-size="14.00">DARK + 独立 BAD</text>
+<text xml:space="preserve" text-anchor="middle" x="695.92" y="-823.27" font-family="PingFang SC" font-size="14.00">保留 hot/dead/noisy 判据</text>
+<text xml:space="preserve" text-anchor="middle" x="695.92" y="-803.02" font-family="PingFang SC" font-size="14.00">DARK / BAD 各自写出并发布</text>
 </g>
 <!-- dark&#45;&gt;darkfits -->
 <g id="edge2" class="edge">
 <title>dark&#45;&gt;darkfits</title>
-<path fill="none" stroke="#64748b" d="M542.67,-826.44C556.14,-826.44 571.75,-826.44 583.21,-826.44"/>
-<polygon fill="#64748b" stroke="#64748b" points="582.88,-828.9 589.88,-826.45 582.88,-824 582.88,-828.9"/>
+<path fill="none" stroke="#64748b" d="M542.72,-826.44C555.3,-826.44 570.51,-826.44 582.98,-826.44"/>
+<polygon fill="#64748b" stroke="#64748b" points="582.97,-828.9 589.97,-826.45 582.97,-824 582.97,-828.9"/>
 </g>
 <!-- flat -->
 <g id="node5" class="node">
@@ -71,7 +71,7 @@
 <!-- darkfits&#45;&gt;flat -->
 <g id="edge11" class="edge">
 <title>darkfits&#45;&gt;flat</title>
-<path fill="none" stroke="#64748b" d="M591.16,-796.78C543.36,-782.16 495.17,-767.43 495.17,-767.43 495.17,-767.43 483.24,-753.72 469.65,-738.13"/>
+<path fill="none" stroke="#64748b" d="M591.43,-795.25C542.66,-781.15 495.17,-767.43 495.17,-767.43 495.17,-767.43 483.24,-753.72 469.65,-738.13"/>
 <polygon fill="#64748b" stroke="#64748b" points="471.62,-736.65 465.17,-732.99 467.92,-739.87 471.62,-736.65"/>
 <text xml:space="preserve" text-anchor="middle" x="528.55" y="-756.98" font-family="PingFang SC" font-size="11.00">DARK + BAD</text>
 </g>
@@ -86,7 +86,7 @@
 <!-- darkfits&#45;&gt;wave -->
 <g id="edge12" class="edge">
 <title>darkfits&#45;&gt;wave</title>
-<path fill="none" stroke="#64748b" d="M647.44,-787.04C622.18,-761.14 593.42,-731.68 593.42,-731.68 593.42,-731.68 576.29,-657.15 564.59,-606.27"/>
+<path fill="none" stroke="#64748b" d="M653.94,-787.04C625.63,-761.14 593.42,-731.68 593.42,-731.68 593.42,-731.68 576.29,-657.15 564.59,-606.27"/>
 <polygon fill="#64748b" stroke="#64748b" points="566.99,-605.76 563.03,-599.49 562.21,-606.86 566.99,-605.76"/>
 <text xml:space="preserve" text-anchor="middle" x="622.67" y="-690.09" font-family="PingFang SC" font-size="11.00">lamp DARK</text>
 </g>
@@ -102,7 +102,7 @@
 <!-- darkfits&#45;&gt;p2vm -->
 <g id="edge13" class="edge">
 <title>darkfits&#45;&gt;p2vm</title>
-<path fill="none" stroke="#64748b" d="M769.72,-787.04C826.88,-761.14 891.92,-731.68 891.92,-731.68 891.92,-731.68 891.92,-653.65 891.92,-653.65 891.92,-653.65 800.92,-597.9 800.92,-597.9 800.92,-597.9 734.92,-519.87 734.92,-519.87 734.92,-519.87 716.75,-503.51 695.98,-484.81"/>
+<path fill="none" stroke="#64748b" d="M776.21,-787.04C830.34,-761.14 891.92,-731.68 891.92,-731.68 891.92,-731.68 891.92,-653.65 891.92,-653.65 891.92,-653.65 800.92,-597.9 800.92,-597.9 800.92,-597.9 734.92,-519.87 734.92,-519.87 734.92,-519.87 716.75,-503.51 695.98,-484.81"/>
 <polygon fill="#64748b" stroke="#64748b" points="697.74,-483.09 690.9,-480.23 694.46,-486.73 697.74,-483.09"/>
 <text xml:space="preserve" text-anchor="middle" x="957.51" y="-623.2" font-family="PingFang SC" font-size="11.00">main DARK；参考 DARK 由调用处选定</text>
 </g>
@@ -117,7 +117,7 @@
 <!-- darkfits&#45;&gt;science -->
 <g id="edge14" class="edge">
 <title>darkfits&#45;&gt;science</title>
-<path fill="none" stroke="#64748b" d="M778.57,-799.41C916.71,-761 1158.92,-693.66 1158.92,-693.66 1158.92,-693.66 1158.92,-693.66 1158.92,-428.73 1158.92,-428.73 1066.92,-344.84 1066.92,-344.84 1066.92,-344.84 1057.41,-338.42 1044.71,-329.85"/>
+<path fill="none" stroke="#64748b" d="M800.41,-795.71C936.97,-756.84 1158.92,-693.66 1158.92,-693.66 1158.92,-693.66 1158.92,-693.66 1158.92,-428.73 1158.92,-428.73 1066.92,-344.84 1066.92,-344.84 1066.92,-344.84 1057.41,-338.42 1044.71,-329.85"/>
 <polygon fill="#64748b" stroke="#64748b" points="1046.24,-327.93 1039.06,-326.05 1043.5,-331.99 1046.24,-327.93"/>
 <text xml:space="preserve" text-anchor="middle" x="1194.92" y="-556.31" font-family="PingFang SC" font-size="11.00">science DARK</text>
 </g>

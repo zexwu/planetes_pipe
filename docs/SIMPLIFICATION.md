@@ -1,4 +1,4 @@
-# PLANETES 0.14.0：明确输入，直接计算
+# PLANETES 0.15.0：明确输入，直接计算
 
 调用处选择文件和标定，读取函数负责读取，科学步骤负责计算。
 不自动猜输入类型，不维护JSON metadata或采集历史。
@@ -27,13 +27,15 @@ P2VM相位参考是已减暗、提取并对齐到扫描网格的光谱，缺失�
 Dark必需mean，RMS和帧数在未测量时为None；BAD检测要求实际测得的RMS。
 P2VMRed保存逐帧信号，平均后的VIS/OIFITS和天文传递函数标定属于后续阶段。
 
-物理metadata只放在FITS header。raw读写共用`RawMetadata`，包含类别、四个
-快门状态及`DetectorSetup`。后者只含曝光、ROI、binning和detector。
+物理metadata只放在FITS header。raw reader返回`RawMetadata`，包含类别、四个
+快门状态及`DetectorSetup`；后者只含曝光、ROI、binning和detector。
+采集writer移出本package，测试只构造固定的最小FITS fixture。
 删除CaptureMetadata、JSON读写、PLANETES_META扩展、采集来源、legacy状态、
 采集时间历史及header/JSON调和检查。没有补缺兼容层。
 
-新产品格式为7，旧生成标定需重新生成。raw仅依赖物理header和cube，不再写
-私有raw格式版本；已有raw中的额外扩展不会参与metadata解释。
+不再写入或强制检查私有格式号和BAD位定义字符串，按实际产品字段读取。
+raw类别由调用者明确给出，HDU默认IMAGING_DATA_SC；非标准数据显式传hdu=0等。
+删除自动HDU搜索、类别猜测、重复维度检查和仅包装getheader的函数。
 随包LINE_LIST去掉旧metadata和指纹，保留原表精度、全部谱线值与标签。
 
 ## 保留的计算边界
@@ -41,8 +43,9 @@ P2VMRed保存逐帧信号，平均后的VIS/OIFITS和天文传递函数标定属
 - 计算float64/complex128，writer统一缩为float32/complex64；整数和flags保留。
 - 稀疏像素范围及波长覆盖在进入Numba提取前检查。
 - 数组入口检查关键物理轴；保留telescope/baseline身份、标定曝光/ROI匹配及V2PM秩检查。
-- QC仅报告少量可用统计，不改变mask、拟合或权重。
-- 写出生成checksum、使用临时文件并拒绝覆盖；完整round-trip由现有测试检查。
+- QC仅报告少量可用统计，脚本/recipe显式计算并传给writer；不改变mask、拟合或权重。
+- 每个输出独立暂存、生成checksum并拒绝覆盖；删除多文件回滚、inode核对及同目录约束。
+  checksum只检查一次；完整round-trip由现有测试检查。
 - CPL参数与DFS实际输入由recipe记录；CPL import仅存在于recipes目录。
 
 Qt6项目独立维护。本仓库不含GUI补丁、manifest或部署文档。

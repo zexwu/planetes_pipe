@@ -12,8 +12,9 @@ from scipy.signal import find_peaks
 from . import log
 from .dark import frame_mean
 from .extraction import extract_sparse_spectra
-from .instrument import N_OUTPUTS
-from .io.raw import check_raw_calibrations, iter_raw_cube, read_raw_metadata
+from .instrument import N_OUTPUTS, check_setup
+from .io.keywords import RAW_IMAGE
+from .io.raw import iter_raw_cube, read_raw_metadata
 from .products import Dark, Flat, Wave, WavelengthReference
 
 # fmt: off
@@ -24,13 +25,19 @@ RANSAC_ITERATIONS = 1_000_000
 
 
 def make_wave(
-    path: Path, dark: Dark, flat: Flat, *, reference: WavelengthReference
+    path: Path,
+    dark: Dark,
+    flat: Flat,
+    *,
+    reference: WavelengthReference,
+    hdu: int | str = RAW_IMAGE,
 ) -> Wave:
     """Read the lamp with its DARK and FLAT geometry; return wavelengths in metres."""
 
-    raw = read_raw_metadata(path, category="WAVELAMP_RAW")
-    check_raw_calibrations(raw, dark, flat)
-    image = frame_mean(iter_raw_cube(path))
+    raw = read_raw_metadata(path, category="WAVELAMP_RAW", hdu=hdu)
+    check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
+    check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
+    image = frame_mean(iter_raw_cube(path, hdu=hdu))
     if image.shape != dark.mean_adu.shape or image.shape != flat.flat_map_adu.shape:
         raise ValueError("Lamp/dark/flat detector shapes differ")
     image = image - dark.mean_adu

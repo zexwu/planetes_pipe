@@ -3,6 +3,7 @@
 from cpl import ui
 
 from planetes import __version__
+from planetes.qc import measure_quality
 from planetes.io.fits import read_product
 from planetes.products import Dark, Flat, WavelengthReference
 from planetes.recipes.dfs import read_sof, save_products
@@ -48,4 +49,6 @@ class PlanetesWave(ui.PyRecipe):
         product = make_wave(
             paths["WAVELAMP_RAW"][0], dark, flat, reference=reference, **options
         )
-        return save_products([("planetes_wave.fits", product)], used, self)
+        return save_products(
+            [("planetes_wave.fits", product, measure_quality(product))], used, self
+        )

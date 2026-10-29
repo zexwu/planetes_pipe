@@ -3,6 +3,7 @@
 from cpl import ui
 
 from planetes import __version__
+from planetes.qc import measure_quality
 from planetes.io.fits import read_product
 from planetes.products import Dark, Flat, P2VM, Wave
 from planetes.recipes.dfs import read_sof, save_products
@@ -56,4 +57,6 @@ class PlanetesReduce(ui.PyRecipe):
         product = reduce_science(
             paths["SINGLE_SCI_RAW"][0], dark, flat, wave, p2vm, **options
         )
-        return save_products([("planetes_reduced.fits", product)], used, self)
+        return save_products(
+            [("planetes_reduced.fits", product, measure_quality(product))], used, self
+        )

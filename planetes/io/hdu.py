@@ -1,5 +1,10 @@
 """I/O precision boundary, FITS metadata and checksums."""
 
+import os
+from contextlib import contextmanager
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 import numpy as np
 
 # Relative round-to-nearest error bound for the on-disk real component.
@@ -32,3 +37,14 @@ def _verify_checksums(hdus):
     for h in hdus:
         if h.verify_checksum() != 1 or h.verify_datasum() != 1:
             raise ValueError("Invalid or missing FITS checksum")
+
+
+@contextmanager
+def new_fits_file(path: Path):
+    """Yield a temporary FITS path, then publish without replacing an existing file."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".planetes-", dir=path.parent) as directory:
+        temporary = Path(directory) / path.name
+        yield temporary
+        os.link(temporary, path)

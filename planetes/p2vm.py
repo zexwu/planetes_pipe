@@ -19,8 +19,10 @@ from .instrument import (
     REAL_SLICE,
     TELESCOPES,
     _check_baselines,
+    check_setup,
 )
-from .io.raw import check_raw_calibrations, read_raw_metadata
+from .io.keywords import RAW_IMAGE
+from .io.raw import read_raw_metadata
 from .products import P2VMSpectra, Dark, Flat, P2VM, Wave
 from .reduction import estimate_group_delay
 
@@ -461,6 +463,7 @@ def make_p2vm(
     *,
     telescope_flats: Mapping[str, Path],
     baseline_cubes: Mapping[str, Path],
+    hdu: int | str = RAW_IMAGE,
     phase_reference: NDArray | None = None,
     keep_diagnostics: bool = False,
     wavelength_min_m: float = 1.15e-6,
@@ -484,6 +487,7 @@ def make_p2vm(
         telescope_flats=telescope_flats,
         baseline_cubes=baseline_cubes,
         wavelength_m=grid,
+        hdu=hdu,
     )
     return fit_p2vm(
         spectra,
@@ -501,6 +505,7 @@ def extract_p2vm_spectra(
     *,
     telescope_flats: Mapping[str, Path],
     baseline_cubes: Mapping[str, Path],
+    hdu: int | str = RAW_IMAGE,
     wavelength_m: NDArray,
 ) -> P2VMSpectra:
     """Extract explicit telescope/baseline file maps and identify detector outputs."""
@@ -518,27 +523,33 @@ def extract_p2vm_spectra(
     baseline_spectra = []
     for baseline in BASELINES:
         path = baseline_cubes[baseline]
-        raw = read_raw_metadata(path, category="P2VM_RAW")
+        raw = read_raw_metadata(path, category="P2VM_RAW", hdu=hdu)
         for telescope, state in enumerate(raw.shutters, 1):
             if state is not None and state != (str(telescope) in baseline):
                 raise ValueError(
                     f"Scan for {baseline} conflicts with recorded shutters: {path}"
                 )
-        check_raw_calibrations(raw, main_dark, flat)
-        baseline_spectra.append(extract_spectra_from_file(path, extractor, main_dark))
+        check_setup(raw.setup, main_dark.setup, exposure=True, role="DARK")
+        check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
+        baseline_spectra.append(
+            extract_spectra_from_file(path, extractor, main_dark, hdu=hdu)
+        )
     baseline_spectra = np.asarray(baseline_spectra)
 
     telescope_spectra = []
     for name in TELESCOPES:
         path = telescope_flats[name]
-        raw = read_raw_metadata(path, category="FLAT_RAW")
+        raw = read_raw_metadata(path, category="FLAT_RAW", hdu=hdu)
         for telescope, state in enumerate(raw.shutters, 1):
             if state is not None and state != (str(telescope) in name):
                 raise ValueError(
                     f"Flat for T{name} conflicts with recorded shutters: {path}"
                 )
-        check_raw_calibrations(raw, main_dark, flat)
-        telescope_spectra.append(extract_spectra_from_file(path, extractor, main_dark))
+        check_setup(raw.setup, main_dark.setup, exposure=True, role="DARK")
+        check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
+        telescope_spectra.append(
+            extract_spectra_from_file(path, extractor, main_dark, hdu=hdu)
+        )
     telescope_spectra = np.asarray(telescope_spectra)
     return P2VMSpectra(
         telescope_spectra,

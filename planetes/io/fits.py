@@ -15,9 +15,8 @@ from ..instrument import (
 )
 from ..products import Bad, Dark, Flat, P2VM, P2VMRed, Wave, WavelengthReference
 from . import keywords as kw
-from .hdu import _verify_checksums, _native, _storage_array
+from .hdu import _verify_checksums, _native, _storage_array, new_fits_file
 from .keywords import CATEGORIES
-from .publication import publish_outputs
 
 
 def _image(name, value, unit=""):
@@ -26,21 +25,16 @@ def _image(name, value, unit=""):
     return hdu
 
 
-def _column(name, values, unit="", dim=None):
+def _column(name, values, unit=""):
+    """Encode one column, keeping trailing array axes in FITS order."""
     values = _storage_array(values)
-    kind = {
-        "f": "D" if values.dtype.itemsize == 8 else "E",
-        "c": "M" if values.dtype.itemsize == 16 else "C",
-        "b": "L",
-        "i": "K",
-        "u": "K",
-    }.get(values.dtype.kind)
-    if kind is None:
-        return afits.Column(
-            name=name, array=values, format=f"{max(1,max(map(len,values),default=1))}A"
-        )
+    if values.dtype.kind in "US":
+        width = max((len(value) for value in values), default=1)
+        return afits.Column(name=name, array=values, format=f"{max(1, width)}A")
+    kind = {"f": "E", "c": "C", "b": "L", "i": "K", "u": "K"}[values.dtype.kind]
     count = int(np.prod(values.shape[1:])) if values.ndim > 1 else 1
-    if dim is None and values.ndim > 1:
+    dim = None
+    if values.ndim > 1:
         dim = "(" + ",".join(map(str, values.shape[:0:-1])) + ")"
     return afits.Column(
         name=name, array=values, format=f"{count}{kind}", unit=unit or None, dim=dim
@@ -72,12 +66,11 @@ def encode_product(product, header=None, *, quality=None):
         if key.startswith("ESO DPR "):
             del hdr[key]
     hdr["INSTRUME"] = "PLANETES"
-    hdr["HIERARCH " + kw.FORMAT_KEY] = kw.PRODUCT_FORMAT
-    hdr["HIERARCH ESO PRO CATG"] = CATEGORIES[type(product)]
-    hdr["HIERARCH ESO PRO TYPE"] = (
+    hdr["HIERARCH " + kw.PRO_CATEGORY] = CATEGORIES[type(product)]
+    hdr["HIERARCH " + kw.PRO_TYPE] = (
         "STATIC" if isinstance(product, WavelengthReference) else "REDUCED"
     )
-    hdr["HIERARCH ESO PRO SCIENCE"] = isinstance(product, P2VMRed)
+    hdr["HIERARCH " + kw.PRO_SCIENCE] = isinstance(product, P2VMRed)
     setup = getattr(product, "setup", None)
     if setup is not None:
         for name, key in kw.ROI_KEYS.items():
@@ -112,9 +105,7 @@ def encode_product(product, header=None, *, quality=None):
             _image(kw.DARK_RMS, product.temporal_rms_adu, "adu"),
         ]
     elif isinstance(product, Bad):
-        image = _image(kw.RAW_IMAGE, product.bad_pixel_flags)
-        image.header["HIERARCH " + kw.BAD_BITS] = "hot=1,dead=2,noisy=4"
-        hdus.append(image)
+        hdus.append(_image(kw.RAW_IMAGE, product.bad_pixel_flags))
     elif isinstance(product, Flat):
         hdus += [
             _detector_table(product),
@@ -247,12 +238,8 @@ def encode_product(product, header=None, *, quality=None):
     if quality is not None:
         for metric, (number, comment) in quality.items():
             hdus[0].header["HIERARCH " + kw.QC_KEYWORDS[metric]] = (number, comment)
-            if metric in (
-                "wavelength_min_m",
-                "wavelength_max_m",
-                "wavelength_residual_std_m",
-            ):
-                key = kw.QC_KEYWORDS[metric].replace(" SC", " UM SC")
+            if metric in kw.QC_UM_KEYWORDS:
+                key = kw.QC_UM_KEYWORDS[metric]
                 hdus[0].header["HIERARCH " + key] = (
                     number * 1e6,
                     comment.replace("[m]", "[um]"),
@@ -262,13 +249,10 @@ def encode_product(product, header=None, *, quality=None):
 
 def read_product(path: Path, cls=None):
     """Read a PLANETES FITS product, retaining physical units and identities."""
-    with afits.open(path, checksum=True) as hdus:
+    with afits.open(path) as hdus:
         hdr = hdus[0].header
-        if (
-            hdr.get(kw.FORMAT_KEY) != kw.PRODUCT_FORMAT
-            or hdr.get("INSTRUME") != "PLANETES"
-        ):
-            raise ValueError("Unsupported PLANETES product format")
+        if hdr.get("INSTRUME") != "PLANETES":
+            raise ValueError("Expected a PLANETES product")
         actual = {v: k for k, v in CATEGORIES.items()}.get(hdr.get(kw.PRO_CATEGORY))
         if actual is None or (cls is not None and actual is not cls):
             raise ValueError("Unexpected product category")
@@ -305,8 +289,6 @@ def read_product(path: Path, cls=None):
                 n_frames=hdr["NFRAMES"],
             )
         elif actual is Bad:
-            if hdus[kw.RAW_IMAGE].header.get(kw.BAD_BITS) != "hot=1,dead=2,noisy=4":
-                raise ValueError("Invalid BAD flag definition")
             values["bad_pixel_flags"] = image(kw.RAW_IMAGE, "")
         elif actual is Flat:
             values.update(
@@ -421,11 +403,8 @@ def read_product(path: Path, cls=None):
         return actual(**values)
 
 
-def write_product(path: Path, product, *, include_qc: bool = True):
-    """Save a product with optional QC; preserve existing output files."""
-    from ..qc import measure_quality
-
-    quality = measure_quality(product) if include_qc else None
+def write_product(path: Path, product, *, quality=None):
+    """Write a product and supplied QC, without replacing an existing file."""
     encoded = encode_product(product, quality=quality)
-    with publish_outputs([path]) as temporary:
-        encoded.writeto(temporary[0], checksum=True)
+    with new_fits_file(path) as temporary:
+        encoded.writeto(temporary, checksum=True)

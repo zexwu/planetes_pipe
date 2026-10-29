@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.14.0
+# PLANETES pipeline 0.15.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python and PyEsoRex share the same scientific steps and single-frame kernels.
@@ -96,6 +96,7 @@ from planetes.p2vm import make_p2vm
 from planetes.reduction import reduce_science
 from planetes.io.fits import read_product, write_product
 from planetes.products import WavelengthReference
+from planetes.qc import measure_quality
 
 raw = Path('/absolute/raw')
 main_dark, bad = make_dark_products(raw / 'dark.fits')
@@ -110,7 +111,10 @@ p2vm = make_p2vm(
     flat, wave, main_dark, telescope_flats=telescopes, baseline_cubes=baselines,
 )
 p2vmred = reduce_science(raw / 'sci.fits', science_dark, flat, wave, p2vm)
-write_product(Path('/absolute/new-output/planetes_reduced.fits'), p2vmred)
+write_product(
+    Path('/absolute/new-output/planetes_reduced.fits'), p2vmred,
+    quality=measure_quality(p2vmred),
+)
 ```
 
 `make_wave` always receives an explicit line list. The WAVE recipe selects the
@@ -122,7 +126,8 @@ calling script, then extract the reference on the same grid as the scans:
 ```python
 import numpy as np
 from planetes.extraction import extract_spectra_from_file, prepare_extraction
-from planetes.io.raw import check_raw_calibrations, read_raw_metadata
+from planetes.instrument import check_setup
+from planetes.io.raw import read_raw_metadata
 from planetes.p2vm import extract_p2vm_spectra, fit_p2vm
 
 grid = np.linspace(1.15e-6, 1.30e-6, 151)
@@ -133,7 +138,8 @@ scans = extract_p2vm_spectra(
 reference_path = raw / 'phase_reference.fits'
 reference_dark = science_dark  # Explicitly choose the dark for this exposure.
 metadata = read_raw_metadata(reference_path, category='SINGLE_SCI_RAW')
-check_raw_calibrations(metadata, reference_dark, flat)
+check_setup(metadata.setup, reference_dark.setup, exposure=True, role="DARK")
+check_setup(metadata.setup, flat.setup, exposure=False, role="FLAT")
 extractor = prepare_extraction(flat, wave, grid)
 reference = extract_spectra_from_file(reference_path, extractor, reference_dark)
 p2vm = fit_p2vm(scans, phase_reference=reference)
@@ -149,24 +155,31 @@ and omit unfinished acquisition keywords. Known exposure, ROI and shutter
 contradictions still fail; missing metadata stays unknown. The dictionaries above
 state physical identities explicitly: filenames and list order never assign them.
 
-The reader selects `IMAGING_DATA_SC` when present, otherwise the unique 3-D image.
-Multiple unnamed cubes require `hdu=...` in the low-level reader. A known non-ADU
-unit is rejected; missing BUNIT follows the bench ADU convention. `read_raw_header()`
-returns the unchanged primary header. `RawMetadata` contains only category, four
-shutter states (each may be None), and detector setup. All physical fields come
-from the FITS header and image dimensions. No JSON metadata is read or written.
-`build_raw_header` and `write_raw` from `planetes.io.acquisition` accept that same
-`RawMetadata`; they store category, shutters, detector, ROI/binning and integration
-time in FITS cards. Acquisition-source and capture-history records are absent.
+Raw readers and all file steps default to `IMAGING_DATA_SC`. For a primary-HDU
+bench cube, explicitly pass `hdu=0`; another named/numbered image HDU can be selected
+the same way. There is no automatic HDU search. `read_raw_metadata` also requires
+an explicit `category`, then checks any declared DPR type against it. A known
+non-ADU unit is rejected; missing BUNIT follows the bench ADU convention. Use
+Astropy `fits.getheader(path)` to inspect the original header.
+`RawMetadata` contains only category, four shutter states (each may be None), and
+detector setup. Physical fields come from the header and cube dimensions. No JSON
+metadata is read or written. Raw acquisition/writing belongs to the acquisition
+project; it is not part of this package.
 
-Save each calibration with the same `write_product` function when needed. Read it
-with `read_product(path, ExpectedClass)` from `planetes.io.fits`. QC is retained by
-default; `write_product(path, product, include_qc=False)` saves without computing
-QC. Formal recipes explicitly retain QC. The FITS encoder only serializes supplied
-measurements; `qc.measure_quality(product)` returns a dictionary of available
-statistics. Unknown values are omitted, without a separate missing-status table.
+Read calibrations with `read_product(path, ExpectedClass)`. Save them with
+`write_product(path, product)` or explicitly supplied QC:
+
+```python
+quality = measure_quality(product)
+write_product(path, product, quality=quality)
+```
+
+The writer only encodes its inputs. Recipes explicitly measure the existing QC
+set before calling the DFS writer. `qc.measure_quality(product)` returns available
+statistics; unknown values are omitted. No flags or scientific masks are changed.
 Writers generate checksums and publish through temporary files without overwriting
-existing paths; they do not automatically read back and decode their own outputs.
+existing paths. Each file is published independently; a later failure does not
+remove earlier complete outputs. Writers do not read back their own outputs.
 Product readers still check checksums, units and physical identities. FITS
 round-trip comparisons belong to the existing development tests.
 See [the retained QC set](docs/QC_PARAMETERS.md).
@@ -222,9 +235,8 @@ science: `measure_dark`, `detect_bad_pixels`, `build_flat`,
 | `instrument.py` | Detector settings and fixed physical telescope/baseline conventions |
 | `qc.py`, `plotting.py` | Descriptive quality measurements and scientific plots |
 | `io/raw.py`, `io/fits.py` | Physical raw fields, product FITS layout and reading |
-| `io/acquisition.py` | Capture metadata, raw header construction and raw writing |
-| `io/hdu.py` | Storage/computation precision, native byte order and shared FITS primitives |
-| `io/keywords.py`, `io/publication.py` | FITS names and non-overwriting publication |
+| `io/hdu.py` | Precision, native byte order, checksums and single-file staging |
+| `io/keywords.py` | Explicit FITS names, categories and QC keyword mappings |
 | `recipes/planetes_*.py` | SOF roles → step call → CPL DFS output registration |
 | `recipes/parameters.py`, `recipes/dfs.py` | Shared CPL translation only; every CPL import stays in recipes/ |
 
@@ -313,9 +325,15 @@ Version 0.14.0 removes JSON persistence, `PLANETES_META`, `CaptureMetadata`,
 exposure-source/legacy states and the header-versus-JSON reconciliation code.
 Physical fields have one location: FITS headers. Raw files no longer receive a
 private format version; existing raw headers and detector cubes can still be read
-without consulting any extra metadata extension. New products use FITS format
-**7**; older generated calibration products need regeneration. Product data layout
-and units remain documented in
+without consulting any extra metadata extension.
+
+Version 0.15.0 removes private product-format and BAD-bit marker gates. Product
+reading depends on category, actual HDUs/columns, units and physical identities,
+so a private version number alone no longer blocks a readable file. There is no
+JSON compatibility path. `write_product` takes explicit `quality` instead of
+`include_qc`; raw file steps take explicit `hdu` when the standard extension is
+not used. Raw writing and multi-file rollback have been removed from the package.
+Product data layout and units remain documented in
 [the product contract](docs/PRODUCT_CONTRACT.md); optional measurements retain
 [the QC definitions](docs/QC_PARAMETERS.md).
 

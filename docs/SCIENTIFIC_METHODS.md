@@ -1,4 +1,4 @@
-# Scientific methods in PLANETES 0.14.0
+# Scientific methods in PLANETES 0.15.0
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).

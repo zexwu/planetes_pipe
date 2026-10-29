@@ -3,6 +3,7 @@
 from cpl import ui
 
 from planetes import __version__
+from planetes.qc import measure_quality
 from planetes.io.fits import read_product
 from planetes.flat import make_flat
 from planetes.products import Bad, Dark
@@ -45,4 +46,6 @@ class PlanetesFlat(ui.PyRecipe):
         bad = read_product(paths["BAD"][0], Bad)
         flats = {read_shutter_id(path, "FLAT_RAW"): path for path in paths["FLAT_RAW"]}
         product = make_flat(flats, dark, bad, **options)
-        return save_products([("planetes_flat.fits", product)], used, self)
+        return save_products(
+            [("planetes_flat.fits", product, measure_quality(product))], used, self
+        )

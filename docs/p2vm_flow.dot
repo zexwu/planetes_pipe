@@ -1,5 +1,5 @@
 digraph P2VM {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.4, fontname="PingFang SC", fontsize=20, label="PLANETES 0.14.0 · P2VM 科学流程", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.4, fontname="PingFang SC", fontsize=20, label="PLANETES 0.15.0 · P2VM 科学流程", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=13, color="#64748b", margin="0.16,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   files [label="make_p2vm / extract_p2vm_spectra\n接收所选标定与具名 raw 路径映射\n提取光谱；核对 flat 照明与扫描调制的 output 身份"];

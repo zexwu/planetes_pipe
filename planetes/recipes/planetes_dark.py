@@ -3,6 +3,7 @@
 from cpl import ui
 
 from planetes import __version__
+from planetes.qc import measure_quality
 from planetes.dark import make_dark_products
 from planetes.recipes.dfs import read_sof, save_products
 from planetes.recipes.parameters import make_parameters, read_parameters
@@ -41,5 +42,10 @@ class PlanetesDark(ui.PyRecipe):
         paths, used = read_sof(frameset, {"DARK_RAW": 1})
         dark, bad = make_dark_products(paths["DARK_RAW"][0], **options)
         return save_products(
-            [("planetes_dark.fits", dark), ("planetes_bad.fits", bad)], used, self
+            [
+                ("planetes_dark.fits", dark, measure_quality(dark)),
+                ("planetes_bad.fits", bad, measure_quality(bad)),
+            ],
+            used,
+            self,
         )

@@ -1,4 +1,4 @@
-# PLANETES science products and FITS interface (v0.14.0)
+# PLANETES science products and FITS interface (v0.15.0)
 
 ## Design
 
@@ -75,14 +75,14 @@ explicitly reuses its main DARK when no PHASE_DARK_CALIB is selected.
 
 ## Raw bench input
 
-The reader selects IMAGING_DATA_SC when present, otherwise the unique nonempty
-3-D primary/image extension. Ambiguous cubes require explicit low-level `hdu`
-selection. Known non-ADU units are rejected; missing BUNIT follows the bench ADU
-convention. Missing physical fields remain None. The reader returns only category,
-shutter states and detector setup from FITS headers and image dimensions.
-There is no JSON reader, fallback or header-versus-JSON reconciliation. The writer
-in `io/acquisition.py` accepts the same `RawMetadata` and writes physical FITS
-cards, without acquisition-source or capture-history records.
+Raw readers and file steps default to IMAGING_DATA_SC. Nonstandard bench files
+require an explicit HDU number/name, such as `hdu=0` for a primary cube. No image
+search is performed. `read_raw_metadata(path, category=..., hdu=...)` requires the
+caller's intended raw category and rejects a contradictory declared DPR type.
+Known non-ADU units are rejected; missing BUNIT follows the bench ADU convention.
+Missing physical fields remain None. RawMetadata holds only category, shutter
+states and detector setup from FITS headers and cube dimensions. The package has
+no raw acquisition/writer interface or JSON metadata path.
 
 Python telescope/baseline dictionaries supply identities when shutter readback
 is incomplete. All known shutter states must agree with that assignment.
@@ -95,10 +95,11 @@ Python field renames (`matrix`, `baseline_outputs`) do not change FITS extension
 or column names. `FrameReducer` contains calculation state only and is constructed
 from explicitly loaded FLAT, WAVE and P2VM products.
 
-Reduced FITS files use `HIERARCH PLANETES FORMAT = 7`. P2VM scan diagnostics are
-optional. Older generated calibration products must be regenerated; the reader
-has no JSON compatibility path. Raw reading uses the physical header and cube,
-without a private raw-format version or metadata extension.
+Readers use the product category and actual required HDUs/columns, units and
+identities. No private format-version or BAD-bit marker is required or emitted.
+An older file can be read when its actual payload matches; missing required
+fields fail at access. No JSON fallback or schema-migration registry is added.
+P2VM scan diagnostics remain optional.
 
 | Category | FITS payload |
 | --- | --- |
@@ -127,8 +128,9 @@ columns use E/C and floating image payloads use 32-bit real components. Reads
 return native float64/complex128 arrays, so FITS round trips preserve the stored
 precision rather than the original unrounded calculation arrays.
 
-Writers generate per-HDU checksums, stage outputs and refuse overwrites. Recipes
-also apply CPL DFS signatures. They do not automatically reopen and decode the
+Writers generate per-HDU checksums, stage each output and refuse overwrites.
+Recipes also apply CPL DFS signatures to each file before publishing. Files are
+independent: an output error does not roll back earlier completed products. They do not automatically reopen and decode the
 completed files; round-trip checks are exercised by the development tests. Product
 reads still verify checksums, units, category and physical row identities.
 
@@ -150,9 +152,10 @@ reads still verify checksums, units, category and physical row identities.
   published without overwriting existing paths.
 - General purpose `validate_wavelength()`, `validate_gd_range()`, `positive()`,
   `fingerprint()`, `require_parent()` and object-level `validate()` are gone.
-- QC remains optional through `include_qc`. Existing Python and recipe publication
-  defaults retain QC (`True`); use `False` to skip it. The FITS encoder only
-  serializes supplied measurements. QC never changes scientific masks or weights.
+- QC is computed explicitly by the script/recipe, then passed as `quality` to the
+  writer. `quality=None` writes no QC. Numerical definitions are unchanged; QC
+  never changes scientific masks or weights. All keyword names, including the
+  existing micrometre cards, are listed explicitly in `io/keywords.py`.
 
 The raw FITS keyword dictionary and calibrated VIS/VIS2/T3 OIFITS remain
 subsequent work. Python-only calls keep their input selection and parameters
@@ -208,6 +211,8 @@ fields stay unknown; dimensions can be read directly from the detector cube.
 
 Raw-file workflows are `make_dark_products`, `make_flat`, `make_wave`,
 `make_p2vm` and `reduce_science`. They return products and leave saving explicit.
+Their `hdu` defaults to IMAGING_DATA_SC; pass the actual HDU for bench data. Each
+step explicitly checks the settings of its selected DARK/FLAT via `check_setup`.
 Array-level functions are `measure_dark`, `detect_bad_pixels`,
 `build_flat(flat_images, bad)`, `fit_wavelength_solution`, `fit_p2vm` and
 `reduce_spectra`. `flat_images` are already dark-subtracted; `build_flat` does

@@ -51,6 +51,7 @@ class CalibrationTests(unittest.TestCase):
                 baseline_cubes=bench_files(
                     "P2VM_RAW", ("43", "42", "41", "32", "31", "21")
                 ),
+                hdu=0,
                 **options,
             )
             np.testing.assert_array_equal(actual.matrix, expected.matrix)

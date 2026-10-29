@@ -8,6 +8,7 @@ from numba import njit, prange
 from numpy.typing import NDArray
 
 from .instrument import DetectorSetup
+from .io.keywords import RAW_IMAGE
 from .io.raw import iter_raw_cube
 from .io.hdu import STORAGE_RTOL
 from .products import Dark, Flat, Wave
@@ -168,10 +169,11 @@ def prepare_extraction(
 
 
 def extract_spectra_from_file(
-    path: Path, extractor: SpectralExtractor, dark: Dark
+    path: Path, extractor: SpectralExtractor, dark: Dark, *, hdu: int | str = RAW_IMAGE
 ) -> NDArray:
     """Read and extract a whole file, retaining all frames and the 16-frame chunking."""
 
     return np.concatenate(
-        [extractor.extract(chunk, dark) for chunk in iter_raw_cube(path)], axis=1
+        [extractor.extract(chunk, dark) for chunk in iter_raw_cube(path, hdu=hdu)],
+        axis=1,
     )
