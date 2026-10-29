@@ -36,7 +36,31 @@ def _detector_hdu(hdus, hdu: int | str):
 def read_raw_metadata(
     path: Path, *, category: str, hdu: int | str = kw.RAW_IMAGE
 ) -> RawMetadata:
-    """Read physical header fields for the caller's explicit raw category and HDU."""
+    """Read physical detector and shutter metadata for an explicitly classified raw file.
+
+    Parameters
+    ----------
+    path : Path
+        Raw FITS file containing a nonempty (frame, y, x) detector cube.
+    category : str
+        Expected role: DARK_RAW, FLAT_RAW, WAVELAMP_RAW, P2VM_RAW or SINGLE_SCI_RAW.
+        A declared DPR TYPE and known shutter states must agree with this role.
+    hdu : int or str, optional
+        Selected image HDU; default IMAGING_DATA_SC. No automatic HDU search.
+
+    Returns
+    -------
+    metadata : RawMetadata
+        Category, shutter states in physical T1..T4 order, and DetectorSetup.
+        Missing physical fields remain None; width/height come from cube dimensions.
+        FITS one-based ROI origins are converted to zero-based Python coordinates.
+
+    Notes
+    -----
+    Known non-ADU units are rejected. Missing BUNIT follows the bench ADU
+    convention. Missing exposure/shutter metadata is not evidence of a match;
+    callers choose calibrations and explicit file identities. Raw data are read only.
+    """
     definition = kw.RAW_TYPES[category]
     with afits.open(path, memmap=True) as hdus:
         header = hdus[0].header
@@ -83,7 +107,26 @@ def read_raw_metadata(
 
 
 def iter_raw_cube(path: Path, *, hdu: int | str = kw.RAW_IMAGE):
-    """Read the selected cube in 16-frame chunks at computation precision."""
+    """Yield detector frames from one explicitly selected raw FITS image HDU.
+
+    Parameters
+    ----------
+    path : Path
+        Raw FITS cube with nonempty (frame, y, x) dimensions, in ADU.
+    hdu : int or str, optional
+        Image HDU name/index; default IMAGING_DATA_SC, or 0 for primary-HDU data.
+
+    Yields
+    ------
+    chunk : ndarray, shape (up to 16 frames, y, x)
+        Native float64 detector samples in original frame order. All frames,
+        including the final partial chunk, are yielded without dark subtraction.
+
+    Notes
+    -----
+    The FITS handle stays open during iteration. This checks image dimensions
+    and declared units; physical role/setup checking uses read_raw_metadata.
+    """
     with afits.open(path, memmap=True) as hdus:
         data = _detector_hdu(hdus, hdu).data
         for start in range(0, len(data), CHUNK_FRAMES):

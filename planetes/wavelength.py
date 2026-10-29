@@ -32,7 +32,34 @@ def make_wave(
     reference: WavelengthReference,
     hdu: int | str = RAW_IMAGE,
 ) -> Wave:
-    """Read the lamp with its DARK and FLAT geometry; return wavelengths in metres."""
+    """Calibrate detector wavelengths from a lamp exposure and a laboratory line list.
+
+    Parameters
+    ----------
+    path : Path
+        Raw lamp ADU cube, shaped (frame, y, x).
+    dark : Dark
+        Mean dark on the lamp detector grid, selected for the lamp exposure.
+        The lamp may require a different dark from the other calibrations.
+    flat : Flat
+        Extraction pixel indices and trace centers on the same detector grid.
+    reference : WavelengthReference
+        Increasing laboratory wavelengths in metres. The caller selects the
+        line list explicitly; this function does not select a default file.
+    hdu : int or str, optional
+        Lamp image HDU; use 0 explicitly for primary-HDU bench cubes.
+
+    Returns
+    -------
+    wave : Wave
+        Wavelength map in metres, shaped (24 outputs, detector x), with accepted
+        fit residuals and their zero-based detector coordinates. Saving is explicit.
+
+    Notes
+    -----
+    Average all lamp frames, subtract dark once, then fit the extracted lines.
+    This step uses FLAT geometry but does not divide the lamp by the flat response.
+    """
 
     raw = read_raw_metadata(path, category="WAVELAMP_RAW", hdu=hdu)
     check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
@@ -47,7 +74,36 @@ def make_wave(
 def fit_wavelength_solution(
     wave_image_adu: NDArray, flat: Flat, reference_wavelength_m: NDArray
 ) -> Wave:
-    """Fit the retained wavelength solution from a dark-subtracted lamp image."""
+    """Fit a global cubic wavelength surface to matched lamp-line positions.
+
+    Parameters
+    ----------
+    wave_image_adu : ndarray, shape (y, x)
+        Mean lamp image with its selected dark already subtracted, in ADU.
+    flat : Flat
+        Sparse extraction pixels and trace centers on the lamp detector grid.
+        The 24 outputs must be ordered by increasing detector y.
+    reference_wavelength_m : ndarray, shape (line,)
+        Strictly increasing laboratory wavelengths in metres. Matching indices
+        refer to sorted lines, so the supplied list must already be ordered.
+
+    Returns
+    -------
+    wave : Wave
+        wavelength_map_m is shaped (24, x). fit_residual_m stores observed
+        laboratory wavelength minus fitted wavelength for accepted samples;
+        fit_x_pixels and fit_y_pixels give their zero-based detector positions.
+
+    Notes
+    -----
+    Use the mean of the last four outputs as the reference lamp spectrum.
+    Match it to the line list with quadratic RANSAC, align each output to that
+    reference, then fit lambda(x, y) with all monomials of total degree <= 3.
+    Three rounds reject residuals beyond 3 population standard deviations.
+    No per-line uncertainty weighting or absolute-accuracy certification is used.
+    The last-four-output choice is a fixed bench convention, not a measured S/N
+    selection. Its suitability must be checked for a different detector layout.
+    """
 
     xs = flat.profile_x_pixels
     ys = flat.profile_y_pixels
@@ -60,9 +116,10 @@ def fit_wavelength_solution(
     # Match lamp peaks to the known wavelength reference.
     lines_m = reference_wavelength_m
 
-    line_x = []  # To store x-centroids for all lines
-    line_y = []  # To store y-centroids for all lines
-    line_wave_m = []  # To store wavelengths for all matched lines
+    line_x = []
+    line_y = []
+    line_wave_m = []
+    # Fixed bench reference quartet; no automatic S/N-based output selection.
     mean_spectrum = lamp_spectra[-4:].mean(axis=0)
 
     # Gaussian-equivalent MAD threshold above the median.
@@ -85,11 +142,11 @@ def fit_wavelength_solution(
     for output in range(N_OUTPUTS):
         spec = lamp_spectra[output]
 
-        # Find peaks in the spectrum of individual region;
+        # Locate peaks independently, then align them to the reference quartet.
         peak_pixels, _ = find_peaks(spec, height=peak_threshold(spec), distance=5)
 
-        # Add sub-pixel refinement for the detected peaks;
-        # assume the log(line) is approximated by a parabola near the peak
+        # A Gaussian line has a quadratic log profile near its peak. Refine
+        # only positive samples with sufficient log curvature (fixed bench cuts).
         pn1, pct, pp1 = spec[peak_pixels - 1], spec[peak_pixels], spec[peak_pixels + 1]
         _pn1, _pct, _pp1 = (
             np.log(abs(pn1) + 1e-8),
@@ -103,8 +160,7 @@ def fit_wavelength_solution(
         p_shift[good] = 0.5 * (_pp1 - _pn1)[good] / (2 * _pct - _pp1 - _pn1)[good]
         peak_pixels = 1.0 * peak_pixels + p_shift
 
-        # match the observed peaks to the mean spectrum peaks
-        # to filter out spurious detections
+        # Constrain inter-output shifts with a near-unity quadratic pixel map.
         matches, _ = match_peaks_grid(
             mean_peaks,
             peak_pixels,
@@ -193,8 +249,31 @@ def match_lines_ransac(
     min_inliers: int = 5,
     n_iter: int = 10000,
 ) -> tuple[NDArray, tuple[float, ...]]:
-    """Match reference wavelengths to detected peak pixels with a quadratic RANSAC fit."""
-    # 1. Setup Data
+    """Match laboratory wavelengths to peak pixels with a monotonic quadratic model.
+
+    Parameters
+    ----------
+    theoretical_lines : sequence of float
+        Laboratory wavelengths in metres; sorted internally.
+    obs_peaks : sequence of float
+        Detected zero-based peak coordinates in pixels; sorted internally.
+    tol : float, optional
+        Maximum absolute pixel mismatch for a pair; the comparison is strict.
+    min_inliers : int, optional
+        Minimum accepted pairs; fewer pairs raise RuntimeError.
+    n_iter : int, optional
+        Number of random three-pair proposals. The Numba random seed is fixed at 0.
+
+    Returns
+    -------
+    matches : ndarray of int, shape (match, 2)
+        (line index, peak index) pairs into the sorted inputs, with no repeated
+        peak assignment. These are not indices into an unsorted original input.
+    coefficients : tuple of float
+        Least-squares (a, b, c) for pixel = a * wavelength**2 + b * wavelength + c,
+        refitted to all accepted pairs. Units are pixel/m**2, pixel/m and pixel.
+    """
+    # Match in wavelength/pixel order; returned indices refer to these sorted arrays.
     obs = np.sort(obs_peaks)
     mod = np.sort(theoretical_lines)
 
@@ -202,10 +281,10 @@ def match_lines_ransac(
     if n_obs < 3 or n_mod < 3:
         raise RuntimeError("Not enough points to match.")
 
-    # 2. Run the ransac Kernel
+    # Score monotonic quadratic models using a fixed random sequence.
     best_coeffs = _ransac_kernel(obs, mod, n_iter, tol, n_mod, n_obs)
 
-    # 3. Reconstruct the Matches
+    # Advance the peak pointer after each match so a peak cannot be reused.
     a, b, c = best_coeffs
     pred_pixels = a * mod**2 + b * mod + c
 
@@ -223,8 +302,7 @@ def match_lines_ransac(
         msg = f"line matching failed: only {len(final_inliers)} matches found."
         raise RuntimeError(msg)
 
-    # 4. Final Fit
-    # Refine the quadratic using ALL inliers (Least Squares)
+    # Refit the selected pairs without constraining the proposal coefficients.
     final_mi = [x[0] for x in final_inliers]
     final_oi = [x[1] for x in final_inliers]
 
@@ -241,55 +319,70 @@ def match_peaks_grid(
     offset_limit: float = 20,
     slope_bounds: tuple[float, float] = (0.98, 1.02),
     curve_limit: float = 1e-3,
-    steps_per_unit: float = 2.0,  # Density of search. Higher = more robust but slower.
+    steps_per_unit: float = 2.0,
 ) -> tuple[NDArray, tuple[float, ...]]:
-    """Match two sets of spectral peak pixels with a quadratic grid search."""
-    # 1. Prepare Data
+    """Align two detected peak lists using a quadratic pixel-coordinate transform.
+
+    Parameters
+    ----------
+    reference_pixels, observed_pixels : sequence of float
+        Zero-based peak positions in pixels; each input is sorted internally.
+    tol : float, optional
+        Pixel matching tolerance. Final accepted pairs satisfy abs(residual) < tol.
+    min_inliers : int, optional
+        Minimum matched pairs required to return a fit; otherwise raise RuntimeError.
+    offset_limit : float, optional
+        Symmetric search bound for constant offset c, in pixels.
+    slope_bounds : tuple of float, optional
+        Lower and upper search bounds for dimensionless scale b.
+    curve_limit : float, optional
+        Positive symmetric bound for curvature a, in inverse pixels.
+    steps_per_unit : float, optional
+        Offset-grid density: c step = tol / steps_per_unit. Slope and curvature
+        sampling have their own fixed rules and do not use this parameter.
+
+    Returns
+    -------
+    matches : ndarray of int, shape (match, 2)
+        Indices into the sorted (reference, observed) lists, assigned one-to-one.
+    coefficients : tuple of float
+        Refitted (a, b, c) for observed_pixel = a * reference_pixel**2
+        + b * reference_pixel + c. The final least-squares fit is unconstrained
+        and may leave the initialization grid bounds.
+    """
     obs = np.sort(observed_pixels)
     mod = np.sort(reference_pixels)
 
-    # 2. Auto-Calculate Grid Steps
-    # We need step sizes small enough so we don't "step over" a valid match.
-    # Rule of thumb: Step size should cause a shift of ~0.5 * tol
-
-    # Offset (c) steps: 0.5 pixels
+    # Sample constant offsets at the requested fraction of the matching tolerance.
     c_step = tol / steps_per_unit
     c_grid = np.arange(-offset_limit, offset_limit + c_step, c_step)
 
-    # Slope (b) steps:
-    # A change in slope d_b shifts the last pixel by d_b * pixel_span.
-    # We want d_b * pixel_span ~ 0.5 * tol  =>  d_b = 0.5 * tol / pixel_span
+    # Adjacent slopes shift the furthest reference peak by half the tolerance.
     pixel_span = np.max(np.abs(mod)) if len(mod) > 0 else 1000.0
     b_step = (tol / 2.0) / pixel_span
     b_grid = np.arange(slope_bounds[0], slope_bounds[1] + b_step, b_step)
 
-    # Curvature (a) steps:
-    # Usually we can search just 3 points: [-limit, 0, +limit] or coarse steps
-    # If a is very small, we might skip it in the grid and solve it in the final fit.
-    # Let's do a coarse grid for robustness.
+    # Five curvature proposals span [-curve_limit, +curve_limit].
     a_step = curve_limit / 2.0  # 5 steps total
     a_grid = np.arange(
         -curve_limit, curve_limit + a_step / 10.0, a_step
     )  # small epsilon
 
-    # Sanity check on grid size
+    # Report expensive searches without changing the requested grid.
     total_iters = len(a_grid) * len(b_grid) * len(c_grid)
     if total_iters > 2e6:
         log.warning(f"Grid search is large ({total_iters} iterations).")
 
-    # 3. Run Grid Search
-    # This finds the "Best Approximate" parameters
+    # Choose a one-to-one matching proposal on the fixed grid.
     a_best, b_best, c_best = _grid_search_kernel(obs, mod, tol, a_grid, b_grid, c_grid)
 
-    # 4. Final Refinement (The "Polish" Step)
-    # Use the approximate grid parameters to identify inliers, then run Least Squares
+    # Reconstruct pairs using the final strict tolerance before least-squares fitting.
     pred = a_best * mod**2 + b_best * mod + c_best
     matches = []
     ptr = 0
     for i, target in enumerate(pred):
         while ptr < len(obs) and obs[ptr] < target - tol:
             ptr += 1
-        # Check if match
         if ptr < len(obs) and abs(obs[ptr] - target) < tol:
             matches.append((i, ptr))
             ptr += 1
@@ -299,7 +392,7 @@ def match_peaks_grid(
 
     final_idx = np.array(matches)
 
-    # 5. Polyfit on the identified inliers for sub-pixel accuracy
+    # The refit uses the accepted pairs and may leave the initialization bounds.
     final_coeffs = np.polyfit(mod[final_idx[:, 0]], obs[final_idx[:, 1]], 2)
 
     return final_idx, tuple(final_coeffs)
@@ -309,21 +402,36 @@ def match_peaks_grid(
 def _ransac_kernel(
     obs: NDArray, mod: NDArray, n_iter: int, tol: float, n_mod: int, n_obs: int
 ) -> tuple[float, float, float]:
-    """
-    The heavy lifting kernel compiled to machine code.
-    Returns the best coefficients found.
+    """Search quadratic wavelength-to-pixel models and retain the most matched lines.
+
+    Parameters
+    ----------
+    obs, mod : ndarray
+        Increasing observed pixels and laboratory wavelengths [m], respectively.
+    n_iter : int
+        Number of random three-pair proposals, using the fixed random seed 0.
+    tol : float
+        Strict pixel matching tolerance.
+    n_mod, n_obs : int
+        Lengths of mod and obs; supplied by match_lines_ransac.
+
+    Returns
+    -------
+    coefficients : tuple of float
+        (a, b, c) for pixel = a * wavelength**2 + b * wavelength + c.
+        Only models increasing over the laboratory wavelength range are scored.
+        Tied scores retain the first model; the caller checks the final match count.
     """
     best_count = -1
     best_coeffs = (0.0, 0.0, 0.0)
 
-    # Pre-calculate min/max for monotonicity check optimization
+    # A quadratic is monotonic on this interval if its endpoint slopes are positive.
     mod_min = mod[0]
     mod_max = mod[-1]
     np.random.seed(0)  # For reproducibility in Numba (uses global state)
 
     for _ in range(n_iter):
-        # 1. Fast Random Selection of 3 unique indices
-        # (Faster than numpy.choice with replace=False inside a loop)
+        # Draw three distinct laboratory lines without replacement.
         i1 = np.random.randint(0, n_mod)
         i2 = np.random.randint(0, n_mod)
         while i1 == i2:
@@ -332,8 +440,7 @@ def _ransac_kernel(
         while i3 == i1 or i3 == i2:
             i3 = np.random.randint(0, n_mod)
 
-        # Sort indices to ensure stability
-        # (Though not strictly necessary for solving, good for consistency)
+        # Pair samples in increasing wavelength and pixel order.
         if i1 > i2:
             i1, i2 = i2, i1
         if i2 > i3:
@@ -341,12 +448,10 @@ def _ransac_kernel(
         if i1 > i2:
             i1, i2 = i2, i1
 
-        # Correct sampling based on original logic:
-        # Sample 3 unique MOD indices
         idxs_m = np.array([i1, i2, i3])
         m_samp = mod[idxs_m]
 
-        # Sample 3 unique OBS indices
+        # Draw three distinct observed peaks.
         o1 = np.random.randint(0, n_obs)
         o2 = np.random.randint(0, n_obs)
         while o1 == o2:
@@ -355,25 +460,20 @@ def _ransac_kernel(
         while o3 == o1 or o3 == o2:
             o3 = np.random.randint(0, n_obs)
         idxs_o = np.array([o1, o2, o3])
-        # Sort the OBS samples to match the sorted MOD samples (assuming monotonic mapping)
-        # The original code did `sort(rng.choice)`,
-        # implying it matches lowest-to-lowest, etc.
+        # The increasing-dispersion assumption pairs lowest with lowest.
         idxs_o_sorted = np.sort(idxs_o)
         p_samp = obs[idxs_o_sorted]
 
-        # 2. Solve Quadratic Equation (Vandermonde)
-        # We solve: A * c = y  ->  c = inv(A) * y
-        # Hardcoded 3x3 solver is faster, but linalg.solve is acceptable in Numba
+        # Analytic quadratic through the three proposed wavelength/pixel pairs.
         x1, x2, x3 = m_samp[0], m_samp[1], m_samp[2]
         y1, y2, y3 = p_samp[0], p_samp[1], p_samp[2]
 
-        # Denominator for Cramer's rule / Lagrange (avoids matrix overhead)
+        # Skip repeated wavelength values even when their indices are distinct.
         denom = (x1 - x2) * (x1 - x3) * (x2 - x3)
         if denom == 0:
-            continue  # Should not happen with unique floats
+            continue
 
-        # Lagrange Interpolation / Analytic quadratic fit
-        # A bit verbose but very fast (no matrix alloc)
+        # Coefficients of pixel = a * wavelength**2 + b * wavelength + c.
         a = (x3 * (y2 - y1) + x2 * (y1 - y3) + x1 * (y3 - y2)) / denom
         b = (x3 * x3 * (y1 - y2) + x2 * x2 * (y3 - y1) + x1 * x1 * (y2 - y3)) / denom
         c = (
@@ -382,30 +482,23 @@ def _ransac_kernel(
             + x1 * x2 * (x1 - x2) * y3
         ) / denom
 
-        # 3. Monotonicity Check Optimization
-        # Derivative d(Pix)/d(Wave) = 2*a*x + b
-        # Since this is linear, we only check the ENDPOINTS of the range.
-        # If it's > 0 at min and max, it's > 0 everywhere in between.
+        # Positive endpoint derivatives ensure increasing dispersion throughout.
         if (2 * a * mod_min + b <= 0) or (2 * a * mod_max + b <= 0):
             continue
 
-        # 4. Inlier Counting (Zero Allocation)
-        # Instead of building a list, we just count. Memory allocation is slow.
+        # Count one-to-one matches; the monotonic model permits a forward-only scan.
         current_inliers = 0
         obs_ptr = 0
 
         for m_idx in range(n_mod):
-            # Calculate prediction on the fly (no array allocation)
             mx = mod[m_idx]
             target = a * mx**2 + b * mx + c
 
-            # Fast scan (Two pointers)
             while obs_ptr < n_obs and obs[obs_ptr] < target - tol:
                 obs_ptr += 1
 
             if obs_ptr < n_obs:
                 diff = obs[obs_ptr] - target
-                # abs(diff) < tol
                 if diff < tol and diff > -tol:
                     current_inliers += 1
                     obs_ptr += 1
@@ -426,8 +519,23 @@ def _grid_search_kernel(
     b_grid: NDArray,
     c_grid: NDArray,
 ) -> tuple[float, float, float]:
-    """
-    Scans the parameter grid and returns the best (a,b,c) parameters.
+    """Select the quadratic pixel transform with the largest one-to-one match count.
+
+    Parameters
+    ----------
+    obs, mod : ndarray
+        Increasing observed and reference peak coordinates in pixels.
+    tol : float
+        Inclusive pixel tolerance for scoring grid proposals.
+    a_grid, b_grid, c_grid : ndarray
+        Curvature [1/pixel], scale [dimensionless] and offset [pixel] grids.
+
+    Returns
+    -------
+    parameters : tuple of float
+        Best (a, b, c) for observed = a * reference**2 + b * reference + c.
+        Ties retain the first proposal. Return early if all reference peaks match;
+        the caller subsequently applies its strict tolerance and refits the pairs.
     """
     n_obs = len(obs)
     n_mod = len(mod)
@@ -435,11 +543,9 @@ def _grid_search_kernel(
     best_score = -1
     best_params = (0.0, 1.0, 0.0)
 
-    # Iterate over the grid
     for a in a_grid:
         for b in b_grid:
             for c in c_grid:
-                # 2. Inlier Counting
                 score = 0
                 ptr = 0
 
@@ -455,14 +561,20 @@ def _grid_search_kernel(
                     best_score = score
                     best_params = (a, b, c)
 
-                    # Early exit:
                     if best_score == n_mod:
                         return best_params
     return best_params
 
 
 def wavelength_reference_path() -> Path:
-    """Return the installed static line-list file."""
+    """Locate the laboratory line-list FITS file distributed with this package.
+
+    Returns
+    -------
+    path : Path
+        Installed data/wavelength_lines.fits. Read it as WavelengthReference;
+        wavelengths are metres and origin labels identify the reference entries.
+    """
     from importlib.resources import files
 
     return Path(str(files("planetes").joinpath("data/wavelength_lines.fits")))

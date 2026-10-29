@@ -56,7 +56,32 @@ def _detector_table(product):
 
 
 def encode_product(product, header=None, *, quality=None):
-    """Encode a product; FITS units and ESO keywords stay in this I/O layer."""
+    """Encode an in-memory scientific product as a FITS HDU list.
+
+    Parameters
+    ----------
+    product : Dark, Bad, Flat, Wave, WavelengthReference, P2VM or P2VMRed
+        Product to encode. Saved DARK requires measured RMS and n_frames >= 2;
+        P2VMRED requires both GD and differential phase.
+    header : astropy.io.fits.Header or None, optional
+        Starting primary header, copied before modification. Recipes pass the
+        DFS header to retain input/parameter provenance. Raw DPR cards are removed.
+    quality : mapping or None, optional
+        Explicit metric -> (value, comment) entries from measure_quality.
+        None writes no QC. This function does not calculate quality statistics.
+
+    Returns
+    -------
+    hdus : astropy.io.fits.HDUList
+        Encoded extensions and ESO product metadata, ready for the writer.
+        Floating payloads use float32/complex64; valid extraction pixel coordinates
+        become one-based on disk. No file is written and no checksum is added here.
+
+    Notes
+    -----
+    Wavelength and GD remain metres; response phase is radians and differential
+    phase is degrees. FITS encoding does not perform scientific calibration.
+    """
     if type(product) not in CATEGORIES:
         raise TypeError(
             "Only complete DARK/BAD/calibration/science objects can be saved"
@@ -248,7 +273,28 @@ def encode_product(product, header=None, *, quality=None):
 
 
 def read_product(path: Path, cls=None):
-    """Read a PLANETES FITS product, retaining physical units and identities."""
+    """Read a PLANETES FITS product and check its stored identity, units and checksums.
+
+    Parameters
+    ----------
+    path : Path
+        Product FITS file with valid CHECKSUM and DATASUM in every HDU.
+    cls : product class or None, optional
+        Expected class, such as Dark or P2VM. A mismatch raises ValueError.
+        None chooses the class from ESO PRO CATG.
+
+    Returns
+    -------
+    product : Dark, Bad, Flat, Wave, WavelengthReference, P2VM or P2VMRed
+        Decoded product. Floating arrays are native float64/complex128, integers
+        and flags retain their types, and extraction coordinates are zero-based.
+
+    Notes
+    -----
+    Promoting stored float32 arrays does not recover discarded precision.
+    This reader checks file representation and physical identities; numerical
+    entry points check the geometry and wavelength coverage needed for calculation.
+    """
     with afits.open(path) as hdus:
         hdr = hdus[0].header
         if hdr.get("INSTRUME") != "PLANETES":
@@ -404,7 +450,26 @@ def read_product(path: Path, cls=None):
 
 
 def write_product(path: Path, product, *, quality=None):
-    """Write a product and supplied QC, without replacing an existing file."""
+    """Save one scientific product without replacing any existing destination.
+
+    Parameters
+    ----------
+    path : Path
+        New output FITS path. Parent directories are created if necessary;
+        an existing destination raises OSError and is left intact.
+    product : Dark, Bad, Flat, Wave, WavelengthReference, P2VM or P2VMRed
+        Complete product accepted by encode_product; see its unit/storage contract.
+    quality : mapping or None, optional
+        Explicit metric -> (value, comment) entries, normally from measure_quality.
+        None omits QC; the writer does not compute it.
+
+    Notes
+    -----
+    Write checksummed FITS to a temporary file in the destination directory, then
+    publish it with a non-overwriting hard link. Each file is independent. Plain
+    Python output does not record input paths or recipe parameters; ESO recipes
+    use the separate DFS writer for those records. Returns None.
+    """
     encoded = encode_product(product, quality=quality)
     with new_fits_file(path) as temporary:
         encoded.writeto(temporary, checksum=True)

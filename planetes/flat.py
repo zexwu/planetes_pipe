@@ -27,10 +27,37 @@ def make_flat(
     hdu: int | str = RAW_IMAGE,
     aperture_width_pixels: float = APERTURE_WIDTH_PIXELS,
 ) -> Flat:
-    """Read four telescope flats with their DARK/BAD; return response and geometry.
+    """Subtract the selected dark and calibrate the detector extraction geometry.
 
-    ``aperture_width_pixels`` is the full extraction aperture in detector pixels.
-    Supply the fixed {telescope: path} mapping, with keys 4,3,2,1 as strings.
+    Parameters
+    ----------
+    telescope_flats : mapping of str to Path
+        Four raw ADU cubes keyed by physical telescope: '4', '3', '2', '1'.
+        Header shutter states, when present, must agree with these identities.
+    dark : Dark
+        Selected mean dark in ADU on exactly the raw detector grid. Known DIT,
+        ROI and detector settings must match; dimensions are checked even when
+        setup is unknown. No dark scaling or broadcasting is allowed.
+    bad : Bad
+        Detector bit mask shaped (y, x); every nonzero pixel is excluded from
+        the sparse extraction aperture.
+    hdu : int or str, optional
+        Raw image HDU shared by the four files; use 0 for primary-HDU cubes.
+    aperture_width_pixels : float, optional
+        Full extraction aperture about the fitted trace, in pixels; default 10.
+        This width is independent of the fitted Gaussian sigma.
+
+    Returns
+    -------
+    flat : Flat
+        Mean response in ADU, zero-based traces and sparse pixel indices,
+        Gaussian sigmas, per-telescope total fluxes and detector setup.
+        Saving is left to the caller.
+
+    Notes
+    -----
+    Each file is averaged over all its frames, then the four dark-subtracted
+    images receive equal weight. Physical outputs are ordered by increasing y.
     """
 
     if set(telescope_flats) != set(TELESCOPES):
@@ -51,7 +78,13 @@ def make_flat(
         if setup is None:
             setup = raw.setup
         check_setup(raw.setup, setup, exposure=False, role="flat sequence")
-        maps.append(frame_mean(iter_raw_cube(path, hdu=hdu)) - dark.mean_adu)
+        image = frame_mean(iter_raw_cube(path, hdu=hdu))
+        if image.shape != dark.mean_adu.shape:
+            raise ValueError(
+                f"Flat and DARK detector shapes differ: "
+                f"{image.shape} != {dark.mean_adu.shape} ({path})"
+            )
+        maps.append(image - dark.mean_adu)
     result = build_flat(maps, bad, aperture_width_pixels=aperture_width_pixels)
     return replace(result, setup=setup)
 
@@ -63,7 +96,33 @@ def build_flat(
     n_outputs: int = N_OUTPUTS,
     aperture_width_pixels: float = APERTURE_WIDTH_PIXELS,
 ) -> Flat:
-    """Build the flat response and extraction traces from dark-subtracted images."""
+    """Locate spectral traces and build their bad-pixel-masked extraction apertures.
+
+    Parameters
+    ----------
+    flat_images : list of ndarray
+        Four already dark-subtracted mean images in ADU, each shaped (y, x),
+        ordered T4, T3, T2, T1. No dark subtraction occurs here.
+    bad : Bad
+        Detector bit mask on the same grid; nonzero pixels are excluded.
+    n_outputs : int, optional
+        Number of traces to retain from the strongest spatial peaks; normally 24.
+    aperture_width_pixels : float, optional
+        Full aperture in pixels. Select abs(y - trace_y) < width / 2.
+
+    Returns
+    -------
+    flat : Flat
+        Averaged response, cubic-smoothed trace centers, fitted Gaussian sigmas
+        and sparse apertures. Pixel coordinates are zero-based. Paired (-1, -1)
+        entries mark bad pixels or padding. Detector setup is left unset.
+
+    Notes
+    -----
+    Trace centers are median-filtered over three columns, then fitted by a cubic
+    using position errors < 0.5 pixel and columns 50 < x < nx - 50. These fixed
+    bench criteria are retained; they are not an adaptive trace-quality model.
+    """
     flat_map = np.mean(flat_images, axis=0)
     if bad.bad_pixel_flags.shape != flat_map.shape:
         raise ValueError("BAD and FLAT detector shapes differ")
@@ -97,7 +156,10 @@ def build_flat(
             flat_map, bad_map, ref_x=w // 2, ref_y=ref_y, range_y=h_half
         )
 
+        # Smooth isolated column fluctuations before the global cubic trace fit.
         ys_med = medfilt(ys, kernel_size=3)
+        # Fixed bench cuts: formal center error < 0.5 pixel and an interior x range.
+        # The 50-pixel edge exclusion is retained, not inferred from this exposure.
         good = (ys_err < 0.5) & (np.arange(w) < w - 50) & (np.arange(w) > 50)
         coeffs = np.polyfit(xs[good], ys_med[good], deg=3)
         trace_y = np.polyval(coeffs, xs)
@@ -136,13 +198,45 @@ def build_flat(
 
 @njit(fastmath=True, cache=True)
 def gaussian(x, a, x0, sigma, c):
+    """Evaluate a Gaussian spatial profile plus a constant background.
+
+    Parameters
+    ----------
+    x : ndarray
+        Pixel coordinates at which to evaluate the profile.
+    a : float
+        Peak height above the background, in ADU.
+    x0, sigma : float
+        Center and Gaussian standard deviation, in pixels.
+    c : float
+        Constant background in ADU.
+
+    Returns
+    -------
+    profile : ndarray
+        ADU values at x, with the same shape as x.
+    """
     return a * np.exp(-0.5 * ((x - x0) / sigma) ** 2) + c
 
 
 @njit(fastmath=True, cache=True)
 def gaussian_jacobian(x, a, x0, sigma):
-    """
-    Returns partial derivatives wrt (a, x0, sigma, c)
+    """Evaluate profile derivatives in the fit's parameter order.
+
+    Parameters
+    ----------
+    x : ndarray
+        Spatial pixel coordinates.
+    a : float
+        Gaussian peak height above background, in ADU.
+    x0, sigma : float
+        Center and standard deviation in pixels.
+
+    Returns
+    -------
+    da, dx0, dsigma, dc : ndarray
+        Derivatives of the ADU model with respect to (a, x0, sigma, c).
+        Each array has the same shape as x.
     """
     dx = x - x0
     inv_s2 = 1.0 / (sigma * sigma)
@@ -158,8 +252,29 @@ def gaussian_jacobian(x, a, x0, sigma):
 
 @njit(fastmath=True, cache=True)
 def fit_gaussian(x, y, p0, max_iter=6):
-    """
-    Fast nonlinear Gaussian fit using Gauss–Newton.
+    """Fit an unweighted Gaussian plus background to one spatial cross-section.
+
+    Parameters
+    ----------
+    x, y : ndarray, shape (sample,)
+        Pixel coordinates and corresponding ADU values, after bad-pixel removal.
+    p0 : ndarray, shape (4,)
+        Initial (amplitude_adu, center_pixel, sigma_pixel, background_adu).
+    max_iter : int, optional
+        Number of damped Gauss-Newton updates; default 6, with no convergence exit.
+
+    Returns
+    -------
+    parameters : ndarray, shape (4,)
+        Fitted values in the same order as p0; sigma is bounded below by 0.3 pixel.
+    center_error : float
+        Formal center error in pixels from residual-scaled normal equations.
+        A singular/nonfinite system returns p0 and an error sentinel of 1e8.
+
+    Notes
+    -----
+    The diagonal damping is fixed at 1e-3. The error estimate is a local fit
+    heuristic, not a propagated detector-noise uncertainty.
     """
 
     a, x0, sigma, c = p0
@@ -205,7 +320,34 @@ def fit_gaussian(x, y, p0, max_iter=6):
 
 
 def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
-    """Return trace centers, position errors and accepted Gaussian sigma per column."""
+    """Follow one Gaussian trace from a reference column in both x directions.
+
+    Parameters
+    ----------
+    image : ndarray, shape (y, x)
+        Dark-subtracted detector image in ADU.
+    bad_mask : ndarray, shape (y, x)
+        Zero denotes a usable pixel; all other values are excluded from fitting.
+    ref_x, ref_y : int
+        Zero-based starting column and approximate trace center in pixels.
+    range_y : int
+        Height of the spatial fit window, in pixels, recentered on the last fit.
+
+    Returns
+    -------
+    centers : ndarray, shape (x,)
+        Trace center in pixels; retain the last center when a new fit is rejected.
+    position_errors : ndarray, shape (x,)
+        Center-error estimates used by the later trace-selection rule. With fewer
+        than five usable pixels, the previous sigma is used as the legacy fallback.
+    gaussian_sigma : ndarray, shape (x,)
+        Accepted fit widths in pixels; NaN where no width was accepted.
+
+    Notes
+    -----
+    Accept an update only if its center moves < 2 pixels and its error is < 0.5
+    pixel. These criteria and the low-sample fallback are fixed bench choices.
+    """
     ny, nx = image.shape
     y_centers = np.full(nx, np.nan)
     y_errs = np.full(nx, np.nan)

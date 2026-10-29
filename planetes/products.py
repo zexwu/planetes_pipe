@@ -65,7 +65,7 @@ class P2VM:
 
     matrix: Array  # (data channel, output, wavelength)
     wavelength_m: Array  # (wavelength,)
-    baseline_outputs: dict[int, list[int]]
+    baseline_outputs: dict[int, list[int]]  # baseline index -> A,C,B,D outputs
     transmission: Array  # (output, telescope, wavelength)
     coherence_amplitude: Array  # (output, baseline, wavelength)
     coherence_phase_rad: Array  # (output, baseline, wavelength)
@@ -90,7 +90,7 @@ class P2VMRed:
     visibility_amplitude: Array  # (frame, baseline, wavelength)
     flags: Array  # bool (frame, baseline, wavelength)
     wavelength_m: Array
-    baseline_outputs: dict[int, list[int]]
+    baseline_outputs: dict[int, list[int]]  # baseline index -> A,C,B,D outputs
     group_delay_m: Array | None = None  # (frame, baseline)
     differential_phase_deg: Array | None = None  # (frame, baseline, wavelength)
 
@@ -101,5 +101,5 @@ class P2VMSpectra:
 
     telescope_spectra: Array  # (telescope, output, frame, wavelength)
     baseline_spectra: Array  # (baseline, output, frame, wavelength)
-    baseline_outputs: dict[int, list[int]]
+    baseline_outputs: dict[int, list[int]]  # baseline index -> A,C,B,D outputs
     wavelength_m: Array

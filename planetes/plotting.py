@@ -30,7 +30,27 @@ def save_reduction_plots(
     object_label: str = "PLANETES",
     full: bool = False,
 ) -> None:
-    """Write the existing diagnostic plots from an in-memory reduced product."""
+    """Write a multipage PDF of per-frame instrumental reduction diagnostics.
+
+    Parameters
+    ----------
+    reduced : P2VMRed
+        Complete product including GD [m] and differential phase [deg]. A live
+        preview with those fields set to None is insufficient for these plots.
+    output : Path
+        New PDF destination; an existing file raises FileExistsError.
+    object_label : str, optional
+        Display label used in page titles; no physical target inference is made.
+    full : bool, optional
+        False writes flux, coherent flux, VISAMP, phase and GD summary pages.
+        True adds differential-phase pages sampled every tenth frame/channel.
+
+    Notes
+    -----
+    The VISAMP page masks flagged samples. Other diagnostic pages show their
+    stored arrays without applying a new rejection rule. Wavelength-dependent
+    plots currently use channel index on the x axis. Returns None.
+    """
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite existing diagnostic: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)

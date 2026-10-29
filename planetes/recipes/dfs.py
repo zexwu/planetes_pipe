@@ -14,6 +14,19 @@ from planetes.products import P2VM, P2VMRed, Wave, WavelengthReference
 
 
 def cpl_frame_type(cls):
+    """Return the CPL image/table classification for a scientific product class.
+
+    Parameters
+    ----------
+    cls : type
+        Product class, not an instance. Wave, WavelengthReference, P2VM and
+        P2VMRed use TABLE; detector Dark/Bad/Flat products use IMAGE.
+
+    Returns
+    -------
+    frame_type : cpl.ui.Frame.FrameType
+        Classification used when registering the generated DFS product.
+    """
     return (
         ui.Frame.FrameType.TABLE
         if cls in (WavelengthReference, Wave, P2VM, P2VMRed)
@@ -22,10 +35,24 @@ def cpl_frame_type(cls):
 
 
 def read_sof(frameset, required: dict[str, int], optional: tuple[str, ...] = ()):
-    """Group SOF paths by tag, check counts and retain classified DFS input frames.
+    """Check SOF roles/counts and classify input frames for DFS provenance.
 
-    Every value is a list of paths. Recipes load their calibration products
-    explicitly; this function never reads them or changes the path value type.
+    Parameters
+    ----------
+    frameset : cpl.ui.FrameSet
+        Recipe inputs, each with an explicit SOF tag and filename.
+    required : dict of str to int
+        Required tag -> exact input count. Missing or excess entries fail.
+    optional : tuple of str, optional
+        Additional allowed tags, each with at most one input. Other tags fail.
+
+    Returns
+    -------
+    paths : dict of str to list of Path
+        Paths grouped by tag. Products are not loaded or substituted into this map.
+    used : cpl.ui.FrameSet
+        Classified RAW/CALIB frames. A recipe must remove unused optional inputs
+        before passing this set to save_products.
     """
     grouped = {}
     for frame in frameset:
@@ -63,7 +90,25 @@ def read_sof(frameset, required: dict[str, int], optional: tuple[str, ...] = ())
 
 
 def read_shutter_id(path: Path, category: str) -> str:
-    """Read the physical shutter combination used to map repeated SOF entries."""
+    """Identify a telescope/beam pair from physical shutter readback in a raw header.
+
+    Parameters
+    ----------
+    path : Path
+        Raw FITS cube using the standard IMAGING_DATA_SC image extension.
+    category : str
+        Expected raw role, normally FLAT_RAW or P2VM_RAW.
+
+    Returns
+    -------
+    identity : str
+        Open telescope numbers in descending physical order, e.g. '4' or '43'.
+
+    Notes
+    -----
+    All four shutter states must be known. Unknown readback raises ValueError;
+    bench files with missing metadata require explicit Python identity mappings.
+    """
     raw = read_raw_metadata(path, category=category)
     if None in raw.shutters:
         raise ValueError(
@@ -73,7 +118,30 @@ def read_shutter_id(path: Path, category: str) -> str:
 
 
 def save_products(outputs, used, recipe):
-    """Write/sign each (filename, product, quality) independently; never overwrite."""
+    """Write, sign and register the products of one ESO recipe invocation.
+
+    Parameters
+    ----------
+    outputs : iterable of tuple
+        (filename, product, quality) for each output. quality is the already
+        measured QC mapping or None; no statistics are computed by the writer.
+    used : cpl.ui.FrameSet
+        Actual raw/calibration inputs used by the recipe, excluding disabled inputs.
+    recipe : cpl.ui.PyRecipe
+        Recipe name and current ParameterList for DFS provenance recording.
+
+    Returns
+    -------
+    products : cpl.ui.FrameSet
+        Published outputs registered as final PRODUCT frames with their categories.
+
+    Notes
+    -----
+    CPL supplies input and parameter provenance; the shared encoder supplies data
+    and scientific units. Checksums and DFS signatures are completed before each
+    file is published. Existing paths are never overwritten. A later failure does
+    not remove an earlier completed output.
+    """
     products = ui.FrameSet()
     for output, product, quality in outputs:
         with new_fits_file(output) as path:

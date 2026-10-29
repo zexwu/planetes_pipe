@@ -16,16 +16,26 @@ from .products import Dark, Flat, Wave
 
 @njit(parallel=True, fastmath=True, cache=True)
 def extract_sparse_spectra(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
-    """
-    Extract spectra from a cube using sparse pixel indices per output channel.
+    """Sum selected detector pixels into one spectrum per output and frame.
 
-    Args:
-        cube (NDArray): Input cube with shape `(n_frame, ny, nx)`.
-        ys (NDArray): Per-output Y indices; negative values are invalid sentinels.
-        xs (NDArray): Per-output X indices; negative values are invalid sentinels.
+    Parameters
+    ----------
+    cube : ndarray, shape (frame, y, x)
+        Detector samples in ADU, normally already dark-subtracted.
+    ys, xs : ndarray of int, shape (output, sample)
+        Zero-based spatial and dispersion pixel indices. Paired (-1, -1)
+        entries are skipped; all other indices must lie within the detector.
 
-    Returns:
-        NDArray: Extracted spectra with shape `(n_reg, n_frame, nx)`.
+    Returns
+    -------
+    spectra : ndarray, shape (output, frame, x)
+        Pixel sums in ADU. Columns without selected pixels contain zero.
+
+    Notes
+    -----
+    This Numba kernel does not check bounds. prepare_extraction checks geometry
+    for science/P2VM extraction; direct callers must provide valid pixel indices.
+    No weighting, flat correction or wavelength interpolation occurs here.
     """
     n_frame, _, nx = cube.shape
     n_reg = len(ys)
@@ -46,16 +56,28 @@ def extract_sparse_spectra(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
 
 @njit(parallel=True, cache=True)
 def resample_spectra(spec: NDArray, wave_map: NDArray, wl_grid: NDArray) -> NDArray:
-    """
-    Resample spectra from detector pixels onto a uniform wavelength grid.
+    """Interpolate detector spectra linearly in wavenumber onto a wavelength grid.
 
-    Args:
-        spec (NDArray): Input spectra with shape `(n_reg, n_frame, n_pixels)`.
-        wave_map (NDArray): Wavelength at each detector pixel with shape `(n_reg, n_pixels)`.
-        wl_grid (NDArray): Target wavelength grid with shape `(n_wave,)`.
+    Parameters
+    ----------
+    spec : ndarray, shape (output, frame, detector x)
+        Spectral values to interpolate; the operation preserves their units.
+    wave_map : ndarray, shape (output, detector x)
+        Increasing wavelengths in metres along each detector spectrum.
+    wl_grid : ndarray, shape (wavelength,)
+        Increasing target wavelengths in metres, covered by every output.
+        Uniform wavelength spacing is usual but is not required by this kernel.
 
-    Returns:
-        NDArray: Resampled spectra with shape `(n_reg, n_frame, n_wave)`.
+    Returns
+    -------
+    aligned : ndarray, shape (output, frame, wavelength)
+        Values linearly interpolated as a function of 1 / wavelength.
+
+    Notes
+    -----
+    This is point interpolation, not flux-conserving integration over bins.
+    Coverage is checked by prepare_extraction before calling this kernel;
+    np.interp itself returns endpoint values outside the input interval.
     """
     n_reg, n_frame, _ = spec.shape
     n_wave = len(wl_grid)
@@ -97,7 +119,28 @@ class SpectralExtractor:
     resampled_flat_spectra: NDArray
 
     def extract(self, cube: NDArray, dark: Dark) -> NDArray:
-        """Subtract one explicitly supplied dark and extract every frame of this chunk."""
+        """Subtract the selected dark and extract one chunk on the prepared grid.
+
+        Parameters
+        ----------
+        cube : ndarray, shape (frame, y, x)
+            Raw detector samples in ADU at calculation precision.
+        dark : Dark
+            Mean image in ADU with exactly the prepared detector shape.
+            Exposure/setup matching is the responsibility of the file entry point.
+
+        Returns
+        -------
+        spectra : ndarray, shape (output, frame, wavelength)
+            Dark-subtracted, resampled signal in instrumental ADU. Input arrays
+            and the prepared geometry are not modified.
+
+        Notes
+        -----
+        Divide the extracted signal by the detector-coordinate flat, interpolate
+        in wavenumber, then restore the prepared flat scale on the target grid.
+        This flattens the response during interpolation without changing flux units.
+        """
         if (
             cube.ndim != 3
             or cube.shape[1:] != self.detector_shape
@@ -117,7 +160,32 @@ class SpectralExtractor:
 def prepare_extraction(
     flat: Flat, wave: Wave, wavelength_m: NDArray
 ) -> SpectralExtractor:
-    """Prepare the extraction geometry and verify wavelength coverage once."""
+    """Prepare reusable extraction geometry and response for one wavelength grid.
+
+    Parameters
+    ----------
+    flat : Flat
+        Detector ADU response and zero-based sparse extraction pixels.
+    wave : Wave
+        Increasing wavelength map in metres on the same (output, detector x) grid.
+    wavelength_m : ndarray, shape (wavelength,)
+        Increasing target wavelengths in metres, covered by every output.
+        Science callers pass the grid stored in their P2VM calibration.
+
+    Returns
+    -------
+    extractor : SpectralExtractor
+        Read-only copies of geometry, wavelength grids and flat spectra.
+        Reuse its extract method for chunks or individual frames.
+
+    Notes
+    -----
+    Reject incompatible dimensions, invalid sparse indices and wavelength gaps.
+    Only float32 storage roundoff is tolerated at coverage endpoints. Detector
+    flat sums are floored at 1e-8 before division. The target flat is the reciprocal
+    of the interpolated reciprocal detector flat, preserving the existing response
+    normalization; it is not the direct interpolation of the flat.
+    """
     height, width = flat.flat_map_adu.shape
     xs, ys = flat.profile_x_pixels, flat.profile_y_pixels
     if wave.wavelength_map_m.shape != (len(xs), width) or xs.shape != ys.shape:
@@ -171,7 +239,31 @@ def prepare_extraction(
 def extract_spectra_from_file(
     path: Path, extractor: SpectralExtractor, dark: Dark, *, hdu: int | str = RAW_IMAGE
 ) -> NDArray:
-    """Read and extract a whole file, retaining all frames and the 16-frame chunking."""
+    """Extract every frame of one raw FITS cube using prepared calibrations.
+
+    Parameters
+    ----------
+    path : Path
+        Raw ADU cube shaped (frame, y, x).
+    extractor : SpectralExtractor
+        Prepared detector geometry, flat response and target wavelength grid.
+    dark : Dark
+        Selected mean image in ADU on the same detector grid.
+    hdu : int or str, optional
+        Image HDU to read; use 0 explicitly for primary-HDU bench cubes.
+
+    Returns
+    -------
+    spectra : ndarray, shape (output, frame, wavelength)
+        Instrumental ADU spectra in original frame order.
+
+    Notes
+    -----
+    Read and extract 16 frames at a time, then concatenate all extracted chunks.
+    The returned spectra therefore still scale in memory with the total frame count.
+    This helper does not select calibrations or check exposure/shutter metadata;
+    those checks belong to the calling file workflow.
+    """
 
     return np.concatenate(
         [extractor.extract(chunk, dark) for chunk in iter_raw_cube(path, hdu=hdu)],

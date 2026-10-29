@@ -8,6 +8,7 @@ from planetes.io.fits import read_product
 from planetes.flat import make_flat
 from planetes.products import Bad, Dark
 from planetes.recipes.dfs import read_sof, save_products, read_shutter_id
+from planetes.recipes.logging import recipe_logging
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
@@ -39,6 +40,7 @@ class PlanetesFlat(ui.PyRecipe):
         super().__init__()
         self.parameters = make_parameters(PARAMETERS, make_flat)
 
+    @recipe_logging()
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
         paths, used = read_sof(frameset, {"DARK": 1, "BAD": 1, "FLAT_RAW": 4})

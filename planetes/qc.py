@@ -10,7 +10,27 @@ from .products import Bad, Dark, Flat, P2VM, P2VMRed, Wave
 
 
 def measure_quality(product):
-    """Return available metric -> (value, unit/definition comment)."""
+    """Measure the available descriptive QC statistics for one product.
+
+    Parameters
+    ----------
+    product : Dark, Bad, Flat, Wave, P2VM or P2VMRed
+        In-memory scientific product. Only the implemented calibration statistics
+        are returned; P2VMRed currently has no registered ESO QC metrics.
+
+    Returns
+    -------
+    quality : dict
+        metric -> (numeric value, definition/unit comment), ready for the FITS
+        writer. Unknown, unsupported and nonfinite measurements are omitted.
+        Keyword names and any metre/micrometre aliases belong to io.keywords.
+
+    Notes
+    -----
+    No thresholds, rejection, masks or weights are changed. DARK RMS is a temporal
+    population RMS; the WAVE fit-residual statistic is a sample standard deviation
+    with ddof=1. Full metric definitions are listed in docs/QC_PARAMETERS.md.
+    """
     values = {}
     if isinstance(product, Dark):
         values["dark_median_adu"] = (
@@ -82,7 +102,25 @@ def measure_quality(product):
 
 
 def diagnostics(product):
-    """Stored inverse condition and channel statistics; no ESO QC keyword mapping."""
+    """Summarize optional numerical diagnostics without assigning ESO QC keywords.
+
+    Parameters
+    ----------
+    product : P2VM, P2VMRed or other product
+        Calibration inverse or reduced instrumental observables to inspect.
+
+    Returns
+    -------
+    values : dict of str to float
+        P2VM: largest wavelength-wise condition number of the stored inverse.
+        P2VMRed: flagged fraction and mean VISAMP over unflagged samples; an empty
+        valid set yields NaN. Other products return an empty dictionary.
+
+    Notes
+    -----
+    These summaries do not reject data or alter products and are not automatically
+    written to FITS. They are distinct from the registered measure_quality metrics.
+    """
     if isinstance(product, P2VM):
         return {
             "p2vm_condition_max": float(

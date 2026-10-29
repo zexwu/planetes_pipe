@@ -1,5 +1,6 @@
 """Optional PyEsoRex P2VM-to-science smoke test."""
 
+import logging
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,8 @@ class ESOChainTests(unittest.TestCase):
                     "-m",
                     "pyesorex",
                     f"--recipe-dir={recipes}",
+                    "--msg-level=error",
+                    "--log-level=debug",
                     "planetes_p2vm",
                     str(sof),
                 ],
@@ -48,6 +51,10 @@ class ESOChainTests(unittest.TestCase):
                 timeout=60,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn("Fitting baseline", result.stdout + result.stderr)
+            logfile = (calibration / "pyesorex.log").read_text()
+            self.assertIn("Fitting baseline 43", logfile)
+            self.assertIn("Fitting ellipses for phase extraction", logfile)
             with fits.open(inputs["PHASE_REFERENCE"]) as hdus:
                 signal = np.array(hdus[1].data, copy=True)
             signal[0] = 0
@@ -130,3 +137,28 @@ class ESOChainTests(unittest.TestCase):
                     float(hdus[0].header["ESO PRO REC1 PARAM2 VALUE"]), 12e-6
                 )
                 self.assertNotIn("ESO QC REJECTED RATIO", hdus[0].header)
+
+    def test_recipe_logging_restores_python_configuration_after_failure(self):
+        from planetes.recipes.logging import recipe_logging
+
+        logger = planetes.log
+        original = logger.handlers, logger.level, logger.propagate
+        handler = logging.NullHandler()
+        try:
+            logger.handlers = [handler]
+            logger.setLevel(logging.WARNING)
+            logger.propagate = True
+            for _ in range(2):
+                with self.assertRaisesRegex(ValueError, "recipe failed"):
+                    with recipe_logging():
+                        self.assertEqual(len(logger.handlers), 1)
+                        self.assertNotIn(handler, logger.handlers)
+                        self.assertEqual(logger.level, logging.DEBUG)
+                        raise ValueError("recipe failed")
+                self.assertEqual(logger.handlers, [handler])
+                self.assertEqual(logger.level, logging.WARNING)
+                self.assertTrue(logger.propagate)
+        finally:
+            logger.handlers, level, logger.propagate = original
+            logger.setLevel(level)
+            handler.close()

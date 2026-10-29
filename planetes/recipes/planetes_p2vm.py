@@ -12,6 +12,7 @@ from planetes.extraction import extract_spectra_from_file, prepare_extraction
 from planetes.p2vm import make_p2vm
 from planetes.products import Dark, Flat, Wave
 from planetes.recipes.dfs import read_sof, save_products, read_shutter_id
+from planetes.recipes.logging import recipe_logging
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
@@ -77,6 +78,7 @@ class PlanetesP2VM(ui.PyRecipe):
         phase.cli_alias = "phase-correction"
         self.parameters.append(phase)
 
+    @recipe_logging()
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
         paths, used = read_sof(

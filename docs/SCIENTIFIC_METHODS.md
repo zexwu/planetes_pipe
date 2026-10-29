@@ -30,6 +30,12 @@ those four maps. Collapse along dispersion, select the strongest 24 spatial
 peaks, trace a Gaussian centroid column by column, then smooth with the retained
 median filter and cubic fit. Gaussian iteration counts and arithmetic are unchanged.
 
+The raw mean image and selected DARK must have exactly the same detector shape,
+including when DARK setup metadata is unknown; NumPy broadcasting is not accepted.
+For the cubic trace fit, the fixed bench selection uses center error < 0.5 pixel
+and columns `50 < x < nx - 50`, after a three-column median filter. These are
+existing fit/edge choices, not adaptive quality thresholds derived per exposure.
+
 Accept pixels under the original strict inequality
 `abs(y - trace_y) < aperture_width_pixels / 2`, excluding the explicitly selected BAD map. Sparse X/Y arrays
 retain the original accumulation order. Paired (-1,-1) entries represent invalid
@@ -46,6 +52,12 @@ spectrum. Detect lines above the retained median/MAD threshold and match to the
 output line positions using a logarithmic parabola and match them to the reference
 with the constrained quadratic grid search.
 
+The reference quartet is a fixed bench choice, not selected by measured S/N.
+The three-sample logarithmic parabola estimates the center of a locally Gaussian
+line. Its retained ADU and log-curvature cuts prevent applying that refinement
+to weak or flat samples; their numerical values are bench criteria. Laboratory
+lines must be increasing because matching indices refer to sorted arrays.
+
 Fit the global cubic `wavelength = f(detector_x, trace_y)` with the retained
 iterative residual clipping. Evaluate at each traced output. The result is a
 24 × detector-x wavelength map in metres. Smooth mapping and preserved line order
@@ -56,7 +68,9 @@ are assumptions; coverage alone is not a wavelength-accuracy measurement.
 Prepare sparse geometry and flat response once. Subtract the explicitly selected
 dark once, accumulate selected pixels, divide the extracted spectrum by the
 flat spectrum in detector coordinates, interpolate in wavenumber, and multiply
-by the interpolated flat response to preserve the original flux scale.
+by the target-grid flat response to preserve the original flux scale. That
+response is `1 / interpolate(1 / detector_flat)`, not direct interpolation of the
+flat. The interpolation is pointwise in wavenumber, not an integral over bins.
 
 P2VM calibration defines its explicit target grid (default 1.15e-6–1.30e-6 m, 151
 channels). Science and live processing consume this saved grid. Every output

@@ -7,7 +7,20 @@ log = logging.getLogger("planetes")
 
 
 def configure_logging(level: str = "INFO") -> None:
-    """Configure console logging explicitly at an application entry point."""
+    """Enable console messages for a standalone Python application.
+
+    Parameters
+    ----------
+    level : str, optional
+        Standard Python log level name; default 'INFO'. Existing handlers are
+        reused. Otherwise a console handler is added; propagation is disabled.
+
+    Notes
+    -----
+    Call explicitly from a script if progress messages are wanted. ESO recipes
+    use their scoped CPL adapter so PyEsoRex controls terminal and logfile levels.
+    This function returns None and does not configure the root logger.
+    """
     if not log.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(

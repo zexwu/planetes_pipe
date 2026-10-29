@@ -68,6 +68,11 @@ Telescope order is 4,3,2,1; baseline order is 43,42,41,32,31,21; the four output
 within a baseline use A,C,B,D. The wave recipe defaults to the bundled static
 30-line FITS reference with the original ECSV values and origin labels.
 
+Scientific messages use CPL logging during each recipe invocation, respecting
+PyEsoRex's independent `--msg-level` and `--log-level` settings. The previous
+Python logger configuration is restored when the recipe returns or raises.
+Standalone scripts can call `planetes.configure_logging()` for console progress.
+
 Parameters use the same scientific defaults in Python and ESO. For example:
 
 ```bash
@@ -264,9 +269,10 @@ local names and table alignment.
 [Simplification notes](docs/SIMPLIFICATION.md) explain the product interfaces.
 [Change report and diagrams](docs/CHANGE_REPORT.md) record the migration and
 full-data evidence. [Scientific methods](docs/SCIENTIFIC_METHODS.md) describe retained numerical
-definitions. During development, 12 focused tests cover core scientific calculations,
-bench P2VM inputs, FITS round trips/non-overwriting writes and one optional PyEsoRex
-P2VM-to-science chain. One-off migration scripts
+definitions. The 15 focused tests cover core scientific calculations, a synthetic
+raw DARK→FLAT→WAVE chain with known traces and dispersion, rejection of mismatched
+DARK dimensions, bench P2VM inputs, FITS round trips/non-overwriting writes and
+optional PyEsoRex P2VM-to-science/logging checks. One-off migration scripts
 and logs are kept in Git history and the local archive referenced in the report.
 
 ```bash

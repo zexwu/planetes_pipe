@@ -35,14 +35,38 @@ def fit_p2vm(
     gd_search_min_m: float = -30e-6,
     gd_search_max_m: float = 30e-6,
 ) -> P2VM:
-    """Fit the full detector response and return its per-wavelength inverse.
+    """Fit the full detector response and invert it at each wavelength.
 
-    Scans: (baseline, output, frame, wavelength); flats: (telescope, output,
-    frame, wavelength). Wavelength and GD bounds are metres. All 24 outputs
-    enter each baseline fit, including cross-talk. Supply extracted reference
-    spectra (output, frame, wavelength) to apply phase correction, or None.
-    Optional scan diagnostics change only the retained arrays, not the response
-    or inverse.
+    Parameters
+    ----------
+    spectra : P2VMSpectra
+        ADU telescope spectra (4, 24, frame, wavelength), baseline scans
+        (6, 24, frame, wavelength), physical output mapping and wavelength grid [m].
+        Telescope order is 4,3,2,1; baseline order is 43,42,41,32,31,21.
+    phase_reference : ndarray or None, optional
+        Already dark-subtracted reference spectra (24, frame, wavelength) in ADU,
+        on the same grid. None skips instrumental phase correction. File and DARK
+        selection belong to the caller; this is not astronomical calibration.
+    keep_diagnostics : bool, optional
+        Retain scan OPD/GD, ellipse phase/radius, DC and residual RMS when True.
+        This changes which arrays are returned, not the fit or inverse.
+    gd_search_min_m, gd_search_max_m : float, optional
+        Coarse GD initialization interval in metres, default +/-30e-6.
+        Newton refinement is unconstrained; see estimate_group_delay.
+
+    Returns
+    -------
+    p2vm : P2VM
+        Inverse (16, 24, wavelength), dimensionless transmission and coherence
+        amplitude, response phases [rad], grid [m] and physical output mapping.
+        Requested scan diagnostics keep their units documented in P2VM.
+
+    Notes
+    -----
+    Fit all 24 output responses to each baseline, including cross-talk. Derive
+    photometric transmission, normalize phases/amplitudes, then invert V2PM.
+    A supplied reference adjusts instrumental phases and triggers a second
+    inversion. Each wavelength's V2PM must have numerical rank 16.
     """
     log.info("--- Step: P2VM ---")
     _check_input_axes(spectra)
@@ -116,11 +140,26 @@ def _check_input_axes(spectra: P2VMSpectra) -> None:
 def _fit_scan_responses(
     spectra: P2VMSpectra, search_range: tuple[float, float], *, keep_diagnostics: bool
 ) -> tuple[NDArray, NDArray, NDArray, dict[str, NDArray]]:
-    """Fit each baseline scan: ellipse -> OPD zero point -> detector response.
+    """Fit each baseline scan from ABCD phase through OPD to all-output response.
 
-    Return amplitude [ADU], phase [rad], DC [ADU], each (output, baseline,
-    wavelength), and requested diagnostics. Scan OPD/GD are metres; ellipse
-    radius is dimensionless. All output rows, including cross-talk, are fitted.
+    Parameters
+    ----------
+    spectra : P2VMSpectra
+        ADU scans (6 baselines, 24 outputs, frame, wavelength), physical output
+        assignments and wavelength grid [m]. Telescope spectra are unused here.
+    search_range : tuple of float
+        Coarse GD initialization interval in metres; Newton is unconstrained.
+    keep_diagnostics : bool
+        Retain the scan/intermediate arrays when True; fitting is unchanged.
+
+    Returns
+    -------
+    amplitude, phase_rad, dc_adu : ndarray, shape (24, 6, wavelength)
+        Fitted response amplitude [ADU], phase [rad] and constant term [ADU].
+        Amplitudes are still unnormalized at this stage; cross-talk is retained.
+    diagnostics : dict of str to ndarray
+        Empty unless requested. OPD/GD use metres, ellipse phase uses radians,
+        ellipse radius is dimensionless, and DC/residual RMS use ADU.
     """
     wavelength_m = spectra.wavelength_m
     n_frames, n_wave = spectra.baseline_spectra[0].shape[1:]
@@ -173,10 +212,27 @@ def _estimate_scan_opd(
     wavelength_m: NDArray,
     search_range: tuple[float, float],
 ) -> tuple[NDArray, NDArray]:
-    """Convert ellipse phase/radius (frame, wavelength) to scan OPD/GD (frame,).
+    """Convert the ellipse phase to scan OPD and determine its zero point from GD.
 
-    Both paths are metres. Use the central half-band, convert phase to
-    phase*lambda/(2*pi), and remove the intercept of its linear fit against GD.
+    Parameters
+    ----------
+    phase_rad, radius : ndarray, shape (frame, wavelength)
+        Unwrapped ellipse phase [rad] and dimensionless unit-circle radius.
+    wavelength_m : ndarray, shape (wavelength,)
+        Scan wavelength grid in metres.
+    search_range : tuple of float
+        Coarse GD initialization interval in metres.
+
+    Returns
+    -------
+    opd_m, gd_m : ndarray, shape (frame,)
+        Optical path and group delay in metres, using the ellipse phase sign.
+
+    Notes
+    -----
+    Use the central half-band to average phase * wavelength / (2*pi) and to
+    estimate GD from radius * exp(1j*phase). Fit OPD versus GD and subtract only
+    the intercept from OPD; the fitted slope is not applied as a rescaling.
     """
     phasor = radius * np.exp(1j * phase_rad)
     n_wave = len(wavelength_m)
@@ -194,12 +250,30 @@ def _estimate_scan_opd(
 def _fit_interferometric_response(
     baseline_spectra: NDArray, opd_m: NDArray, wavelength_m: NDArray
 ) -> tuple[NDArray, NDArray, NDArray, NDArray]:
-    """Fit c+a*cos(phi)+b*sin(phi) to all outputs, retaining amplitude/phase/DC/RMS.
+    """Fit c + a*cos(phi) + b*sin(phi) to every detector output in one baseline scan.
 
-    Amplitude, DC and RMS are raw ADU at this stage; phase is in radians.
-    With phase=atan2(b,a), the response is c+amplitude*cos(phi-phase).
-    Arrays returned here are (output, wavelength); OPD is (frame,) in metres.
-    The response amplitude is normalized later using the photometric transmission.
+    Parameters
+    ----------
+    baseline_spectra : ndarray, shape (24 outputs, frame, wavelength)
+        Dark-subtracted, extracted ADU spectra, including off-baseline outputs.
+    opd_m : ndarray, shape (frame,)
+        Scan optical paths in metres with the chosen zero point and ellipse sign.
+    wavelength_m : ndarray, shape (wavelength,)
+        Extracted wavelength grid in metres; phi = 2*pi*OPD/wavelength.
+
+    Returns
+    -------
+    amplitude : ndarray, shape (24, wavelength)
+        sqrt(a*a + b*b) in ADU; photometric normalization occurs later.
+    phase_rad : ndarray, shape (24, wavelength)
+        atan2(b, a) [rad], so the model is c + amplitude*cos(phi - phase).
+    dc_adu, rms_adu : ndarray, shape (24, wavelength)
+        Constant term and unweighted population RMS of fit residuals, in ADU.
+
+    Notes
+    -----
+    The design columns are ordered (1, sin(phi), cos(phi)); use an unweighted
+    pseudoinverse independently at each wavelength. No channels are rejected here.
     """
     n_wave = len(wavelength_m)
     amplitude = np.zeros((N_OUTPUTS, n_wave))
@@ -226,7 +300,20 @@ def _fit_interferometric_response(
 
 
 def _estimate_transmission(telescope_spectra: NDArray) -> NDArray:
-    """Normalize each telescope's median spectrum by its total over outputs/wavelengths."""
+    """Estimate relative telescope illumination from frame-median flat spectra.
+
+    Parameters
+    ----------
+    telescope_spectra : ndarray, shape (4 telescopes, 24 outputs, frame, wavelength)
+        Extracted ADU flat spectra in T4,T3,T2,T1 order.
+
+    Returns
+    -------
+    transmission : ndarray, shape (24 outputs, 4 telescopes, wavelength)
+        Dimensionless median spectrum divided by its telescope's total over all
+        outputs and wavelengths. The later response normalization sets the mean
+        over outputs to one separately at each telescope/wavelength.
+    """
     transmission = np.zeros((N_OUTPUTS, N_TELESCOPES, telescope_spectra.shape[-1]))
     for telescope in range(N_TELESCOPES):
         log.info(f"Measuring transmission for telescope {TELESCOPES[telescope]}...")
@@ -242,13 +329,28 @@ def _normalize_response_inplace(
     dc_adu: NDArray,
     baseline_outputs: Mapping[int, list[int]],
 ) -> None:
-    """Normalize phase, transmission and coherence in place.
+    """Set response phase origins and normalize transmission and coherent amplitude.
 
-    Within each physical output quartet, subtract its A row from *all six*
-    response components, retaining that convention for cross-talk as well.
-    Set each telescope/wavelength's mean transmission over outputs to one,
-    then divide coherence [ADU] by sqrt(P_i*P_j) from the fitted DC terms.
-    The resulting amplitude and transmission are dimensionless.
+    Parameters
+    ----------
+    transmission : ndarray, shape (24 outputs, 4 telescopes, wavelength)
+        Relative telescope response; modified in place to mean one over outputs.
+    amplitude : ndarray, shape (24 outputs, 6 baselines, wavelength)
+        Fitted ADU amplitude; modified in place to a dimensionless response.
+    phase_rad : ndarray, shape (24 outputs, 6 baselines, wavelength)
+        Fitted phase in radians; modified in place to the A-output phase convention.
+    dc_adu : ndarray, shape (24 outputs, 6 baselines, wavelength)
+        Constant fitted response in ADU, used to solve baseline photometry.
+        Not modified by this function.
+    baseline_outputs : mapping of int to list of int
+        Baseline-axis index 0..5 -> four detector-output indices in A,C,B,D order.
+
+    Notes
+    -----
+    For each output quartet, subtract its A row from all six baseline response
+    components, including cross-talk. Solve transmission against DC by pseudoinverse,
+    then divide amplitude by sqrt(P_i*P_j). A nonpositive/nonfinite photometric
+    product raises ValueError. Returns None; the first three arrays are updated.
     """
     log.info("P2VM Normalization...")
     log.info("    Phase normalization (A=0)...")
@@ -278,7 +380,24 @@ def _normalize_response_inplace(
 
 
 def _invert_v2pm(v2pm_matrix: NDArray) -> NDArray:
-    """Compute the same per-wavelength pseudoinverse before and after phase correction."""
+    """Compute the wavelength-wise inverse needed to reconstruct 16 data channels.
+
+    Parameters
+    ----------
+    v2pm_matrix : ndarray, shape (24 outputs, 16 data channels, wavelength)
+        Dimensionless forward response matrix.
+
+    Returns
+    -------
+    p2vm : ndarray, shape (16 data channels, 24 outputs, wavelength)
+        NumPy pseudoinverse at each wavelength.
+
+    Notes
+    -----
+    Require numerical rank 16 using NumPy's default matrix_rank criterion;
+    otherwise raise ValueError identifying the wavelength. No condition-number
+    threshold or alternate regularization is introduced.
+    """
     log.info("V2PM -> P2VM")
     n_wave = v2pm_matrix.shape[-1]
     p2vm = np.zeros((N_DATA, N_OUTPUTS, n_wave))
@@ -295,11 +414,28 @@ def _invert_v2pm(v2pm_matrix: NDArray) -> NDArray:
 def build_v2pm(
     transmission: NDArray, coherence_amplitude: NDArray, coherence_phase_rad: NDArray
 ) -> NDArray:
-    """Expand dimensionless terms into V2PM (output, data channel, wavelength).
+    """Expand physical response terms into the forward visibility-to-pixel matrix.
 
-    Columns are T4,T3,T2,T1, then Re(C_43,...,C_21), then Im(C_43,...,C_21).
+    Parameters
+    ----------
+    transmission : ndarray, shape (24 outputs, 4 telescopes, wavelength)
+        Dimensionless photometric transmission, normalized to mean one over outputs.
+    coherence_amplitude : ndarray, shape (24 outputs, 6 baselines, wavelength)
+        Dimensionless interferometric response after photometric normalization.
+    coherence_phase_rad : ndarray, shape (24 outputs, 6 baselines, wavelength)
+        Response phase in radians, with convention amplitude * cos(phi - phase).
+
+    Returns
+    -------
+    v2pm : ndarray, shape (24 outputs, 16 data channels, wavelength)
+        Dimensionless forward matrix. Columns are T4,T3,T2,T1, then Re(C_ij),
+        then Im(C_ij), each coherent group ordered 43,42,41,32,31,21.
+
+    Notes
+    -----
     Coherent columns are amplitude*cos(phase) and amplitude*sin(phase).
-    The complete matrix retains the original division by 24 outputs.
+    Divide the entire matrix by 24 to preserve the instrumental flux convention.
+    All cross-talk terms remain present; no inversion is performed here.
     """
     matrix = np.zeros((N_OUTPUTS, N_DATA, transmission.shape[-1]))
     matrix[:, :N_TELESCOPES] = transmission
@@ -318,12 +454,35 @@ def _apply_phase_reference(
     *,
     search_range: tuple[float, float],
 ) -> NDArray:
-    """Set instrumental phases using a reference, with T4 as the telescope anchor.
+    """Correct instrumental response phases using a reference anchored to telescope T4.
 
-    Reference spectra [ADU]: (output, frame, wavelength). Reconstructed complex
-    coherence [ADU]: (frame, baseline, wavelength). Input/output response phases
-    [rad]: (output, baseline, wavelength). Only each output's own baseline is
-    corrected; off-baseline response phases retain their scan normalization.
+    Parameters
+    ----------
+    phase_rad : ndarray, shape (24 outputs, 6 baselines, wavelength)
+        Current response phases in radians; copied before modification.
+    p2vm : ndarray, shape (16 data channels, 24 outputs, wavelength)
+        Initial response inverse used to reconstruct reference coherent flux.
+    reference_spectra : ndarray, shape (24 outputs, frame, wavelength)
+        Reference spectra in ADU, already extracted with their selected dark.
+    wavelength_m : ndarray, shape (wavelength,)
+        Reference and response wavelength grid in metres.
+    baseline_outputs : mapping of int to list of int
+        Baseline-axis index 0..5 -> four output indices in A,C,B,D order.
+    search_range : tuple of float
+        Coarse GD initialization interval in metres.
+
+    Returns
+    -------
+    corrected_phase_rad : ndarray, shape (24 outputs, 6 baselines, wavelength)
+        New phases [rad]. Only each output's own physical baseline is corrected;
+        cross-talk phase components keep their scan normalization.
+
+    Notes
+    -----
+    Recover telescope phases from baselines 43,42,41, remove their temporal mean,
+    scale as 1/lambda and coherently SUM the corrected reference frames. Remove
+    the residual chromatic GD with T4-anchored telescope phasors, then subtract
+    the integrated reference phase. The caller rebuilds and reinverts V2PM.
     """
     log.info("Applying phase-reference correction...")
     phase_rad = phase_rad.copy()
@@ -392,13 +551,29 @@ def _apply_phase_reference(
 
 
 def fit_abcd_ellipse(spec: NDArray) -> tuple[NDArray, NDArray]:
-    """Fit X=C-A, Y=D-B to an ellipse with equation M @ coefficients = 1.
+    """Recover scan phase and normalized radius from four ABCD intensity outputs.
 
-    Input ADU axes are (output, frame, wavelength), ordered A,C,B,D along
-    the four-output axis. Return unwrapped phase [rad] and dimensionless radius, both
-    (frame, wavelength). Unwrapping runs along frames. For ideal outputs
-    I_q = c + A*cos(phi + [0, pi, pi/2, 3*pi/2]_q), this phase decreases
-    with phi; preserve that sign through scan OPD and response fitting.
+    Parameters
+    ----------
+    spec : ndarray, shape (4 outputs, frame, wavelength)
+        ADU intensities ordered A,C,B,D. The fit uses X=C-A and Y=D-B,
+        centers/scales them, and solves a quadratic ellipse with unit right-hand side.
+
+    Returns
+    -------
+    phase_rad : ndarray, shape (frame, wavelength)
+        Unit-circle angle in radians, unwrapped along the frame axis.
+    radius : ndarray, shape (frame, wavelength)
+        Dimensionless distance from the fitted unit-circle center. This is not
+        fringe contrast in ADU; a perfect ellipse has unit radius at any contrast.
+
+    Notes
+    -----
+    For I_q = c + A*cos(phi + [0, pi, pi/2, 3*pi/2]_q), the recovered phase
+    DECREASES with phi. Preserve this sign in scan OPD and response fitting.
+    Scaling below 1e-9 is skipped; nonpositive quadratic terms use 1e-6.
+    These numerical fallbacks do not certify an ellipse: zero input returns
+    zero phase/radius. No scientific channel-rejection rule is imposed here.
     """
     _, n_frames, n_wave = spec.shape
 
@@ -472,11 +647,47 @@ def make_p2vm(
     gd_search_min_m: float = -30e-6,
     gd_search_max_m: float = 30e-6,
 ) -> P2VM:
-    """Read the calibration sequence and return the full 24-output response/inverse.
+    """Read the calibration sequences and fit an instrumental P2VM on an explicit grid.
 
-    Wavelength and coarse GD bounds use metres. The optional phase reference is
-    already extracted, dark-subtracted spectra on this exact wavelength grid,
-    with axes (output, frame, wavelength). Its file and DARK are chosen by the caller.
+    Parameters
+    ----------
+    flat : Flat
+        Detector response and sparse extraction geometry.
+    wave : Wave
+        Wavelength map in metres on the FLAT detector grid.
+    main_dark : Dark
+        Mean dark in ADU used for both telescope-flat and baseline-scan sequences.
+        Known exposure and detector settings must match each input.
+    telescope_flats : mapping of str to Path
+        Four raw ADU cubes keyed by physical telescope '4', '3', '2', '1'.
+    baseline_cubes : mapping of str to Path
+        Six raw ADU scan cubes keyed by '43', '42', '41', '32', '31', '21'.
+    hdu : int or str, optional
+        Image HDU shared by all calibration cubes; use 0 for primary-HDU data.
+    phase_reference : ndarray or None, optional
+        Extracted ADU spectra (24 outputs, frame, wavelength) on the exact target
+        grid. The caller selects its independent DARK and extracts it beforehand.
+        None skips the correction; a path is not accepted here.
+    keep_diagnostics : bool, optional
+        Retain scan diagnostics in the returned product; default False.
+    wavelength_min_m, wavelength_max_m : float, optional
+        Inclusive endpoints of the uniform target grid [m]; defaults 1.15e-6,
+        1.30e-6. Every detector output must cover the grid.
+    wavelength_channels : int, optional
+        Number of target grid points; default 151.
+    gd_search_min_m, gd_search_max_m : float, optional
+        Coarse GD initialization interval [m]; defaults -30e-6, +30e-6.
+        Subsequent Newton refinement is unconstrained.
+
+    Returns
+    -------
+    p2vm : P2VM
+        Response terms and inverse on the saved target grid. Saving is explicit.
+
+    Notes
+    -----
+    Frame counts must agree within the four telescope files and, separately,
+    within the six baseline files. The two groups may have different frame counts.
     """
 
     grid = np.linspace(wavelength_min_m, wavelength_max_m, wavelength_channels)
@@ -508,7 +719,38 @@ def extract_p2vm_spectra(
     hdu: int | str = RAW_IMAGE,
     wavelength_m: NDArray,
 ) -> P2VMSpectra:
-    """Extract explicit telescope/baseline file maps and identify detector outputs."""
+    """Extract calibration spectra and identify the outputs belonging to each baseline.
+
+    Parameters
+    ----------
+    flat : Flat
+        Detector response and sparse extraction geometry.
+    wave : Wave
+        Wavelength map [m] on the same detector grid.
+    main_dark : Dark
+        Mean image [ADU] selected for every telescope and baseline input.
+    telescope_flats : mapping of str to Path
+        Raw ADU files keyed by telescope '4', '3', '2', '1'.
+    baseline_cubes : mapping of str to Path
+        Raw ADU files keyed by baseline '43', '42', '41', '32', '31', '21'.
+    hdu : int or str, optional
+        Image HDU shared by all input cubes.
+    wavelength_m : ndarray, shape (wavelength,)
+        Increasing target wavelengths [m], covered by all detector outputs.
+
+    Returns
+    -------
+    spectra : P2VMSpectra
+        Telescope spectra (4, 24, frame, wavelength) and baseline spectra
+        (6, 24, frame, wavelength) in ADU, plus the grid and output mapping.
+        Frame counts must agree within each group of files.
+
+    Notes
+    -----
+    Known shutter and detector metadata must match the explicit file identities
+    and calibrations. Output identification requires agreement between telescope
+    illumination and baseline modulation; it does not infer identity from names.
+    """
 
     if set(telescope_flats) != set(TELESCOPES):
         raise ValueError("Telescope flats require a path for each of 4,3,2,1")
@@ -562,7 +804,28 @@ def extract_p2vm_spectra(
 def _identify_output_mapping(
     telescope_spectra: NDArray, baseline_spectra: NDArray
 ) -> dict[int, list[int]]:
-    """Require telescope illumination and baseline modulation to identify the same outputs."""
+    """Associate each physical baseline with four outputs using two independent signals.
+
+    Parameters
+    ----------
+    telescope_spectra : ndarray, shape (4, 24, frame, wavelength)
+        Telescope-flat ADU spectra in T4,T3,T2,T1 order.
+    baseline_spectra : ndarray, shape (6, 24, frame, wavelength)
+        ADU scans in baseline order 43,42,41,32,31,21.
+
+    Returns
+    -------
+    baseline_outputs : dict of int to list of int
+        Baseline-axis index 0..5 -> four increasing detector-output indices.
+        Their physical A,C,B,D order is an instrument-layout assumption.
+
+    Notes
+    -----
+    Select the 12 highest mean-flux outputs for each telescope and the four
+    highest temporal-modulation outputs for each baseline. Require the two
+    illuminated telescope sets' intersection to equal the modulated set, otherwise
+    raise ValueError. Ranking alone does not establish a signal-to-noise threshold.
+    """
     illuminated = {}
     for telescope, flux in enumerate(telescope_spectra):
         mean_flux = flux.mean(axis=(1, 2))

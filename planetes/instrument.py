@@ -53,7 +53,27 @@ class DetectorSetup:
 def check_setup(
     raw: DetectorSetup, calibration: DetectorSetup | None, *, exposure: bool, role: str
 ) -> None:
-    """Reject contradictions in *known* detector settings; unknowns stay unknown."""
+    """Reject contradictions between known raw and selected calibration settings.
+
+    Parameters
+    ----------
+    raw : DetectorSetup
+        Physical configuration of the current raw cube.
+    calibration : DetectorSetup or None
+        Configuration associated with the selected calibration; None means unknown.
+    exposure : bool
+        Also compare integration times when True, as required for direct dark
+        subtraction. False compares detector, ROI and binning only.
+    role : str
+        Calibration label used in error messages, such as 'DARK' or 'FLAT'.
+
+    Notes
+    -----
+    Missing fields are skipped and are not filled or inferred. Exposure comparison
+    allows only floating-point encoding roundoff. Raises ValueError for known
+    contradictions, otherwise returns None. Array dimensions require separate checks
+    when the calibration lacks metadata.
+    """
     names = [
         "detector",
         "origin_x",

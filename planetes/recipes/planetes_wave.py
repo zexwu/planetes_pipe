@@ -7,6 +7,7 @@ from planetes.qc import measure_quality
 from planetes.io.fits import read_product
 from planetes.products import Dark, Flat, WavelengthReference
 from planetes.recipes.dfs import read_sof, save_products
+from planetes.recipes.logging import recipe_logging
 from planetes.recipes.parameters import make_parameters, read_parameters
 from planetes.wavelength import make_wave, wavelength_reference_path
 
@@ -33,6 +34,7 @@ class PlanetesWave(ui.PyRecipe):
         super().__init__()
         self.parameters = make_parameters(PARAMETERS, make_wave)
 
+    @recipe_logging()
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
         frames = ui.FrameSet(list(frameset))

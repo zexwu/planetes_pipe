@@ -6,6 +6,7 @@ from planetes import __version__
 from planetes.qc import measure_quality
 from planetes.dark import make_dark_products
 from planetes.recipes.dfs import read_sof, save_products
+from planetes.recipes.logging import recipe_logging
 from planetes.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
@@ -37,6 +38,7 @@ class PlanetesDark(ui.PyRecipe):
         super().__init__()
         self.parameters = make_parameters(PARAMETERS, make_dark_products)
 
+    @recipe_logging()
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
         paths, used = read_sof(frameset, {"DARK_RAW": 1})
