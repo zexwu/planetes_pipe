@@ -38,10 +38,9 @@ def _check_baselines(baseline_outputs: dict[int, list[int]]) -> None:
 
 @dataclass(frozen=True, slots=True)
 class DetectorSetup:
-    """Physical camera configuration; missing legacy fields remain unknown."""
+    """Physical camera configuration; missing fields remain unknown."""
 
     exposure_s: float | None = None
-    exposure_source: str = "readback"
     origin_x: int | None = None
     origin_y: int | None = None
     width: int | None = None
@@ -49,8 +48,6 @@ class DetectorSetup:
     binning_x: int | None = None
     binning_y: int | None = None
     detector: str | None = None
-    orientation: str | None = None
-    legacy: bool = False
 
 
 def check_setup(
@@ -65,7 +62,6 @@ def check_setup(
         "height",
         "binning_x",
         "binning_y",
-        "orientation",
     ]
     if exposure:
         names.append("exposure_s")

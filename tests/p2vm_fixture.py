@@ -7,7 +7,8 @@ import numpy as np
 
 from planetes.instrument import BASELINES, TELESCOPES, DetectorSetup
 from planetes.io.fits import write_product
-from planetes.io.acquisition import CaptureMetadata, write_raw
+from planetes.io.acquisition import write_raw
+from planetes.io.raw import RawMetadata
 from planetes.products import P2VMSpectra, Dark, Flat, Wave
 
 
@@ -72,16 +73,12 @@ def setup(n_wave=151, height=24):
         binning_x=1,
         binning_y=1,
         detector="synthetic",
-        orientation="native",
     )
 
 
 def metadata(category, active=(), n_wave=151, height=24):
-    return CaptureMetadata(
-        category,
-        tuple(str(n) in active for n in range(1, 5)),
-        setup(n_wave, height),
-        "command",
+    return RawMetadata(
+        category, tuple(str(n) in active for n in range(1, 5)), setup(n_wave, height)
     )
 
 

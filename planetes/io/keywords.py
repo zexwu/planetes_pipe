@@ -21,9 +21,10 @@ PRO_TYPE      = "ESO PRO TYPE"
 PRO_SCIENCE   = "ESO PRO SCIENCE"
 
 # Detector timing and window. Python ROI origins are zero-based; FITS is one-based.
-DIT  = "ESO DET WIN1 DIT1"
-UIT  = "ESO DET WIN1 UIT1"
-NDIT = "ESO DET WIN1 NDIT"
+DIT         = "ESO DET WIN1 DIT1"
+UIT         = "ESO DET WIN1 UIT1"
+NDIT        = "ESO DET WIN1 NDIT"
+DETECTOR_ID = "ESO DET ID"
 
 ROI_KEYS = {
     "origin_x":  "ESO DET WIN1 STRX",
@@ -57,15 +58,13 @@ ELLIPSE_AMPLITUDE  = "PLANETES_ELLIPSE_AMPLITUDE"
 P2VM_FIT_RMS       = "PLANETES_P2VM_FIT_RMS"
 SCIENCE_FLUX       = "PLANETES_FLUX"
 SCIENCE_VISIBILITY = "PLANETES_VIS"
-META_EXT           = "PLANETES_META"
 
 # Private header keywords and versions, outside the ESO dictionary.
 FORMAT_KEY   = "PLANETES FORMAT"
 BAD_BITS     = "PLANETES BAD BITS"
 SHUTTER_KEYS = tuple(f"PLANETES INS SHUT{n} ST" for n in range(1, 5))
 
-RAW_FORMAT     = 3
-PRODUCT_FORMAT = 6
+PRODUCT_FORMAT = 7
 
 # Raw exposure definitions: DPR values plus the number of open physical shutters.
 RAW_TYPES = {

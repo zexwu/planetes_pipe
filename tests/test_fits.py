@@ -7,10 +7,11 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
-from p2vm_fixture import calibration_arrays, calibration_spectra
+from p2vm_fixture import calibration_arrays, calibration_spectra, metadata
 
 from planetes.dark import detect_bad_pixels, measure_dark
 from planetes.io.fits import read_product, write_product
+from planetes.io.acquisition import write_raw
 from planetes.io.hdu import as_compute_array
 from planetes.io.raw import iter_raw_cube as iter_cube
 from planetes.io.raw import read_raw_header, read_raw_metadata
@@ -78,6 +79,8 @@ class CalibrationFitsTests(unittest.TestCase):
             ):
                 path = Path(tmp) / "calibration.fits"
                 write_product(path, product)
+                with fits.open(path) as hdus:
+                    self.assertNotIn("PLANETES_META", hdus)
                 loaded = read_product(path, type(product))
                 for field in fields(product):
                     before, after = (
@@ -124,13 +127,30 @@ class RawFitsTests(unittest.TestCase):
                 self.assertEqual(raw.shutters, (None,) * 4)
                 self.assertIsNone(raw.setup.exposure_s)
                 self.assertEqual((raw.setup.height, raw.setup.width), (3, 5))
-                self.assertTrue(raw.setup.legacy)
                 self.assertNotIn("ESO DET WIN1 DIT1", read_raw_header(path))
                 chunks = list(iter_cube(path))
                 self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
                 self.assertTrue(all(chunk.dtype == np.float64 for chunk in chunks))
                 np.testing.assert_array_equal(np.concatenate(chunks), cube)
                 self.assertEqual(path.read_bytes(), original)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "raw.fits"
+            physical = metadata("DARK_RAW", n_wave=5, height=3)
+            write_raw(path, cube, physical)
+            self.assertEqual(read_raw_metadata(path), physical)
+            with fits.open(path) as hdus:
+                self.assertEqual(
+                    [hdu.name for hdu in hdus], ["PRIMARY", "IMAGING_DATA_SC"]
+                )
+                self.assertEqual(hdus[0].header["ESO DET ID"], "synthetic")
+                np.testing.assert_array_equal(hdus[1].data, cube)
+                for hdu in hdus:
+                    self.assertEqual(hdu.verify_checksum(), 1)
+                    self.assertEqual(hdu.verify_datasum(), 1)
+            original = path.read_bytes()
+            with self.assertRaises(OSError):
+                write_raw(path, cube, physical)
+            self.assertEqual(path.read_bytes(), original)
         single = measure_dark([cube[:1]])
         self.assertEqual(single.n_frames, 1)
         self.assertIsNone(single.temporal_rms_adu)

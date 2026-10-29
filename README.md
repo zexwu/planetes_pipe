@@ -1,4 +1,4 @@
-# PLANETES pipeline 0.13.0
+# PLANETES pipeline 0.14.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
 Python and PyEsoRex share the same scientific steps and single-frame kernels.
@@ -153,10 +153,11 @@ The reader selects `IMAGING_DATA_SC` when present, otherwise the unique 3-D imag
 Multiple unnamed cubes require `hdu=...` in the low-level reader. A known non-ADU
 unit is rejected; missing BUNIT follows the bench ADU convention. `read_raw_header()`
 returns the unchanged primary header. `RawMetadata` contains only category, four
-shutter states (each may be None), and detector setup. Format-3 files remain
-readable; only relevant physical fields are read from their private metadata.
-Acquisition uses `CaptureMetadata`, `build_raw_header` and `write_raw` from
-`planetes.io.acquisition`; host timing and configuration sources stay there.
+shutter states (each may be None), and detector setup. All physical fields come
+from the FITS header and image dimensions. No JSON metadata is read or written.
+`build_raw_header` and `write_raw` from `planetes.io.acquisition` accept that same
+`RawMetadata`; they store category, shutters, detector, ROI/binning and integration
+time in FITS cards. Acquisition-source and capture-history records are absent.
 
 Save each calibration with the same `write_product` function when needed. Read it
 with `read_product(path, ExpectedClass)` from `planetes.io.fits`. QC is retained by
@@ -303,15 +304,18 @@ Replace former raw-file lists with `{identity: path}` mappings; SOF syntax is
 unchanged. The former `identify_raw_exposures`, `load_recipe_inputs` and
 `save_product` helpers are removed. Recipes use `read_sof` (path lists plus DFS
 frames), explicit `read_product` calls, and the single `save_products` entry.
-Raw format-3 metadata keeps its existing interpretation with one explicit
-header-first physical-field selection and saved source flags.
 
 Version 0.11.0 makes the P2VM fit follow the physical stages above. Call
 `fit_abcd_ellipse(spec)` without the removed unit `envs` argument; the existing
 pseudoinverse, thresholds and phase order are retained.
 
-New products use FITS format **6**; formats **4/5** remain readable. Full structured
-raw files stay at format **3**. Product data layout and units remain documented in
+Version 0.14.0 removes JSON persistence, `PLANETES_META`, `CaptureMetadata`,
+exposure-source/legacy states and the header-versus-JSON reconciliation code.
+Physical fields have one location: FITS headers. Raw files no longer receive a
+private format version; existing raw headers and detector cubes can still be read
+without consulting any extra metadata extension. New products use FITS format
+**7**; older generated calibration products need regeneration. Product data layout
+and units remain documented in
 [the product contract](docs/PRODUCT_CONTRACT.md); optional measurements retain
 [the QC definitions](docs/QC_PARAMETERS.md).
 

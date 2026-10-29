@@ -1,13 +1,13 @@
 digraph Architecture {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.13.0 — 调用处选择输入，步骤直接计算", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.14.0 — 调用处选择输入，步骤直接计算", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.16,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   python [label="Python / examples/reduce.py"];
   recipes [label="PyEsoRex → recipes/\nread_sof：路径分组 / 数量\n显式 read_product · shutter → 路径映射\n默认线表 / 相位参考及 DARK 在此选择\nsave_products · CPL 参数 / DFS\n全部 CPL import 限定在这里"];
   steps [label="五个同级科学步骤\ndark.py · flat.py · wavelength.py · p2vm.py · reduction.py\n\nFLAT / P2VM：具名路径映射\n其他文件步骤：单个 Path\n读文件 → 本步骤计算 → 返回具名结果\n每个文件保留物理参数、默认值、算法和 helper\n波长 / OPD / GD 全部使用 m\n浮点计算 float64 / complex128", style="rounded,filled", fillcolor="#eff6ff"];
   extraction [label="extraction.py\n共用像素提取 · 波数重采样\n16 帧读取/提取，仍拼接全量光谱"];
-  io [label="io/raw.py · io/fits.py\nraw：header 物理值优先，JSON 补缺\n产品 FITS 读写\n读入升精度 / 写出降精度\n磁盘 float32 ↔ 计算 float64（复数对应）\n读取核对单位与 checksum；写出不自动读回\nchecksum 生成 · 不覆盖写入"];
-  acquisition [label="io/acquisition.py\nCaptureMetadata → header / raw FITS\n采集时间与配置来源留在写入侧"];
+  io [label="io/raw.py · io/fits.py\n物理字段只读写 FITS header\n产品 FITS 读写\n读入升精度 / 写出降精度\n磁盘 float32 ↔ 计算 float64（复数对应）\n读取核对单位与 checksum；写出不自动读回\nchecksum 生成 · 不覆盖写入"];
+  acquisition [label="io/acquisition.py\nRawMetadata → header + detector cube\n只写物理字段；不记录采集来源"];
   products [label="products.py · instrument.py\nDark · Bad · Flat · Wave · P2VM · P2VMRed\n具名数组与固定物理通道约定"];
   qc [label="qc.py → io/keywords.py\n少量可用统计 → FITS keyword\n不修改拟合、mask 或权重"];
   {rank=same; python; recipes;}

@@ -1,4 +1,4 @@
-# PLANETES science products and FITS interface (v0.13.0)
+# PLANETES science products and FITS interface (v0.14.0)
 
 ## Design
 
@@ -79,10 +79,10 @@ The reader selects IMAGING_DATA_SC when present, otherwise the unique nonempty
 3-D primary/image extension. Ambiguous cubes require explicit low-level `hdu`
 selection. Known non-ADU units are rejected; missing BUNIT follows the bench ADU
 convention. Missing physical fields remain None. The reader returns only category,
-shutter states and detector setup; old format-3 private metadata supplies known
-physical fields without reconstructing the acquisition record. Known header/private
-metadata contradictions still fail. Capture records and the raw writer live in
-`io/acquisition.py`; reading does not require host timing or source records.
+shutter states and detector setup from FITS headers and image dimensions.
+There is no JSON reader, fallback or header-versus-JSON reconciliation. The writer
+in `io/acquisition.py` accepts the same `RawMetadata` and writes physical FITS
+cards, without acquisition-source or capture-history records.
 
 Python telescope/baseline dictionaries supply identities when shutter readback
 is incomplete. All known shutter states must agree with that assignment.
@@ -95,9 +95,10 @@ Python field renames (`matrix`, `baseline_outputs`) do not change FITS extension
 or column names. `FrameReducer` contains calculation state only and is constructed
 from explicitly loaded FLAT, WAVE and P2VM products.
 
-Reduced FITS files use `HIERARCH PLANETES FORMAT = 6`. P2VM scan diagnostics are
-optional. The reader also accepts previous format-4/5 files, ignoring their old private SHA-256 field
-and provenance JSON entries. Full structured raw files remain **format 3**.
+Reduced FITS files use `HIERARCH PLANETES FORMAT = 7`. P2VM scan diagnostics are
+optional. Older generated calibration products must be regenerated; the reader
+has no JSON compatibility path. Raw reading uses the physical header and cube,
+without a private raw-format version or metadata extension.
 
 | Category | FITS payload |
 | --- | --- |
@@ -110,9 +111,9 @@ and provenance JSON entries. Full structured raw files remain **format 3**.
 | LINE_LIST | laboratory wavelength [m] and origin labels |
 
 All products carry `ESO PRO CATG/TYPE/SCIENCE`, named extensions, physical
-units, per-HDU FITS checksum/DATASUM and minimal private `PLANETES_META`
-(software version and optional known detector setup). FITS checksum is a
-transmission/integrity check, **not** cryptographic provenance. New standalone
+units and per-HDU FITS checksum/DATASUM. DARK/FLAT detector settings are stored
+only in the primary header: `ESO DET ID`, window/ROI/binning cards and DIT.
+There is no `PLANETES_META` extension. FITS checksums detect transmission errors. New standalone
 Python files do not encode input paths or processing parameters. PyCPL/ESO DFS
 files additionally record recipe parameters and the frames actually used.
 
@@ -200,10 +201,10 @@ shutters remain usable with those explicit Python mappings. Repeated SOF raw fil
 are identified by `read_shutter_id` at the recipe boundary; unknown shutters need
 an explicit Python mapping. No path/metadata tuples flow into scientific steps.
 
-Raw metadata keeps the existing format-3 contract: known physical header fields
-win, JSON fills missing physical fields, and saved exposure-source/legacy flags
-are retained. Known contradictions fail. The raw writer and FITS formats are
-unchanged.
+Raw metadata contains only category, four shutter states and physical detector
+settings. `DetectorSetup` has exposure, ROI, binning and detector fields; no
+exposure-source, legacy or orientation state is carried. Unknown physical header
+fields stay unknown; dimensions can be read directly from the detector cube.
 
 Raw-file workflows are `make_dark_products`, `make_flat`, `make_wave`,
 `make_p2vm` and `reduce_science`. They return products and leave saving explicit.

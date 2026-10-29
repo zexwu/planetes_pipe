@@ -8,7 +8,7 @@ from astropy.io import fits as afits
 
 from ..instrument import DetectorSetup, check_setup
 from . import keywords as kw
-from .hdu import _read_json, as_compute_array
+from .hdu import as_compute_array
 
 CHUNK_FRAMES = 16
 
@@ -104,13 +104,7 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
         category=category,
         shutters=shutter_values,
         setup=DetectorSetup(
-            **roi,
-            exposure_s=exposure,
-            exposure_source="readback"
-            if kw.DIT in header
-            else ("command" if kw.UIT in header else "unknown"),
-            detector=header.get("ESO DET ID"),
-            legacy=True,
+            **roi, exposure_s=exposure, detector=header.get(kw.DETECTOR_ID)
         ),
     )
     return raw
@@ -119,88 +113,13 @@ def parse_raw_header(header: afits.Header, shape, *, category=None) -> RawMetada
 def read_raw_metadata(
     path: Path, *, category=None, hdu: int | str | None = None
 ) -> RawMetadata:
-    """Use known physical header values, filling gaps from saved format-3 JSON.
-
-    Saved JSON also retains exposure-source and legacy flags. Contradictions in
-    known physical fields fail; acquisition timestamps are not read here.
-    """
+    """Read physical fields from the FITS header and image dimensions."""
     with afits.open(path, memmap=True) as hdus:
         header = hdus[0].header
         if kw.PRO_CATEGORY in header:
             raise ValueError(f"Expected raw FITS, found pipeline product: {path}")
-        if kw.FORMAT_KEY in header and (
-            header[kw.FORMAT_KEY] != kw.RAW_FORMAT
-            or header.get("INSTRUME") != "PLANETES"
-        ):
-            raise ValueError(f"Unsupported PLANETES raw format: {path}")
         image = _detector_hdu(hdus, hdu)
-        saved = _read_json(hdus, kw.META_EXT) if kw.META_EXT in hdus else {}
-        header_meta = parse_raw_header(
-            header,
-            image.shape,
-            category=category if category is not None else saved.get("category"),
-        )
-        if saved.get("category", header_meta.category) != header_meta.category:
-            raise ValueError("Raw header and metadata disagree: category")
-        if not saved:
-            return header_meta
-
-        # Format-3 files, including current acquisitions, also store setup in JSON.
-        header_setup = header_meta.setup
-        saved_fields = saved.get("setup", {})
-        saved_setup = DetectorSetup(**saved_fields)
-        check_setup(header_setup, saved_setup, exposure=True, role="raw metadata")
-        if header_setup.exposure_s is not None and "exposure_source" in saved_fields:
-            recorded_dit = saved_setup.exposure_source in (
-                "readback",
-                "legacy-property",
-            )
-            if recorded_dit != (kw.DIT in header):
-                raise ValueError("Raw header and metadata disagree: exposure source")
-
-        physical = {}
-        for name in (
-            "exposure_s",
-            "origin_x",
-            "origin_y",
-            "width",
-            "height",
-            "binning_x",
-            "binning_y",
-            "detector",
-            "orientation",
-        ):
-            value = getattr(header_setup, name)
-            physical[name] = value if value is not None else getattr(saved_setup, name)
-
-        saved_shutters = tuple(saved.get("shutters", header_meta.shutters))
-        if len(saved_shutters) != 4 or any(
-            state is not None and type(state) is not bool for state in saved_shutters
-        ):
-            raise ValueError("Recorded shutter states must be four booleans or unknown")
-        shutters = []
-        for header_state, saved_state in zip(
-            header_meta.shutters, saved_shutters, strict=True
-        ):
-            if (
-                header_state is not None
-                and saved_state is not None
-                and header_state != saved_state
-            ):
-                raise ValueError("Raw header and metadata disagree: shutters")
-            shutters.append(header_state if header_state is not None else saved_state)
-        active = sum(state is True for state in shutters)
-        expected_open = kw.RAW_TYPES[header_meta.category]["open_shutters"]
-        if not active <= expected_open <= active + shutters.count(None):
-            raise ValueError("Raw category and recorded shutter states conflict")
-        setup = DetectorSetup(
-            **physical,
-            exposure_source=saved_fields.get(
-                "exposure_source", header_setup.exposure_source
-            ),
-            legacy=saved_fields.get("legacy", header_setup.legacy),
-        )
-        return RawMetadata(header_meta.category, tuple(shutters), setup)
+        return parse_raw_header(header, image.shape, category=category)
 
 
 def iter_raw_cube(path: Path, *, hdu: int | str | None = None):

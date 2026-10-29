@@ -1,12 +1,10 @@
 """Science-product FITS with GRAVITY-derived vocabulary and metre-valued arrays."""
 
-from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits as afits
 
-from .. import __version__
 from ..instrument import (
     ABCD_ORDER,
     BASELINES,
@@ -17,7 +15,7 @@ from ..instrument import (
 )
 from ..products import Bad, Dark, Flat, P2VM, P2VMRed, Wave, WavelengthReference
 from . import keywords as kw
-from .hdu import _verify_checksums, _json_hdu, _native, _read_json, _storage_array
+from .hdu import _verify_checksums, _native, _storage_array
 from .keywords import CATEGORIES
 from .publication import publish_outputs
 
@@ -71,7 +69,7 @@ def encode_product(product, header=None, *, quality=None):
         )
     hdr = afits.Header() if header is None else header.copy()
     for key in list(hdr):
-        if key.startswith("ESO DPR ") or key == "PLANETES CONTENT SHA256":
+        if key.startswith("ESO DPR "):
             del hdr[key]
     hdr["INSTRUME"] = "PLANETES"
     hdr["HIERARCH " + kw.FORMAT_KEY] = kw.PRODUCT_FORMAT
@@ -86,13 +84,10 @@ def encode_product(product, header=None, *, quality=None):
             v = getattr(setup, name)
             if v is not None:
                 hdr["HIERARCH " + key] = v + (1 if name.startswith("origin_") else 0)
+        if setup.detector is not None:
+            hdr["HIERARCH " + kw.DETECTOR_ID] = setup.detector
         if setup.exposure_s is not None:
-            key = (
-                kw.DIT
-                if setup.exposure_source in ("readback", "legacy-property")
-                else kw.UIT
-            )
-            hdr["HIERARCH " + key] = (setup.exposure_s, "[s] Source in PLANETES_META")
+            hdr["HIERARCH " + kw.DIT] = (setup.exposure_s, "[s] Integration time")
 
     def one_based_pixels(values):
         return (
@@ -249,14 +244,6 @@ def encode_product(product, header=None, *, quality=None):
                     ],
                 )
             )
-    # The raw/bench FITS dictionary is unfinished. Store only useful setup
-    # information here; ESO DFS owns input-file and recipe provenance.
-    metadata = {
-        "software_version": __version__,
-        "setup": asdict(product.setup)
-        if getattr(product, "setup", None) is not None
-        else None,
-    }
     if quality is not None:
         for metric, (number, comment) in quality.items():
             hdus[0].header["HIERARCH " + kw.QC_KEYWORDS[metric]] = (number, comment)
@@ -270,7 +257,6 @@ def encode_product(product, header=None, *, quality=None):
                     number * 1e6,
                     comment.replace("[m]", "[um]"),
                 )
-    hdus.append(_json_hdu(kw.META_EXT, metadata))
     return afits.HDUList(hdus)
 
 
@@ -279,7 +265,7 @@ def read_product(path: Path, cls=None):
     with afits.open(path, checksum=True) as hdus:
         hdr = hdus[0].header
         if (
-            hdr.get(kw.FORMAT_KEY) not in (4, 5, kw.PRODUCT_FORMAT)
+            hdr.get(kw.FORMAT_KEY) != kw.PRODUCT_FORMAT
             or hdr.get("INSTRUME") != "PLANETES"
         ):
             raise ValueError("Unsupported PLANETES product format")
@@ -287,7 +273,6 @@ def read_product(path: Path, cls=None):
         if actual is None or (cls is not None and actual is not cls):
             raise ValueError("Unexpected product category")
         _verify_checksums(hdus)
-        meta = _read_json(hdus, kw.META_EXT)
         values = {}
 
         def image(ext, unit):
@@ -424,23 +409,15 @@ def read_product(path: Path, cls=None):
                         kw.SCIENCE_VISIBILITY, "DIFFPHASE", "deg"
                     ).reshape(nf, 6, nw),
                 )
-        if actual in (Dark, Flat) and meta["setup"] is not None:
-            values["setup"] = DetectorSetup(**meta["setup"])
-            setup = values["setup"]
-            for name, key in kw.ROI_KEYS.items():
-                v = getattr(setup, name)
-                expected = (
-                    None if v is None else v + (1 if name.startswith("origin_") else 0)
-                )
-                if hdr.get(key) != expected:
-                    raise ValueError(f"Product setup and header disagree: {key}")
-            key = (
-                kw.DIT
-                if setup.exposure_source in ("readback", "legacy-property")
-                else kw.UIT
-            )
-            if hdr.get(key) != setup.exposure_s:
-                raise ValueError("Product exposure and header disagree")
+        if actual in (Dark, Flat):
+            setup = {name: hdr.get(key) for name, key in kw.ROI_KEYS.items()}
+            for name in ("origin_x", "origin_y"):
+                if setup[name] is not None:
+                    setup[name] -= 1  # FITS origins are one-based.
+            setup["exposure_s"] = hdr.get(kw.DIT)
+            setup["detector"] = hdr.get(kw.DETECTOR_ID)
+            if any(value is not None for value in setup.values()):
+                values["setup"] = DetectorSetup(**setup)
         return actual(**values)
 
 
