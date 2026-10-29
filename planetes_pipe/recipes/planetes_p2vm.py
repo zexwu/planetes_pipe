@@ -3,17 +3,17 @@
 import numpy as np
 from cpl import ui
 
-from planetes import __version__
-from planetes.qc import measure_quality
-from planetes.io.fits import read_product
-from planetes.instrument import check_setup
-from planetes.io.raw import read_raw_metadata
-from planetes.extraction import extract_spectra_from_file, prepare_extraction
-from planetes.p2vm import make_p2vm
-from planetes.products import Dark, Flat, Wave
-from planetes.recipes.dfs import read_sof, save_products, read_shutter_id
-from planetes.recipes.logging import recipe_logging
-from planetes.recipes.parameters import make_parameters, read_parameters
+from planetes_pipe import __version__
+from planetes_pipe.qc import measure_quality
+from planetes_pipe.io.fits import read_product
+from planetes_pipe.instrument import check_setup
+from planetes_pipe.io.raw import read_raw_metadata
+from planetes_pipe.extraction import extract_spectra_from_file, prepare_extraction
+from planetes_pipe.p2vm import make_p2vm
+from planetes_pipe.products import Dark, Flat, Wave
+from planetes_pipe.recipes.dfs import read_sof, save_products, read_shutter_id
+from planetes_pipe.recipes.logging import recipe_logging
+from planetes_pipe.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
     "keep_diagnostics": (

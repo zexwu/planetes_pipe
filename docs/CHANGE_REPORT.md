@@ -1,5 +1,22 @@
 # PLANETES 0.15.0：让I/O直接表达读了什么、写了什么
 
+## 后续维护：与 bench 的包名及产品接口同步
+
+科学软件使用独立 distribution `planetes-pipe` 和 Python namespace `planetes_pipe`，
+恢复 `PLANETES_new/bench` 已采用的接口约定。硬件项目 `catkit2-planetes` 继续拥有
+`planetes` namespace，两者可在同一进程导入。ESO recipe 名和产品类别保持不变。
+更新包目录、资源查找、构建配置、测试与文档；同步 pipeline/bench 的 uv 环境，
+未升级第三方科学依赖，科学函数 AST 保持一致。
+
+bench 新增独立 Git 仓库与两项离线联调测试，检查 raw 写入/只读回放、动态命名标定
+按 PRO CATG 加载、明确 DARK 的逐帧/离线一致性，以及重复标定类别的拒绝行为。
+同步 acquisition 示例和数据目录的 prepare_reduce.py，产品名统一调用
+`product_filename`，不再从 archive 重算命名。非 Git 文件修改前已保存在 bench/archive。
+
+mba 验证：pipeline 17 项测试通过；bench 2 项联调通过。实际 2026-02-05 science
+回放读取 1024×1280 raw 帧，输出 6×151 个有限 VISAMP，明确使用 science DARK；
+与已存 float32 首帧的最大差值为 5.96e-8。验证仅使用离线回放，未操作硬件。
+
 ## 后续维护：保留 raw 文件名中的时间信息
 
 在 mba 的 `/Users/zexwu/PLANETES_new/planetes_pipe` 开发。默认命名沿用

@@ -13,10 +13,10 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import input_rows, metadata, write_raw, write_recipe_inputs
 
-import planetes
-from planetes.io.fits import read_product, write_product
-from planetes.products import Flat, P2VM, P2VMRed, Wave
-from planetes.reduction import reduce_science
+import planetes_pipe
+from planetes_pipe.io.fits import read_product, write_product
+from planetes_pipe.products import Flat, P2VM, P2VMRed, Wave
+from planetes_pipe.reduction import reduce_science
 
 
 @unittest.skipUnless(
@@ -24,7 +24,7 @@ from planetes.reduction import reduce_science
 )
 class ESOChainTests(unittest.TestCase):
     def test_science_recipe_preserves_dark_subtraction_and_masks(self):
-        recipes = Path(planetes.__file__).parent / "recipes"
+        recipes = Path(planetes_pipe.__file__).parent / "recipes"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             inputs = write_recipe_inputs(root / "inputs")
@@ -163,7 +163,7 @@ class ESOChainTests(unittest.TestCase):
                 self.assertNotIn("ESO QC REJECTED RATIO", hdus[0].header)
 
     def test_dark_recipe_dynamic_and_static_product_names(self):
-        recipes = Path(planetes.__file__).parent / "recipes"
+        recipes = Path(planetes_pipe.__file__).parent / "recipes"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "PLANETES.2026-02-05TUNKNOWN.0001.fits"
@@ -206,9 +206,9 @@ class ESOChainTests(unittest.TestCase):
                         self.assertEqual(header["ESO PRO REC1 RAW1 NAME"], source.name)
 
     def test_recipe_logging_restores_python_configuration_after_failure(self):
-        from planetes.recipes.logging import recipe_logging
+        from planetes_pipe.recipes.logging import recipe_logging
 
-        logger = planetes.log
+        logger = planetes_pipe.log
         original = logger.handlers, logger.level, logger.propagate
         handler = logging.NullHandler()
         try:

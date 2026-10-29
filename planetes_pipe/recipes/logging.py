@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 from cpl.core import Msg
 
-from planetes import log
+from planetes_pipe import log
 
 
 class _CPLHandler(logging.Handler):

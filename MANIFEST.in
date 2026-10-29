@@ -1,5 +1,5 @@
 include README.md pyproject.toml uv.lock
-recursive-include planetes *.py *.ecsv *.fits
+recursive-include planetes_pipe *.py *.ecsv *.fits
 recursive-include tests *.py
 recursive-include docs *.md *.dot *.svg *.png
 recursive-include examples *.in *.py

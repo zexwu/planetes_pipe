@@ -3,7 +3,7 @@
 import logging
 
 __version__ = "0.15.0"
-log = logging.getLogger("planetes")
+log = logging.getLogger("planetes_pipe")
 
 
 def configure_logging(level: str = "INFO") -> None:

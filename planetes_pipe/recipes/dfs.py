@@ -5,13 +5,13 @@ from pathlib import Path
 from astropy.io import fits as afits
 from cpl import core, dfs, ui
 
-from planetes import __version__
-from planetes.io.fits import encode_product, product_filename
-from planetes.io.keywords import CATEGORIES, PRO_CATEGORY, RAW_TYPES
-from planetes.io.hdu import new_fits_file
-from planetes.io.raw import read_raw_metadata
-from planetes.products import P2VM, P2VMRed, Wave, WavelengthReference
-from planetes.recipes.parameters import STATIC_NAME
+from planetes_pipe import __version__
+from planetes_pipe.io.fits import encode_product, product_filename
+from planetes_pipe.io.keywords import CATEGORIES, PRO_CATEGORY, RAW_TYPES
+from planetes_pipe.io.hdu import new_fits_file
+from planetes_pipe.io.raw import read_raw_metadata
+from planetes_pipe.products import P2VM, P2VMRed, Wave, WavelengthReference
+from planetes_pipe.recipes.parameters import STATIC_NAME
 
 
 def cpl_frame_type(cls):
@@ -173,7 +173,7 @@ def save_products(outputs, used, recipe, *, reference: Path):
                 used,
                 recipe.name,
                 properties,
-                f"planetes/{__version__}",
+                f"planetes-pipe/{__version__}",
                 str(path),
                 inherit=inherit,
             )

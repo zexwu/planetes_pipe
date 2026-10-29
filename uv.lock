@@ -534,7 +534,7 @@ wheels = [
 ]
 
 [[package]]
-name = "planetes"
+name = "planetes-pipe"
 source = { editable = "." }
 dependencies = [
     { name = "astropy" },

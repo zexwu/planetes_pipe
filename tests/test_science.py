@@ -6,11 +6,11 @@ from dataclasses import replace
 import numpy as np
 from p2vm_fixture import calibration_arrays, calibration_spectra
 
-from planetes.extraction import extract_sparse_spectra
-from planetes.instrument import N_DATA
-from planetes.p2vm import build_v2pm, fit_p2vm, fit_abcd_ellipse
-from planetes.reduction import normalize_coherent_flux, reduce_spectra
-from planetes.wavelength import match_peaks_grid
+from planetes_pipe.extraction import extract_sparse_spectra
+from planetes_pipe.instrument import N_DATA
+from planetes_pipe.p2vm import build_v2pm, fit_p2vm, fit_abcd_ellipse
+from planetes_pipe.reduction import normalize_coherent_flux, reduce_spectra
+from planetes_pipe.wavelength import match_peaks_grid
 
 
 class ScienceTests(unittest.TestCase):

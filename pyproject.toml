@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "planetes"
+name = "planetes-pipe"
 dynamic = ["version"]
 description = "PLANETES detector and interferometric reduction pipeline"
 readme = "README.md"
@@ -26,14 +26,14 @@ eso = [
 include-package-data = false
 
 [tool.setuptools.packages.find]
-include = ["planetes*"]
+include = ["planetes_pipe*"]
 namespaces = false
 
 [tool.setuptools.dynamic]
-version = {attr = "planetes.__version__"}
+version = {attr = "planetes_pipe.__version__"}
 
 [tool.setuptools.package-data]
-planetes = ["data/*.ecsv", "data/*.fits"]
+planetes_pipe = ["data/*.ecsv", "data/*.fits"]
 
 [tool.ruff]
 line-length = 88

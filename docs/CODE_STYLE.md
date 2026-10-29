@@ -99,8 +99,8 @@ RANSAC_ITERATIONS = 1_000_000
 Ruff 配置集中在 `pyproject.toml`：
 
 ```bash
-ruff format planetes tests examples
-ruff check planetes tests examples
+ruff format planetes_pipe tests examples
+ruff check planetes_pipe tests examples
 ```
 
 现有科学测试与必要的数值对照用于检查计算行为；纯排版不新增测试。

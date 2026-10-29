@@ -2,12 +2,12 @@
 
 from cpl import ui
 
-from planetes import __version__
-from planetes.qc import measure_quality
-from planetes.dark import make_dark_products
-from planetes.recipes.dfs import read_sof, save_products
-from planetes.recipes.logging import recipe_logging
-from planetes.recipes.parameters import make_parameters, read_parameters
+from planetes_pipe import __version__
+from planetes_pipe.qc import measure_quality
+from planetes_pipe.dark import make_dark_products
+from planetes_pipe.recipes.dfs import read_sof, save_products
+from planetes_pipe.recipes.logging import recipe_logging
+from planetes_pipe.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
     "bad_pixel_threshold": (

@@ -2,14 +2,14 @@
 
 from cpl import ui
 
-from planetes import __version__
-from planetes.qc import measure_quality
-from planetes.io.fits import read_product
-from planetes.products import Dark, Flat, P2VM, Wave
-from planetes.recipes.dfs import read_sof, save_products
-from planetes.recipes.logging import recipe_logging
-from planetes.recipes.parameters import make_parameters, read_parameters
-from planetes.reduction import reduce_science
+from planetes_pipe import __version__
+from planetes_pipe.qc import measure_quality
+from planetes_pipe.io.fits import read_product
+from planetes_pipe.products import Dark, Flat, P2VM, Wave
+from planetes_pipe.recipes.dfs import read_sof, save_products
+from planetes_pipe.recipes.logging import recipe_logging
+from planetes_pipe.recipes.parameters import make_parameters, read_parameters
+from planetes_pipe.reduction import reduce_science
 
 PARAMETERS = {
     "gd_search_min_m": (

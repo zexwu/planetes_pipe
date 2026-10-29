@@ -6,11 +6,11 @@ from pathlib import Path
 import numpy as np
 from astropy.io import fits
 
-from planetes.instrument import BASELINES, TELESCOPES, DetectorSetup
-from planetes.io.fits import write_product
-from planetes.io import keywords as kw
-from planetes.io.raw import RawMetadata
-from planetes.products import P2VMSpectra, Dark, Flat, Wave
+from planetes_pipe.instrument import BASELINES, TELESCOPES, DetectorSetup
+from planetes_pipe.io.fits import write_product
+from planetes_pipe.io import keywords as kw
+from planetes_pipe.io.raw import RawMetadata
+from planetes_pipe.products import P2VMSpectra, Dark, Flat, Wave
 
 
 def calibration_arrays(n_wave: int = 151, n_frame: int = 32):

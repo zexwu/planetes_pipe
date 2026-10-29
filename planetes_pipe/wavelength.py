@@ -577,4 +577,4 @@ def wavelength_reference_path() -> Path:
     """
     from importlib.resources import files
 
-    return Path(str(files("planetes").joinpath("data/wavelength_lines.fits")))
+    return Path(str(files("planetes_pipe").joinpath("data/wavelength_lines.fits")))

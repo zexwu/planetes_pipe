@@ -3,14 +3,14 @@
 # %% Select raw inputs and a new output directory (bench values follow the ADU convention).
 from pathlib import Path
 
-from planetes.dark import make_dark_products
-from planetes.flat import make_flat
-from planetes.io.fits import product_filename, read_product, write_product
-from planetes.p2vm import make_p2vm
-from planetes.reduction import reduce_science
-from planetes.products import WavelengthReference
-from planetes.qc import measure_quality
-from planetes.wavelength import make_wave, wavelength_reference_path
+from planetes_pipe.dark import make_dark_products
+from planetes_pipe.flat import make_flat
+from planetes_pipe.io.fits import product_filename, read_product, write_product
+from planetes_pipe.p2vm import make_p2vm
+from planetes_pipe.reduction import reduce_science
+from planetes_pipe.products import WavelengthReference
+from planetes_pipe.qc import measure_quality
+from planetes_pipe.wavelength import make_wave, wavelength_reference_path
 
 calibration_raw = Path("/absolute/calibration-raw")
 science_raw = Path("/absolute/science-raw")

@@ -9,15 +9,15 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import calibration_arrays, calibration_spectra, metadata, write_raw
 
-from planetes.dark import detect_bad_pixels, measure_dark
-from planetes.io.fits import product_filename, read_product, write_product
-from planetes.io.hdu import as_compute_array
-from planetes.io.raw import iter_raw_cube as iter_cube
-from planetes.io.raw import read_raw_metadata
-from planetes.p2vm import fit_p2vm
-from planetes.products import Dark, P2VMRed
-from planetes.qc import measure_quality
-from planetes.reduction import reduce_spectra
+from planetes_pipe.dark import detect_bad_pixels, measure_dark
+from planetes_pipe.io.fits import product_filename, read_product, write_product
+from planetes_pipe.io.hdu import as_compute_array
+from planetes_pipe.io.raw import iter_raw_cube as iter_cube
+from planetes_pipe.io.raw import read_raw_metadata
+from planetes_pipe.p2vm import fit_p2vm
+from planetes_pipe.products import Dark, P2VMRed
+from planetes_pipe.qc import measure_quality
+from planetes_pipe.reduction import reduce_spectra
 
 
 class ScienceProductTests(unittest.TestCase):

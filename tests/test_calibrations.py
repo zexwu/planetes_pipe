@@ -8,14 +8,14 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import write_recipe_inputs
 
-from planetes.dark import make_dark_products
-from planetes.extraction import extract_spectra_from_file, prepare_extraction
-from planetes.flat import make_flat
-from planetes.instrument import BASELINES, TELESCOPES
-from planetes.io.fits import read_product, write_product
-from planetes.p2vm import make_p2vm
-from planetes.products import Bad, Dark, WavelengthReference
-from planetes.wavelength import make_wave
+from planetes_pipe.dark import make_dark_products
+from planetes_pipe.extraction import extract_spectra_from_file, prepare_extraction
+from planetes_pipe.flat import make_flat
+from planetes_pipe.instrument import BASELINES, TELESCOPES
+from planetes_pipe.io.fits import read_product, write_product
+from planetes_pipe.p2vm import make_p2vm
+from planetes_pipe.products import Bad, Dark, WavelengthReference
+from planetes_pipe.wavelength import make_wave
 
 
 class CalibrationTests(unittest.TestCase):

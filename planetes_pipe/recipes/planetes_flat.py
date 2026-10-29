@@ -2,14 +2,14 @@
 
 from cpl import ui
 
-from planetes import __version__
-from planetes.qc import measure_quality
-from planetes.io.fits import read_product
-from planetes.flat import make_flat
-from planetes.products import Bad, Dark
-from planetes.recipes.dfs import read_sof, save_products, read_shutter_id
-from planetes.recipes.logging import recipe_logging
-from planetes.recipes.parameters import make_parameters, read_parameters
+from planetes_pipe import __version__
+from planetes_pipe.qc import measure_quality
+from planetes_pipe.io.fits import read_product
+from planetes_pipe.flat import make_flat
+from planetes_pipe.products import Bad, Dark
+from planetes_pipe.recipes.dfs import read_sof, save_products, read_shutter_id
+from planetes_pipe.recipes.logging import recipe_logging
+from planetes_pipe.recipes.parameters import make_parameters, read_parameters
 
 PARAMETERS = {
     "aperture_width_pixels": (

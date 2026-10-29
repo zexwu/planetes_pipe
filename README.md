@@ -9,6 +9,20 @@ P2VM calculation: [flow diagram](docs/p2vm_flow.png) ·
 [phase and normalization conventions](docs/SCIENTIFIC_METHODS.md#p2vm-p2vmpy) ·
 [change report](docs/CHANGE_REPORT.md).
 
+## Python package and bench compatibility
+
+The distribution is `planetes-pipe`, imported as `planetes_pipe`. The separate
+`catkit2-planetes` hardware project owns `planetes`; both must be able to coexist
+in one bench process. The ESO recipe names remain `planetes_dark`, `planetes_flat`,
+`planetes_wave`, `planetes_p2vm` and `planetes_reduce`.
+
+When changing public functions, product formats/names or package metadata, update
+and validate the sibling `../bench` ([planetes_bench](https://github.com/zexwu/planetes_bench))
+in the same change. Run its compatibility
+tests using its own locked environment, including offline GUI loading and the
+comparison of live reduction with the same pipeline/calibrations. Select products
+by `ESO PRO CATG`, not a fixed filename. Check the dataset's calling scripts too.
+
 ## Install
 
 For scientific functions and FITS I/O:
@@ -31,10 +45,10 @@ The ESO recipe tests use Python 3.13, CPL 7.4, PyCPL 1.0.4.post1 and PyEsoRex
 ## Run with PyEsoRex
 
 ```bash
-pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes/recipes --recipes
+pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes_pipe/recipes --recipes
 mkdir /path/to/new-dark-output
 cd /path/to/new-dark-output
-pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes/recipes planetes_dark /absolute/path/to/dark.sof
+pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes_pipe/recipes planetes_dark /absolute/path/to/dark.sof
 ```
 
 Use a new directory per invocation. Fill the absolute paths in `examples/*.sof.in`
@@ -90,12 +104,12 @@ within a baseline use A,C,B,D. The wave recipe defaults to the bundled static
 Scientific messages use CPL logging during each recipe invocation, respecting
 PyEsoRex's independent `--msg-level` and `--log-level` settings. The previous
 Python logger configuration is restored when the recipe returns or raises.
-Standalone scripts can call `planetes.configure_logging()` for console progress.
+Standalone scripts can call `planetes_pipe.configure_logging()` for console progress.
 
 Parameters use the same scientific defaults in Python and ESO. For example:
 
 ```bash
-pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes/recipes planetes_p2vm \
+pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes_pipe/recipes planetes_p2vm \
   --phase-correction=true --wavelength-min-m=1.15e-6 --wavelength-max-m=1.30e-6 \
   --wavelength-channels=151 /absolute/path/to/p2vm.sof
 ```
@@ -113,14 +127,14 @@ reference with its matching DARK when available.
 
 ```python
 from pathlib import Path
-from planetes.dark import make_dark_products
-from planetes.flat import make_flat
-from planetes.wavelength import make_wave, wavelength_reference_path
-from planetes.p2vm import make_p2vm
-from planetes.reduction import reduce_science
-from planetes.io.fits import product_filename, read_product, write_product
-from planetes.products import WavelengthReference
-from planetes.qc import measure_quality
+from planetes_pipe.dark import make_dark_products
+from planetes_pipe.flat import make_flat
+from planetes_pipe.wavelength import make_wave, wavelength_reference_path
+from planetes_pipe.p2vm import make_p2vm
+from planetes_pipe.reduction import reduce_science
+from planetes_pipe.io.fits import product_filename, read_product, write_product
+from planetes_pipe.products import WavelengthReference
+from planetes_pipe.qc import measure_quality
 
 raw = Path('/absolute/raw')
 main_dark, bad = make_dark_products(raw / 'dark.fits')
@@ -150,10 +164,10 @@ calling script, then extract the reference on the same grid as the scans:
 
 ```python
 import numpy as np
-from planetes.extraction import extract_spectra_from_file, prepare_extraction
-from planetes.instrument import check_setup
-from planetes.io.raw import read_raw_metadata
-from planetes.p2vm import extract_p2vm_spectra, fit_p2vm
+from planetes_pipe.extraction import extract_spectra_from_file, prepare_extraction
+from planetes_pipe.instrument import check_setup
+from planetes_pipe.io.raw import read_raw_metadata
+from planetes_pipe.p2vm import extract_p2vm_spectra, fit_p2vm
 
 grid = np.linspace(1.15e-6, 1.30e-6, 151)
 scans = extract_p2vm_spectra(
@@ -216,7 +230,7 @@ See [the retained QC set](docs/QC_PARAMETERS.md).
 For single frames:
 
 ```python
-from planetes.reduction import FrameReducer
+from planetes_pipe.reduction import FrameReducer
 reducer = FrameReducer(flat, wave, p2vm)
 observables = reducer.reduce_frame(raw_frame_adu, dark=science_dark)
 ```
