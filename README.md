@@ -54,8 +54,9 @@ pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes_pipe/recipes plan
 Use a new directory per invocation. Fill the absolute paths in `examples/*.sof.in`
 before using them. Tags describe categories; repeated FLAT_RAW/P2VM_RAW entries are
 identified by physical shutter metadata, independently of order and filenames.
-SOF categories are unchanged. For bench files without shutter readback, use the
-explicit Python identity mappings below.
+SOF categories are unchanged. Legacy files without shutter readback require
+explicitly assigned Python identity mappings. The supplied example uses the
+standardized bench raw files with physical shutter headers.
 
 | Recipe | Required SOF roles | Optional roles | Output with `--static-name=true` |
 | --- | --- | --- | --- |
@@ -110,7 +111,7 @@ Parameters use the same scientific defaults in Python and ESO. For example:
 
 ```bash
 pyesorex --recipe-dir=/absolute/path/to/planetes_pipe/planetes_pipe/recipes planetes_p2vm \
-  --phase-correction=true --wavelength-min-m=1.15e-6 --wavelength-max-m=1.30e-6 \
+  --phase-correction=false --wavelength-min-m=1.15e-6 --wavelength-max-m=1.30e-6 \
   --wavelength-channels=151 /absolute/path/to/p2vm.sof
 ```
 
@@ -119,48 +120,37 @@ PyEsoRex can save its own `.rc` parameter file; a project YAML is unnecessary.
 
 ## Run from Python
 
-[examples/reduce.py](examples/reduce.py) is a complete linear script: edit its raw
-and output directories, then run it. It explicitly selects separate main, lamp
-and science DARKs and saves eight calibration/instrumental products. Its P2VM call
-has no phase reference. The example below shows how to select and extract a
-reference with its matching DARK when available.
+[examples/reduce.py](examples/reduce.py) directly reduces the standardized
+`../2026_02_05/raw/calibration` and `raw/science` dataset:
 
-```python
-from pathlib import Path
-from planetes_pipe.dark import make_dark_products
-from planetes_pipe.flat import make_flat
-from planetes_pipe.wavelength import make_wave, wavelength_reference_path
-from planetes_pipe.p2vm import make_p2vm
-from planetes_pipe.reduction import reduce_science
-from planetes_pipe.io.fits import product_filename, read_product, write_product
-from planetes_pipe.products import WavelengthReference
-from planetes_pipe.qc import measure_quality
-
-raw = Path('/absolute/raw')
-main_dark, bad = make_dark_products(raw / 'dark.fits')
-wave_dark, _ = make_dark_products(raw / 'wave_dark.fits')
-science_dark, _ = make_dark_products(raw / 'sci_dark.fits')
-telescopes = {n: raw / f'tel{n}.fits' for n in ('4', '3', '2', '1')}
-baselines = {n: raw / f'bsl{n}.fits' for n in ('43', '42', '41', '32', '31', '21')}
-flat = make_flat(telescopes, main_dark, bad)
-lines = read_product(wavelength_reference_path(), WavelengthReference)
-wave = make_wave(raw / 'wave.fits', wave_dark, flat, reference=lines)
-p2vm = make_p2vm(
-    flat, wave, main_dark, telescope_flats=telescopes, baseline_cubes=baselines,
-)
-p2vmred = reduce_science(raw / 'sci.fits', science_dark, flat, wave, p2vm)
-write_product(
-    Path('/absolute/new-output') / product_filename(raw / 'sci.fits', p2vmred),
-    p2vmred,
-    quality=measure_quality(p2vmred),
-)
+```bash
+.venv/bin/python examples/reduce.py
 ```
+
+The script derives the sibling dataset directory from its own location. Change
+`night` and the five explicitly selected DARK/lamp/science paths for another
+night. FLAT and P2VM input identities come from DPR type and physical shutter
+headers, never from timestamp/import-index text. Three DARKs are selected
+separately; the main calibration DARK has unknown DIT in this dataset.
+
+Outputs go to a **new** `../2026_02_05/reduced_example/` directory, with the raw
+stem preserved. Re-running requires selecting another output directory. The
+script saves seven calibrations, reads the saved DARK/FLAT/WAVE/P2VM back, then
+writes per-frame science observables. This matches the bench's use of serialized
+calibrations. No instrumental phase reference is selected for this dataset.
+
+The SOF templates use these actual raw names and the calibration products from
+`reduced_example`. Replace `/absolute/PLANETES_new` with your workspace root;
+point calibration paths at your chosen recipe outputs if needed. `dark.sof.in`,
+`lamp_dark.sof.in` and `science_dark.sof.in` explicitly distinguish the three
+DARK inputs. The P2VM SOF contains no fictitious phase-reference exposure.
 
 `make_wave` always receives an explicit line list. The WAVE recipe selects the
 packaged list when no LINE_LIST is supplied and records it as a DFS input.
 
-For instrumental phase correction, select the reference file and DARK in the
-calling script, then extract the reference on the same grid as the scans:
+For a separate dataset with an instrumental phase reference, the following
+continues from the example's variables in an interactive session. Explicitly
+select that reference file and its DARK, then extract it on the scan grid:
 
 ```python
 import numpy as np
@@ -171,10 +161,10 @@ from planetes_pipe.p2vm import extract_p2vm_spectra, fit_p2vm
 
 grid = np.linspace(1.15e-6, 1.30e-6, 151)
 scans = extract_p2vm_spectra(
-    flat, wave, main_dark, telescope_flats=telescopes,
-    baseline_cubes=baselines, wavelength_m=grid,
+    flat, wave, main_dark, telescope_flats=telescope_flats,
+    baseline_cubes=baseline_cubes, wavelength_m=grid,
 )
-reference_path = raw / 'phase_reference.fits'
+reference_path = Path('/absolute/path/to/selected_reference.fits')
 reference_dark = science_dark  # Explicitly choose the dark for this exposure.
 metadata = read_raw_metadata(reference_path, category='SINGLE_SCI_RAW')
 check_setup(metadata.setup, reference_dark.setup, exposure=True, role="DARK")
@@ -191,8 +181,9 @@ functions have no such switch or implicit DARK fallback.
 
 Unversioned bench FITS may store their cube in the primary or an image extension
 and omit unfinished acquisition keywords. Known exposure, ROI and shutter
-contradictions still fail; missing metadata stays unknown. The dictionaries above
-state physical identities explicitly: filenames and list order never assign them.
+contradictions still fail; missing metadata stays unknown. Explicit Python mappings
+can supply physical identities for such legacy cubes; filenames and list order
+never assign them.
 
 Raw readers and all file steps default to `IMAGING_DATA_SC`. For a primary-HDU
 bench cube, explicitly pass `hdu=0`; another named/numbered image HDU can be selected

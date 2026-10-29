@@ -1,6 +1,6 @@
-/absolute/dark-output/dark_dark.fits DARK
-/absolute/dark-output/dark_bad.fits BAD
-/absolute/raw/tel4.fits FLAT_RAW
-/absolute/raw/tel3.fits FLAT_RAW
-/absolute/raw/tel2.fits FLAT_RAW
-/absolute/raw/tel1.fits FLAT_RAW
+/absolute/PLANETES_new/2026_02_05/reduced_example/PLANETES.2026-02-05TUNKNOWN.0001_dark.fits DARK
+/absolute/PLANETES_new/2026_02_05/reduced_example/PLANETES.2026-02-05TUNKNOWN.0001_bad.fits BAD
+/absolute/PLANETES_new/2026_02_05/raw/calibration/PLANETES.2026-02-05TUNKNOWN.0002.fits FLAT_RAW
+/absolute/PLANETES_new/2026_02_05/raw/calibration/PLANETES.2026-02-05TUNKNOWN.0003.fits FLAT_RAW
+/absolute/PLANETES_new/2026_02_05/raw/calibration/PLANETES.2026-02-05TUNKNOWN.0004.fits FLAT_RAW
+/absolute/PLANETES_new/2026_02_05/raw/calibration/PLANETES.2026-02-05TUNKNOWN.0005.fits FLAT_RAW

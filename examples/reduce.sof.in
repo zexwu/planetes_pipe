@@ -1,5 +1,5 @@
-/absolute/raw/science.fits SINGLE_SCI_RAW
-/absolute/science-dark-output/sci_dark_dark.fits DARK
-/absolute/flat-output/tel4_flat.fits FLAT
-/absolute/wave-output/wave_wave.fits WAVE
-/absolute/p2vm-output/bsl43_p2vm.fits P2VM
+/absolute/PLANETES_new/2026_02_05/raw/science/PLANETES.2026-02-05T210609.fits SINGLE_SCI_RAW
+/absolute/PLANETES_new/2026_02_05/reduced_example/PLANETES.2026-02-05T210637_dark.fits DARK
+/absolute/PLANETES_new/2026_02_05/reduced_example/PLANETES.2026-02-05TUNKNOWN.0002_flat.fits FLAT
+/absolute/PLANETES_new/2026_02_05/reduced_example/PLANETES.2026-02-05T205537_wave.fits WAVE
+/absolute/PLANETES_new/2026_02_05/reduced_example/PLANETES.2026-02-05TUNKNOWN.0006_p2vm.fits P2VM
