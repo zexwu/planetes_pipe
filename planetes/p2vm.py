@@ -28,7 +28,7 @@ from .reduction import estimate_group_delay
 def fit_p2vm(
     spectra: P2VMSpectra,
     *,
-    phase_correction: bool = True,
+    phase_reference: NDArray | None = None,
     keep_diagnostics: bool = False,
     gd_search_min_m: float = -30e-6,
     gd_search_max_m: float = 30e-6,
@@ -37,12 +37,21 @@ def fit_p2vm(
 
     Scans: (baseline, output, frame, wavelength); flats: (telescope, output,
     frame, wavelength). Wavelength and GD bounds are metres. All 24 outputs
-    enter each baseline fit, including cross-talk. Optional scan diagnostics
-    change only the retained arrays, not the response or inverse.
+    enter each baseline fit, including cross-talk. Supply extracted reference
+    spectra (output, frame, wavelength) to apply phase correction, or None.
+    Optional scan diagnostics change only the retained arrays, not the response
+    or inverse.
     """
     log.info("--- Step: P2VM ---")
     _check_input_axes(spectra)
     wavelength_m = spectra.wavelength_m
+    if phase_reference is not None and (
+        phase_reference.ndim != 3
+        or phase_reference.shape[0] != N_OUTPUTS
+        or phase_reference.shape[-1] != len(wavelength_m)
+        or phase_reference.shape[1] == 0
+    ):
+        raise ValueError("Phase reference must match output/frame/wavelength axes")
     search_range = (gd_search_min_m, gd_search_max_m)
 
     # Scans: ABCD ellipse -> OPD/GD -> sinusoidal response of all 24 outputs.
@@ -58,18 +67,16 @@ def fit_p2vm(
     p2vm = _invert_v2pm(build_v2pm(transmission, amplitude, phase_rad))
 
     # The instrumental reference changes phases, then requires a new inverse.
-    if phase_correction and spectra.phase_reference.shape[1] > 0:
+    if phase_reference is not None:
         phase_rad = _apply_phase_reference(
             phase_rad,
             p2vm,
-            spectra.phase_reference,
+            phase_reference,
             wavelength_m,
             spectra.baseline_outputs,
             search_range=search_range,
         )
         p2vm = _invert_v2pm(build_v2pm(transmission, amplitude, phase_rad))
-    elif phase_correction:
-        log.info("Skipping phase correction: no phase-reference cube was provided.")
 
     product = P2VM(
         matrix=p2vm,
@@ -96,9 +103,6 @@ def _check_input_axes(spectra: P2VMSpectra) -> None:
         or spectra.baseline_spectra.ndim != 4
         or spectra.baseline_spectra.shape[:2] != (N_BASELINES, N_OUTPUTS)
         or spectra.baseline_spectra.shape[-1] != len(wavelength_m)
-        or spectra.phase_reference.ndim != 3
-        or spectra.phase_reference.shape[0] != N_OUTPUTS
-        or spectra.phase_reference.shape[-1] != len(wavelength_m)
     ):
         raise ValueError(
             "P2VM spectra must match telescope/output/baseline/wavelength axes"
@@ -457,9 +461,7 @@ def make_p2vm(
     *,
     telescope_flats: Mapping[str, Path],
     baseline_cubes: Mapping[str, Path],
-    phase_reference: Path | None = None,
-    phase_dark: Dark | None = None,
-    phase_correction: bool = True,
+    phase_reference: NDArray | None = None,
     keep_diagnostics: bool = False,
     wavelength_min_m: float = 1.15e-6,
     wavelength_max_m: float = 1.30e-6,
@@ -469,12 +471,11 @@ def make_p2vm(
 ) -> P2VM:
     """Read the calibration sequence and return the full 24-output response/inverse.
 
-    Wavelength and coarse GD bounds use metres. The optional phase reference
-    defines the instrumental phase and uses its selected DARK, or ``main_dark``.
+    Wavelength and coarse GD bounds use metres. The optional phase reference is
+    already extracted, dark-subtracted spectra on this exact wavelength grid,
+    with axes (output, frame, wavelength). Its file and DARK are chosen by the caller.
     """
 
-    if phase_dark is not None and phase_reference is None:
-        raise ValueError("phase_dark requires phase_reference")
     grid = np.linspace(wavelength_min_m, wavelength_max_m, wavelength_channels)
     spectra = extract_p2vm_spectra(
         flat,
@@ -483,12 +484,10 @@ def make_p2vm(
         telescope_flats=telescope_flats,
         baseline_cubes=baseline_cubes,
         wavelength_m=grid,
-        phase_reference=phase_reference if phase_correction else None,
-        phase_dark=phase_dark if phase_correction else None,
     )
     return fit_p2vm(
         spectra,
-        phase_correction=phase_correction,
+        phase_reference=phase_reference,
         keep_diagnostics=keep_diagnostics,
         gd_search_min_m=gd_search_min_m,
         gd_search_max_m=gd_search_max_m,
@@ -503,8 +502,6 @@ def extract_p2vm_spectra(
     telescope_flats: Mapping[str, Path],
     baseline_cubes: Mapping[str, Path],
     wavelength_m: NDArray,
-    phase_reference: Path | None = None,
-    phase_dark: Dark | None = None,
 ) -> P2VMSpectra:
     """Extract explicit telescope/baseline file maps and identify detector outputs."""
 
@@ -516,8 +513,6 @@ def extract_p2vm_spectra(
         raise ValueError("Each telescope requires a different flat file")
     if len({Path(path) for path in baseline_cubes.values()}) != N_BASELINES:
         raise ValueError("Each baseline requires a different scan file")
-    if phase_dark is not None and phase_reference is None:
-        raise ValueError("phase_dark requires phase_reference")
     extractor = prepare_extraction(flat, wave, wavelength_m)
 
     baseline_spectra = []
@@ -545,18 +540,9 @@ def extract_p2vm_spectra(
         check_raw_calibrations(raw, main_dark, flat)
         telescope_spectra.append(extract_spectra_from_file(path, extractor, main_dark))
     telescope_spectra = np.asarray(telescope_spectra)
-    reference_spectra = np.empty((N_OUTPUTS, 0, len(extractor.wavelength_m)))
-    if phase_reference is not None:
-        selected_dark = main_dark if phase_dark is None else phase_dark
-        raw = read_raw_metadata(phase_reference, category="SINGLE_SCI_RAW")
-        check_raw_calibrations(raw, selected_dark, flat)
-        reference_spectra = extract_spectra_from_file(
-            phase_reference, extractor, selected_dark
-        )
     return P2VMSpectra(
         telescope_spectra,
         baseline_spectra,
-        reference_spectra,
         _identify_output_mapping(telescope_spectra, baseline_spectra),
         extractor.wavelength_m,
     )

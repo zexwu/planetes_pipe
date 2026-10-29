@@ -11,7 +11,7 @@ from ..instrument import DetectorSetup
 from . import keywords as kw
 from .hdu import _json_hdu, _storage_array
 from .publication import publish_outputs
-from .raw import CHUNK_FRAMES, verify_raw
+from .raw import CHUNK_FRAMES
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +122,7 @@ def write_raw(path: Path, cube, metadata: CaptureMetadata):
         raise ValueError("Expected finite real raw detector values")
     image = afits.ImageHDU(cube, name=kw.RAW_IMAGE)
     image.header["BUNIT"] = "adu"
-    with publish_outputs([path], verify=verify_raw) as temporary:
+    with publish_outputs([path]) as temporary:
         afits.HDUList(
             [
                 afits.PrimaryHDU(header=header),

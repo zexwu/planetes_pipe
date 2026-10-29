@@ -1,9 +1,9 @@
-# PLANETES pipeline 0.12.0
+# PLANETES pipeline 0.13.0
 
 PLANETES computes instrumental interferometric observables from detector cubes.
-Python, PyEsoRex and the Qt6 bench viewer share the same scientific steps and
-single-frame kernels. File entry points return typed objects; saving is explicit in
-Python. Raw data are read only, and product writers refuse existing destinations.
+Python and PyEsoRex share the same scientific steps and single-frame kernels.
+File entry points return typed objects; saving is explicit in Python. Raw data are read only, and product writers refuse existing destinations.
+Qt6 applications are maintained separately; this repository contains no GUI patches.
 
 P2VM calculation: [flow diagram](docs/p2vm_flow.png) ·
 [phase and normalization conventions](docs/SCIENTIFIC_METHODS.md#p2vm-p2vmpy) ·
@@ -84,17 +84,18 @@ PyEsoRex can save its own `.rc` parameter file; a project YAML is unnecessary.
 [examples/reduce.py](examples/reduce.py) is a complete linear script: edit its raw
 and output directories, then run it. It explicitly selects separate main, lamp
 and science DARKs and saves eight calibration/instrumental products. Its P2VM call
-has no phase reference; supply an explicitly selected instrumental reference and
-matching DARK in that call when available.
+has no phase reference. The example below shows how to select and extract a
+reference with its matching DARK when available.
 
 ```python
 from pathlib import Path
 from planetes.dark import make_dark_products
 from planetes.flat import make_flat
-from planetes.wavelength import make_wave
+from planetes.wavelength import make_wave, wavelength_reference_path
 from planetes.p2vm import make_p2vm
 from planetes.reduction import reduce_science
-from planetes.io.fits import write_product
+from planetes.io.fits import read_product, write_product
+from planetes.products import WavelengthReference
 
 raw = Path('/absolute/raw')
 main_dark, bad = make_dark_products(raw / 'dark.fits')
@@ -103,7 +104,8 @@ science_dark, _ = make_dark_products(raw / 'sci_dark.fits')
 telescopes = {n: raw / f'tel{n}.fits' for n in ('4', '3', '2', '1')}
 baselines = {n: raw / f'bsl{n}.fits' for n in ('43', '42', '41', '32', '31', '21')}
 flat = make_flat(telescopes, main_dark, bad)
-wave = make_wave(raw / 'wave.fits', wave_dark, flat)
+lines = read_product(wavelength_reference_path(), WavelengthReference)
+wave = make_wave(raw / 'wave.fits', wave_dark, flat, reference=lines)
 p2vm = make_p2vm(
     flat, wave, main_dark, telescope_flats=telescopes, baseline_cubes=baselines,
 )
@@ -111,14 +113,41 @@ p2vmred = reduce_science(raw / 'sci.fits', science_dark, flat, wave, p2vm)
 write_product(Path('/absolute/new-output/planetes_reduced.fits'), p2vmred)
 ```
 
-For an instrumental phase reference, explicitly pass its raw path as
-`phase_reference` and its selected DARK as `phase_dark` to `make_p2vm`.
+`make_wave` always receives an explicit line list. The WAVE recipe selects the
+packaged list when no LINE_LIST is supplied and records it as a DFS input.
+
+For instrumental phase correction, select the reference file and DARK in the
+calling script, then extract the reference on the same grid as the scans:
+
+```python
+import numpy as np
+from planetes.extraction import extract_spectra_from_file, prepare_extraction
+from planetes.io.raw import check_raw_calibrations, read_raw_metadata
+from planetes.p2vm import extract_p2vm_spectra, fit_p2vm
+
+grid = np.linspace(1.15e-6, 1.30e-6, 151)
+scans = extract_p2vm_spectra(
+    flat, wave, main_dark, telescope_flats=telescopes,
+    baseline_cubes=baselines, wavelength_m=grid,
+)
+reference_path = raw / 'phase_reference.fits'
+reference_dark = science_dark  # Explicitly choose the dark for this exposure.
+metadata = read_raw_metadata(reference_path, category='SINGLE_SCI_RAW')
+check_raw_calibrations(metadata, reference_dark, flat)
+extractor = prepare_extraction(flat, wave, grid)
+reference = extract_spectra_from_file(reference_path, extractor, reference_dark)
+p2vm = fit_p2vm(scans, phase_reference=reference)
+```
+
+`phase_reference=None` means no correction. Both `fit_p2vm` and `make_p2vm`
+accept extracted reference spectra `(output, frame, wavelength)`, never a path.
+The recipe's `--phase-correction` remains a file-selection option; the numerical
+functions have no such switch or implicit DARK fallback.
 
 Unversioned bench FITS may store their cube in the primary or an image extension
 and omit unfinished acquisition keywords. Known exposure, ROI and shutter
 contradictions still fail; missing metadata stays unknown. The dictionaries above
 state physical identities explicitly: filenames and list order never assign them.
-Lists remain supported when the headers record all four shutter states.
 
 The reader selects `IMAGING_DATA_SC` when present, otherwise the unique 3-D image.
 Multiple unnamed cubes require `hdu=...` in the low-level reader. A known non-ADU
@@ -135,6 +164,10 @@ default; `write_product(path, product, include_qc=False)` saves without computin
 QC. Formal recipes explicitly retain QC. The FITS encoder only serializes supplied
 measurements; `qc.measure_quality(product)` returns a dictionary of available
 statistics. Unknown values are omitted, without a separate missing-status table.
+Writers generate checksums and publish through temporary files without overwriting
+existing paths; they do not automatically read back and decode their own outputs.
+Product readers still check checksums, units and physical identities. FITS
+round-trip comparisons belong to the existing development tests.
 See [the retained QC set](docs/QC_PARAMETERS.md).
 For single frames:
 
@@ -149,9 +182,6 @@ visibility amplitude and invalid flags. GD and differential phase are `None` unl
 `include_phase=True`; both are required when saving P2VMRED. Science and live
 extraction use the saved P2VM grid. Invalid physical mappings, detector dimensions
 and wavelength coverage fail at the calculation/extraction boundary.
-
-The actual Qt6 viewer integration, recovery instructions and fake-data launch
-are documented in [GUI integration](docs/GUI_INTEGRATION.md).
 
 ## Numerical precision
 
@@ -181,7 +211,7 @@ science: `measure_dark`, `detect_bad_pixels`, `build_flat`,
 
 | Location | Responsibility |
 | --- | --- |
-| `dark.py` | DARK/BAD inputs, statistics, bad-pixel parameters and live dark loading |
+| `dark.py` | DARK/BAD inputs, temporal statistics and bad-pixel parameters |
 | `flat.py` | Four telescope inputs, aperture parameter, response and trace fitting |
 | `wavelength.py` | Lamp/reference inputs, line matching and wavelength surface fitting |
 | `p2vm.py` | Calibration sequence, target grid, output mapping and P2VM response fitting |
@@ -203,7 +233,7 @@ FLAT/P2VM Python file inputs are explicit `Mapping[str, Path]` values:
 In PyEsoRex, repeated SOF entries are mapped from shutter metadata at the recipe
 boundary. Each recipe then reads its DARK/FLAT/WAVE/P2VM products explicitly.
 
-There is one implementation per step. Python, GUI and PyEsoRex use those same
+There is one implementation per step. Python and PyEsoRex use those same
 functions. No task dispatcher, separate calibration layer or identity module is
 needed. Scientific parameters and defaults belong to the step functions. Each
 corresponding recipe declares the CPL names/aliases and SOF multiplicities; shared
@@ -260,6 +290,13 @@ products no longer store `baseline_telescopes`. Actual `baseline_outputs` remain
 in the products. P2VM scan/ellipse/DC/residual diagnostics are omitted by default;
 use `keep_diagnostics=True` in Python or `--keep-diagnostics=true` in PyEsoRex
 to retain them. This does not alter calibration or reduction.
+
+Version 0.13.0 removes `load_dark`, `load_wavelength_reference` and `load_reducer`.
+Read calibrations with `read_product(path, ExpectedClass)` and construct
+`FrameReducer(flat, wave, p2vm)` explicitly. `make_wave` requires `reference`.
+`P2VMSpectra` contains only scans, telescope flats, output identities and wavelength;
+pass optional reference spectra separately to `fit_p2vm`. Qt6 patches, their
+manifest and deployment documentation are removed from this repository.
 
 Version 0.12.0 requires explicit file mappings in Python FLAT/P2VM workflows.
 Replace former raw-file lists with `{identity: path}` mappings; SOF syntax is

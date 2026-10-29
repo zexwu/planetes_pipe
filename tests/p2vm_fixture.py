@@ -136,4 +136,4 @@ def write_recipe_inputs(directory: Path):
 def calibration_spectra(n_wave=15):
     """Array-level spectra with explicit telescope and baseline mappings."""
     values = calibration_arrays(n_wave=n_wave)
-    return P2VMSpectra(*values[:4], values[5])
+    return P2VMSpectra(values[0], values[1], values[3], values[5])

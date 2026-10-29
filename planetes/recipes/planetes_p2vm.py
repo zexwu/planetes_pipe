@@ -1,9 +1,12 @@
 """SOF, CPL parameters and DFS adapter for the p2vm step."""
 
+import numpy as np
 from cpl import ui
 
 from planetes import __version__
 from planetes.io.fits import read_product
+from planetes.io.raw import check_raw_calibrations, read_raw_metadata
+from planetes.extraction import extract_spectra_from_file, prepare_extraction
 from planetes.p2vm import make_p2vm
 from planetes.products import Dark, Flat, Wave
 from planetes.recipes.dfs import read_sof, save_products, read_shutter_id
@@ -14,11 +17,6 @@ PARAMETERS = {
         "planetes.calib.keep-diagnostics",
         "keep-diagnostics",
         "Retain P2VM scan and fit diagnostics in the calibration product",
-    ),
-    "phase_correction": (
-        "planetes.calib.phase-correction",
-        "phase-correction",
-        "Apply supplied phase reference",
     ),
     "wavelength_min_m": (
         "planetes.calib.wavelength-min-m",
@@ -68,6 +66,14 @@ class PlanetesP2VM(ui.PyRecipe):
     def __init__(self):
         super().__init__()
         self.parameters = make_parameters(PARAMETERS, make_p2vm)
+        phase = ui.ParameterValue(
+            name="planetes.calib.phase-correction",
+            context="planetes.calib",
+            description="Apply supplied phase reference",
+            default=True,
+        )
+        phase.cli_alias = "phase-correction"
+        self.parameters.append(phase)
 
     def run(self, frameset, settings):
         options = read_parameters(self, settings, PARAMETERS)
@@ -79,12 +85,34 @@ class PlanetesP2VM(ui.PyRecipe):
         dark = read_product(paths["DARK"][0], Dark)
         flat = read_product(paths["FLAT"][0], Flat)
         wave = read_product(paths["WAVE"][0], Wave)
-        reference = paths["PHASE_REFERENCE"][0] if "PHASE_REFERENCE" in paths else None
-        phase_dark = (
-            read_product(paths["PHASE_DARK_CALIB"][0], Dark)
-            if "PHASE_DARK_CALIB" in paths
-            else None
-        )
+        reference = None
+        if (
+            self.parameters["planetes.calib.phase-correction"].value
+            and "PHASE_REFERENCE" in paths
+        ):
+            path = paths["PHASE_REFERENCE"][0]
+            selected_dark = (
+                read_product(paths["PHASE_DARK_CALIB"][0], Dark)
+                if "PHASE_DARK_CALIB" in paths
+                else dark
+            )
+            raw = read_raw_metadata(path, category="SINGLE_SCI_RAW")
+            check_raw_calibrations(raw, selected_dark, flat)
+            grid = np.linspace(
+                options["wavelength_min_m"],
+                options["wavelength_max_m"],
+                options["wavelength_channels"],
+            )
+            extractor = prepare_extraction(flat, wave, grid)
+            reference = extract_spectra_from_file(path, extractor, selected_dark)
+        else:
+            used = ui.FrameSet(
+                [
+                    frame
+                    for frame in used
+                    if frame.tag not in ("PHASE_REFERENCE", "PHASE_DARK_CALIB")
+                ]
+            )
         flats = {read_shutter_id(path, "FLAT_RAW"): path for path in paths["FLAT_RAW"]}
         scans = {read_shutter_id(path, "P2VM_RAW"): path for path in paths["P2VM_RAW"]}
         product = make_p2vm(
@@ -94,15 +122,6 @@ class PlanetesP2VM(ui.PyRecipe):
             telescope_flats=flats,
             baseline_cubes=scans,
             phase_reference=reference,
-            phase_dark=phase_dark,
             **options,
         )
-        if not (options["phase_correction"] and reference is not None):
-            used = ui.FrameSet(
-                [
-                    frame
-                    for frame in used
-                    if frame.tag not in ("PHASE_REFERENCE", "PHASE_DARK_CALIB")
-                ]
-            )
         return save_products([("planetes_p2vm.fits", product)], used, self)

@@ -8,7 +8,7 @@ from astropy.io import fits as afits
 
 from ..instrument import DetectorSetup, check_setup
 from . import keywords as kw
-from .hdu import _verify_checksums, _read_json, as_compute_array
+from .hdu import _read_json, as_compute_array
 
 CHUNK_FRAMES = 16
 
@@ -216,10 +216,3 @@ def check_raw_calibrations(raw: RawMetadata, dark, flat=None):
     check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
     if flat is not None:
         check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
-
-
-def verify_raw(path):
-    """Check classified metadata and every HDU checksum at publication."""
-    read_raw_metadata(path)
-    with afits.open(path, checksum=True) as hdus:
-        _verify_checksums(hdus)

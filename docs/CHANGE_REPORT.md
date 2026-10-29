@@ -1,91 +1,85 @@
-# PLANETES 0.12.0：固定输入形式，直接展示文件流程
+# PLANETES 0.13.0：明确选择输入，删除自动识别与重复回读
 
-基于 `742d754`。这轮按“减少模式、间接调用和中间状态”的要求整理文件入口。
-科学计算函数、阈值、归一化、mask、物理单位与 FITS 格式保持。
+基于 `d0ecbe0`。调用处明确输入含义；读取函数负责读取，科学步骤负责计算。
+文件入口检查关键文件语义，数组入口保留必要的物理轴检查；内部流程不逐层兜底。
 
-## 具体改变
+## 本轮修改
 
-### 文件映射始终只是文件映射
+- 删除 `dark.load_dark`。读取 DARK 产品用 `read_product(path, Dark)`；
+  原始暗场计算用 `make_dark_products(path)`；临时内存暗场直接构造 `Dark(frame)`。
+  不再自动寻找第一个有数据的 HDU、猜输入类型或在读取函数里决定是否计算。
+- `make_wave(..., reference=lines)` 必须明确传入线表；删除
+  `load_wavelength_reference`。默认线表由 recipe 或脚本选择。WAVE recipe
+  仍将所用 LINE_LIST 写入 DFS 实际输入。
+- `fit_p2vm` 与 `make_p2vm` 的 `phase_reference` 只接收已减暗、已提取、
+  与扫描使用相同网格的参考光谱，或 None。删除科学接口的 `phase_correction`、
+  `phase_dark`，不再自动复用主暗场。`P2VMSpectra` 只含 telescope/scan
+  光谱、物理输出身份和波长，不再用零帧数组暗示缺少参考。
+- P2VM recipe 在调用处选择参考文件与 DARK，并明确提取。SOF 和
+  `--phase-correction` 的名字、默认值保持；未选 PHASE_DARK_CALIB 时，recipe
+  明确采用其主 DARK。关闭或没有 reference 时，不加载可选 reference/DARK，
+  并从 DFS 实际输入排除；单独出现的未使用 phase DARK 不再触发错误。
+- DFS 在 `save_products` 内直接填写自己刚创建的临时文件；删除
+  `populate_dfs_product` 及其空 stub 猜测检查，合并为一次打开。
+- 写出只做编码、checksum 生成、临时发布与禁止覆盖；删除通用 `verify`
+  回调和 `verify_raw`，不再自动读回并完整解码刚写出的文件。
+  FITS round-trip 由现有测试检查。外部产品读取仍核对单位、checksum 和身份，
+  recipe 仍执行 CPL DFS 签名，多产品发布失败时仍回收本次已建立的链接。
 
-删除 `identify_raw_exposures`。`make_flat`、`make_p2vm`、
-`extract_p2vm_spectra`只接收明确的`Mapping[str, Path]`：
+## Qt6 项目分离
 
-- telescope keys：`4,3,2,1`；
-- baseline keys：`43,42,41,32,31,21`。
+删除 `integration/qt6/` 中的五份补丁/manifest，以及专用的
+`docs/GUI_INTEGRATION.md`；从 README 和架构图移除对应维护与部署说明。
+删除 GUI 专用的 `load_reducer(directory)` 包装。
 
-移除“字典还是列表”“用户指定还是自动推断”的内部模式切换。
-步骤直接按固定物理身份循环：取路径 → 读metadata → 检查所选标定 → 读图像或提取光谱。
-路径不会中途变成`(Path, RawMetadata)`，调用方不再用`[0]`、`[1].setup`拆这种tuple。
-
-Python直接提供文件身份。PyEsoRex在recipe入口用`read_shutter_id`读取SOF raw
-文件的快门组合，再构造同样的路径映射。身份缺失、文件重复、已知快门矛盾和
-ROI/曝光矛盾检查保留；未知shutter的bench文件仍可通过Python显式映射处理。
-这里允许入口与步骤分别读取小量metadata，以保持内部数据结构直接。
-
-### Recipe明确加载所选标定
-
-删除`load_recipe_inputs`。新的`read_sof`只分组路径、检查数量并保留分类后的DFS
-输入frames。每个tag的值始终是路径列表，不再混用单个Path和列表，也不返回一个
-由共享函数自动加载的objects字典。
-
-每个recipe直接展示自己的输入，例如FLAT：
+数组科学接口仍直接使用：
 
 ```python
-paths, used = read_sof(frameset, {"DARK": 1, "BAD": 1, "FLAT_RAW": 4})
-dark = read_product(paths["DARK"][0], Dark)
-bad = read_product(paths["BAD"][0], Bad)
-flats = {read_shutter_id(path, "FLAT_RAW"): path for path in paths["FLAT_RAW"]}
-product = make_flat(flats, dark, bad, **options)
-return save_products([("planetes_flat.fits", product)], used, self)
+flat = read_product(flat_path, Flat)
+wave = read_product(wave_path, Wave)
+p2vm = read_product(p2vm_path, P2VM)
+reducer = FrameReducer(flat, wave, p2vm)
 ```
 
-SOF tags、数量、CPL参数及DFS实际输入顺序保持。LINE_LIST的默认文件仍由recipe
-显式加入DFS输入。关闭phase correction时，reference/dark仍从实际使用输入中排除。
+没有修改外部 GUI 项目。没有增加产品类、通用 validator、新依赖或测试文件。
 
-### Raw metadata一次选择最终值
+## 保留的科学约定
 
-header与保存的JSON分别解析为`header_setup`、`saved_setup`，先检查已知矛盾，
-再一次选择最终物理字段：header/cube已知值优先，JSON补缺。
-保存的`exposure_source`和`legacy`标志明确处理。快门值在一个循环中核对并补全。
-移除多次`asdict`、字典叠加覆盖及对象/字典往返转换。
+计算仍为 float64/complex128，I/O 仍为 float32/complex64；raw format 3、
+product format 6、物理单位、波长覆盖舍入容差、mask、阈值和相位操作顺序保持。
+Numba 索引范围、关键数组轴、标定 ROI/曝光、物理输出映射和 V2PM 秩检查保留。
+raw HDU 搜索及 header/JSON 双份 metadata 的调和规则留待下一步处理。
 
-raw writer继续写format 3，包含现有JSON记录；产品format仍为6。
-本轮保持已有字段来源规则，未重新定义采集格式。
+## 验证
 
-### 合并薄包装与无收益的间接调用
+- 现有 **12 项测试通过**，包括 PyEsoRex recipe；测试数量未增加。
+- 同一批 15 份既有 raw，旧版和新版分别在独立目录运行完整五种 recipe：
+  **10 份产品、31 个数组逐字节相同**；QC、setup、物理映射和实际输入一致。
+- 使用同一批提取光谱，六种相位参考/诊断配置及后续 reduction 的
+  **63 个存盘前数组逐字节相同**。
+- CPL 参数名字、默认值和实际值一致；phase-correction 现在由 recipe
+  单独声明并列在参数表末尾，所以 FITS 的 PARAMn 编号顺序有所变化。
+  参数对照按名字比较，而非将编号当作参数身份。
+- 五种 recipe 选择情况通过：独立参考暗场、明确复用主暗场、关闭参考、
+  缺少参考、只有未使用的参考暗场。未使用的可选 FITS 即使内容无效也不会
+  被 pipeline 加载或记入 DFS 实际输入。
+- 校验了这些选择输出和 15 份输入 fixture 的所有 HDU checksum/DATASUM。
+  六个模块内 **32 个科学计算函数的 AST 保持相同**。
+- Ruff 与 `git diff --check` 通过；架构图、数据流图和 P2VM 图同步更新。
 
-- 删除只把一个产品包装成列表的`save_product`，所有recipe统一调用`save_products`。
-- `reduce_science`直接调用`prepare_extraction`，随后提取并计算；不再构造
-  `FrameReducer`只为了取它的extractor。逐帧复用的`FrameReducer`接口保持。
-- 删除未使用的`flat_setup`旁路参数，校准检查直接接收所选Flat。
+## 备份与对照结果
 
-没有新增模块、产品类、输入配置对象或通用校验框架。
-[代码风格](CODE_STYLE.md)现将输入形式、直接流程和明确的数据来源放在命名/排版之前。
+修改前源码、原 Qt6 补丁及一次性对照脚本：
 
-## 验证与接口变化
+`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261029_101722_explicit_boundaries/`
 
-- 现有12项测试通过，数量未增加；调用更新为显式文件映射。
-- 同一批15份既有raw完整运行五种recipe：10份产品的31个数组逐字节相同，
-  QC、setup、物理映射、参数与实际输入保持。
-- 相同提取光谱下六种P2VM配置及后续计算的63个存盘前对照数组逐字节相同。
-- 33个header/JSON样例，完整metadata结果或异常与旧版相同。
-- DARK、FLAT、WAVE、P2VM、extraction与reduction的科学计算函数体保持。
-  Ruff与diff检查通过。
+隔离输出与对照记录：
 
-这是Python文件入口及recipe内部helper的接口简化，版本升为0.12.0。
-Python旧调用中的raw文件列表需改成具名路径映射；SOF文件、产品字段与文件布局保持。
+`reduced/explicit_boundaries/20261029_101722/`
 
-## 备份与结果
+`comparison.json` 保存数组及 metadata 对照，`selection_v2/summary.json`
+保存选择分支检查；`tests.log` 保存现有测试结果。
 
-完整修改前源码和一次性对照脚本：
+[架构图](architecture.png) · [数据流](dataflow.png) · [P2VM](p2vm_flow.png)
 
-`/Users/zexwu/zexwu_lib/planetes_pipe_backups/20261028_181919_direct_workflows/`
-
-本轮独立产品、metadata对照、存盘前数组和`comparison.json`：
-
-`reduced/direct_workflows/20261028_181919/`
-
-[架构图](architecture.png) · [完整数据流](dataflow.png) · [P2VM计算](p2vm_flow.png)
-
-[上一版报告](https://github.com/zexwu/planetes_pipe/blob/742d75499e0b5a58b4fcb734a62dde8a27e27e05/docs/CHANGE_REPORT.md)
-保留此前P2VM、精度和排版改动的验证记录。
+[0.12.0 修改报告](https://github.com/zexwu/planetes_pipe/blob/d0ecbe07d9b46a18c925d8ebc28254bc63af59e5/docs/CHANGE_REPORT.md)

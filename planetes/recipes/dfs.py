@@ -1,4 +1,4 @@
-"""CPL binding of explicit categories/parameters and verified product publication."""
+"""CPL binding of explicit categories/parameters and product publication."""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ from astropy.io import fits as afits
 from cpl import core, dfs, ui
 
 from planetes import __version__
-from planetes.io.fits import encode_product, read_product
+from planetes.io.fits import encode_product
 from planetes.io.keywords import CATEGORIES, PRO_CATEGORY, RAW_TYPES
 from planetes.io.publication import publish_outputs
 from planetes.io.raw import read_raw_metadata
@@ -76,7 +76,7 @@ def read_shutter_id(path: Path, category: str) -> str:
 def save_products(outputs, used, recipe, *, include_qc: bool = True):
     """Sign all outputs before publication; rollback only newly owned links on failure."""
     prepared = [(Path(output), product) for output, product in outputs]
-    with publish_outputs([p for p, _ in prepared], verify=read_product) as temporary:
+    with publish_outputs([p for p, _ in prepared]) as temporary:
         products = ui.FrameSet()
         for (output, product), path in zip(prepared, temporary, strict=True):
             properties = core.PropertyList()
@@ -93,7 +93,13 @@ def save_products(outputs, used, recipe, *, include_qc: bool = True):
                 str(path),
             )
             quality = measure_quality(product) if include_qc else None
-            populate_dfs_product(path, product, quality=quality)
+            with afits.open(path, mode="update") as hdus:
+                encoded = encode_product(product, hdus[0].header, quality=quality)
+                hdus[0].header = encoded[0].header
+                for item in encoded[1:]:
+                    hdus.append(item)
+                for item in hdus:
+                    item.add_checksum()
             products.append(
                 ui.Frame(
                     file=str(path),
@@ -116,22 +122,3 @@ def save_products(outputs, used, recipe, *, include_qc: bool = True):
             for output, product in prepared
         ]
     )
-
-
-def populate_dfs_product(path: Path, product, *, quality=None):
-    """Fill only a freshly created DFS stub with the shared payload encoding."""
-    with afits.open(path) as hdus:
-        if (
-            len(hdus) != 1
-            or hdus[0].data is not None
-            or hdus[0].header.get(PRO_CATEGORY) != CATEGORIES[type(product)]
-            or "ESO PRO REC1 ID" not in hdus[0].header
-        ):
-            raise ValueError("Expected a new empty DFS product")
-        encoded = encode_product(product, hdus[0].header, quality=quality)
-    with afits.open(path, mode="update") as hdus:
-        hdus[0].header = encoded[0].header
-        for item in encoded[1:]:
-            hdus.append(item)
-        for item in hdus:
-            item.add_checksum()

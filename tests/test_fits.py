@@ -9,12 +9,13 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import calibration_arrays, calibration_spectra
 
-from planetes.dark import detect_bad_pixels, load_dark, measure_dark
+from planetes.dark import detect_bad_pixels, measure_dark
 from planetes.io.fits import read_product, write_product
+from planetes.io.hdu import as_compute_array
 from planetes.io.raw import iter_raw_cube as iter_cube
 from planetes.io.raw import read_raw_header, read_raw_metadata
 from planetes.p2vm import fit_p2vm
-from planetes.products import P2VMRed
+from planetes.products import Dark, P2VMRed
 from planetes.qc import measure_quality
 from planetes.reduction import reduce_spectra
 
@@ -23,8 +24,8 @@ class ScienceProductTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         spectra = calibration_spectra(n_wave=15)
-        p2vm = fit_p2vm(spectra, phase_correction=False)
-        science = spectra.phase_reference.copy()
+        p2vm = fit_p2vm(spectra)
+        science = calibration_arrays(n_wave=15)[2]
         science[:, 0] = 0
         cls.product = reduce_spectra(science, p2vm)
 
@@ -66,10 +67,8 @@ class CalibrationFitsTests(unittest.TestCase):
         arrays = calibration_arrays(n_wave=15)
         cls.spectra = calibration_spectra(n_wave=15)
         cls.flat, cls.wave = arrays[-2:]
-        cls.p2vm = fit_p2vm(cls.spectra, phase_correction=False)
-        cls.p2vm_diagnostics = fit_p2vm(
-            cls.spectra, phase_correction=False, keep_diagnostics=True
-        )
+        cls.p2vm = fit_p2vm(cls.spectra)
+        cls.p2vm_diagnostics = fit_p2vm(cls.spectra, keep_diagnostics=True)
 
     def test_fits_round_trip_preserves_storage_precision_and_mappings(self):
         for product in [self.flat, self.wave, self.p2vm, self.p2vm_diagnostics]:
@@ -141,11 +140,8 @@ class RawFitsTests(unittest.TestCase):
             self.assertEqual(measured.mean_adu.item(), 1e12)
             self.assertEqual(measured.temporal_rms_adu.item(), 1.0)
             self.assertEqual(measured.mean_adu.dtype, np.float64)
-        for data, count in ((cube[0], None), (cube[:1], 1)):
+        for dark, count in ((Dark(as_compute_array(cube[0])), None), (single, 1)):
             with tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp) / "dark.fits"
-                fits.PrimaryHDU(data).writeto(path)
-                dark = load_dark(path)
                 np.testing.assert_array_equal(dark.mean_adu, cube[0])
                 self.assertEqual(dark.n_frames, count)
                 self.assertIsNone(dark.temporal_rms_adu)

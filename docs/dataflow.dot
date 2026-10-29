@@ -1,23 +1,23 @@
 digraph Dataflow {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.12.0 — 原始数据、标定与科学结果\n浮点数组：存盘32位 / 计算64位", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.35, ranksep=0.55, splines=polyline, fontname="PingFang SC", fontsize=20, label="PLANETES 0.13.0 — 原始数据、标定与科学结果\n浮点数组：存盘32位 / 计算64位", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.15,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
   rawdark [label="DARK_RAW\nmain / lamp / science 分别选择"];
   dark [label="dark.py / planetes_dark\nmake_dark_products\n完整多帧 mean + temporal RMS", style="rounded,filled", fillcolor="#eff6ff"];
-  darkfits [label="DARK + 独立 BAD\n保留 hot/dead/noisy 判据\n两份校验后发布", shape=folder];
+  darkfits [label="DARK + 独立 BAD\n保留 hot/dead/noisy 判据\n两份写出后发布", shape=folder];
   rawflat [label="FLAT_RAW × 4\nPython 具名路径映射 / SOF shutter 身份"];
   flat [label="flat.py / planetes_flat\nmake_flat → build_flat\n响应 · trace · 稀疏提取几何", style="rounded,filled", fillcolor="#eff6ff"];
   flatfits [label="FLAT\n所选 DARK/BAD · 探测器几何", shape=folder];
   rawwave [label="WAVELAMP_RAW + LINE_LIST\n选用匹配曝光的 lamp DARK"];
   wave [label="wavelength.py / planetes_wave\nmake_wave → fit_wavelength_solution\n保留谱线匹配与波长拟合", style="rounded,filled", fillcolor="#eff6ff"];
   wavefits [label="WAVE\n全输出波长图 + accepted residuals", shape=folder];
-  rawp2vm [label="FLAT_RAW × 4 + P2VM_RAW × 6\n可选仪器 phase reference / 独立 DARK"];
+  rawp2vm [label="FLAT_RAW × 4 + P2VM_RAW × 6\nrecipe / 脚本可显式提取 phase reference"];
   p2vm [label="p2vm.py / planetes_p2vm\nmake_p2vm → fit_p2vm\nscan response → transmission → 归一化
 求逆 → 可选 phase reference", style="rounded,filled", fillcolor="#eff6ff"];
   p2vmfits [label="P2VM\n全 24 输出响应 + inverse\n保存目标波长网格 [m]\n扫描诊断按需保留", shape=folder];
   rawscience [label="SINGLE_SCI_RAW\n选用匹配曝光的 science DARK"];
   science [label="reduction.py / planetes_reduce\nreduce_science / FrameReducer\n共用计算与 invalid flags", style="rounded,filled", fillcolor="#eff6ff"];
-  results [label="离线：SINGLE_SCI_P2VMRED\n逐帧 ADU / VISAMP / GD [m] / 差分相位 [deg]\n实时：内存 P2VMRed 与 flags → GUI", shape=folder];
+  results [label="离线：SINGLE_SCI_P2VMRED\n逐帧 ADU / VISAMP / GD [m] / 差分相位 [deg]\n逐帧接口：内存 P2VMRed 与 flags", shape=folder];
   {rank=same; rawdark; dark; darkfits;}
   {rank=same; rawflat; flat; flatfits;}
   {rank=same; rawwave; wave; wavefits;}
@@ -30,7 +30,7 @@ digraph Dataflow {
   rawscience -> science -> results;
   darkfits -> flat [label="DARK + BAD"];
   darkfits -> wave [label="lamp DARK"];
-  darkfits -> p2vm [label="main / phase DARK"];
+  darkfits -> p2vm [label="main DARK；参考 DARK 由调用处选定"];
   darkfits -> science [label="science DARK"];
   flatfits -> wave;
   flatfits -> p2vm;

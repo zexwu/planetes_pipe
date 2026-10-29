@@ -101,6 +101,5 @@ class P2VMSpectra:
 
     telescope_spectra: Array  # (telescope, output, frame, wavelength)
     baseline_spectra: Array  # (baseline, output, frame, wavelength)
-    phase_reference: Array  # (output, frame, wavelength)
     baseline_outputs: dict[int, list[int]]
     wavelength_m: Array

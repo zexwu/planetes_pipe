@@ -13,7 +13,6 @@ from . import log
 from .dark import frame_mean
 from .extraction import extract_sparse_spectra
 from .instrument import N_OUTPUTS
-from .io.fits import read_product
 from .io.raw import check_raw_calibrations, iter_raw_cube, read_raw_metadata
 from .products import Dark, Flat, Wave, WavelengthReference
 
@@ -25,13 +24,12 @@ RANSAC_ITERATIONS = 1_000_000
 
 
 def make_wave(
-    path: Path, dark: Dark, flat: Flat, *, reference: WavelengthReference | None = None
+    path: Path, dark: Dark, flat: Flat, *, reference: WavelengthReference
 ) -> Wave:
     """Read the lamp with its DARK and FLAT geometry; return wavelengths in metres."""
 
     raw = read_raw_metadata(path, category="WAVELAMP_RAW")
     check_raw_calibrations(raw, dark, flat)
-    reference = load_wavelength_reference() if reference is None else reference
     image = frame_mean(iter_raw_cube(path))
     if image.shape != dark.mean_adu.shape or image.shape != flat.flat_map_adu.shape:
         raise ValueError("Lamp/dark/flat detector shapes differ")
@@ -461,11 +459,3 @@ def wavelength_reference_path() -> Path:
     from importlib.resources import files
 
     return Path(str(files("planetes").joinpath("data/wavelength_lines.fits")))
-
-
-def load_wavelength_reference(path: Path | None = None) -> WavelengthReference:
-    """Load the packaged or explicitly supplied static reference, including origin labels."""
-
-    return read_product(
-        wavelength_reference_path() if path is None else path, WavelengthReference
-    )

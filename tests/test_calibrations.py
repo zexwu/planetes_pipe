@@ -8,10 +8,10 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import write_recipe_inputs
 
-from planetes.extraction import prepare_extraction
+from planetes.extraction import extract_spectra_from_file, prepare_extraction
 from planetes.io.fits import read_product
 from planetes.instrument import BASELINES, TELESCOPES
-from planetes.p2vm import make_p2vm, extract_p2vm_spectra
+from planetes.p2vm import make_p2vm
 from planetes.products import Dark
 
 
@@ -24,7 +24,7 @@ class CalibrationTests(unittest.TestCase):
             dark = read_product(paths["DARK"])
             with self.assertRaisesRegex(ValueError, "outside calibration"):
                 prepare_extraction(flat, wave, np.linspace(1.14e-6, 1.30e-6, 15))
-            options = dict(wavelength_channels=15, phase_correction=False)
+            options = dict(wavelength_channels=15)
             expected = make_p2vm(
                 flat,
                 wave,
@@ -69,20 +69,14 @@ class CalibrationTests(unittest.TestCase):
             phase = Dark(
                 np.full(main.mean_adu.shape, 7, dtype=np.float32), setup=main.setup
             )
-            spectra = extract_p2vm_spectra(
-                flat,
-                wave,
-                main,
-                telescope_flats=dict(zip(TELESCOPES, inputs["FLAT_RAW"], strict=True)),
-                baseline_cubes=dict(zip(BASELINES, inputs["P2VM_RAW"], strict=True)),
-                wavelength_m=np.linspace(1.15e-6, 1.30e-6, 151),
-                phase_reference=reference,
-                phase_dark=phase,
-            )
             raw = np.array(fits.getdata(reference), dtype=np.float32)
             corrected = raw - 7
             prepared = prepare_extraction(
                 flat, wave, np.linspace(1.15e-6, 1.30e-6, 151)
             )
+            reference_spectra = extract_spectra_from_file(reference, prepared, phase)
             expected = prepared.extract(corrected, Dark(np.zeros_like(phase.mean_adu)))
-            np.testing.assert_array_equal(spectra.phase_reference, expected)
+            np.testing.assert_array_equal(reference_spectra, expected)
+            self.assertFalse(
+                np.array_equal(reference_spectra, prepared.extract(raw, main))
+            )

@@ -1,16 +1,12 @@
-"""DARK/BAD step: raw-stack statistics, bad-pixel parameters and live dark loading."""
+"""DARK/BAD step: raw-stack statistics and bad-pixel parameters."""
 
 from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
-from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from .io import keywords as kw
-from .io.fits import read_product
-from .io.hdu import as_compute_array
 from .io.raw import iter_raw_cube, read_raw_metadata
 from .products import Bad, Dark
 
@@ -92,31 +88,3 @@ def measure_dark(chunks: Iterable[NDArray]) -> Dark:
     """Measure the mean and, with at least two frames, temporal population RMS."""
     mean, rms, count = frame_statistics(chunks)
     return Dark(mean, rms if count >= 2 else None, count)
-
-
-def load_dark(path: Path) -> Dark:
-    """Load a DARK product, raw stack or mean-only image; unknown statistics stay None."""
-
-    path = Path(path)
-    with afits.open(path, memmap=True) as hdus:
-        head = hdus[0].header
-        if kw.PRO_CATEGORY in head:
-            return read_product(path, Dark)
-        role = str(head.get(kw.DPR_TYPE, "")).upper()
-        if role and role != "DARK":
-            raise ValueError("Expected dark input, FITS declares another raw category")
-        index = next((i for i, h in enumerate(hdus) if h.data is not None), None)
-        if index is None:
-            raise ValueError("Dark FITS has no data")
-        data = hdus[index].data
-        unit = str(hdus[index].header.get("BUNIT", "adu")).lower()
-        if unit != "adu":
-            raise ValueError("Dark subtraction expects ADU")
-        if data.ndim == 3:
-            metadata = read_raw_metadata(path, category="DARK_RAW")
-            result = measure_dark(iter_raw_cube(path))
-            return replace(result, setup=metadata.setup)
-        if data.ndim != 2:
-            raise ValueError("A GUI dark must be a 2-D image or nonempty cube")
-        result = Dark(as_compute_array(data).copy())
-    return result

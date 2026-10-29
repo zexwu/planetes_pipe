@@ -1,9 +1,9 @@
-# Scientific methods in PLANETES 0.12.0
+# Scientific methods in PLANETES 0.13.0
 
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
 Each step file contains its file entry point, parameters and array calculations.
-Python, PyEsoRex and the GUI call the same functions; CPL imports stay in recipes/.
+Python and PyEsoRex call the same functions; CPL imports stay in recipes/.
 
 ## Dark statistics (`dark.py`)
 
@@ -135,9 +135,11 @@ The optional phase reference is applied in four explicit stages:
 4. Subtract the integrated reference phase only from each detector output's
    **own physical baseline** response. Rebuild and invert V2PM.
 
-With no reference or with correction disabled, this stage is skipped. A reference
-uses its selected dark, or main dark if none was supplied. Both independent file
-entry points reject a phase dark without a reference, even if correction is off.
+The fitting function receives reference spectra explicitly, or None to skip this
+stage. The script or recipe selects the reference file and its DARK and performs
+extraction first. The recipe retains its phase-correction switch and explicitly
+selects the main DARK when no PHASE_DARK_CALIB is supplied. Disabled or absent
+references are not read and their optional DARK is excluded from DFS used inputs.
 
 The original ellipse thresholds (`1e-9` for scaling; nonpositive quadratic terms
 replaced by `1e-6`) remain unchanged. On the regression bench sequence, none of
@@ -158,7 +160,7 @@ Default coarse GD ranges are ±30e-6 m for calibration and ±100e-6 m for scienc
 with the retained physical 1e-8 m step. Newton refinement is unconstrained by these
 initialization bounds. Real-time reduction can skip GD/phase diagnostics while
 sharing extraction, normalization and flags. It always receives raw unbinned
-frames. GUI binning affects only display.
+frames. Display binning belongs to the consuming application.
 
 Flux is instrumental ADU. No new uncertainty model, transfer-function correction,
 closure-phase definition or OIFITS/Phase 3 product is introduced here.

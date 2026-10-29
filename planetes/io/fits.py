@@ -450,5 +450,5 @@ def write_product(path: Path, product, *, include_qc: bool = True):
 
     quality = measure_quality(product) if include_qc else None
     encoded = encode_product(product, quality=quality)
-    with publish_outputs([path], verify=read_product) as temporary:
+    with publish_outputs([path]) as temporary:
         encoded.writeto(temporary[0], checksum=True)

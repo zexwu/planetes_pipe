@@ -1,4 +1,4 @@
-# PLANETES science products and FITS interface (v0.12.0)
+# PLANETES science products and FITS interface (v0.13.0)
 
 ## Design
 
@@ -29,7 +29,7 @@ unchanged; old double-precision payloads remain readable without narrowing on re
 FITS header scalars retain their normal textual representation.
 
 The array-level API expects calculation-precision arrays. It does not cast inside
-scientific algorithms. Python/GUI input adapters can use `as_compute_array()` once;
+scientific algorithms. Python input adapters can use `as_compute_array()` once;
 file entry points and product readers already do this. No dtype setting is stored
 in scientific dataclasses or passed through algorithm parameters.
 
@@ -44,7 +44,7 @@ in scientific dataclasses or passed through algorithm parameters.
 | `P2VM` | `matrix` `(16,24,wavelength)` plus wavelength, inferred output mapping and physical response; optional fit diagnostics | P2VM response/inverse |
 | `P2VMRed` | per-frame `photometric_flux_adu`, complex `coherent_flux_adu`, `visibility_amplitude`, `flags`; optional GD and differential phase | Science intermediate, **not VIS** |
 | `WavelengthReference` | laboratory `wavelength_m`, origins | Static line list |
-| `P2VMSpectra` | extracted calibration scans and explicit instrument identity | Internal P2VM fit input, not a file product |
+| `P2VMSpectra` | telescope/scan spectra, wavelength and explicit output identity | Internal P2VM fit input, not a file product |
 
 `P2VMRed.group_delay_m` and `.differential_phase_deg` are `None` in the
 fast live preview (`include_phase=False`). Formal file reductions compute them; only complete
@@ -63,6 +63,15 @@ carry `baseline_telescopes`; their data-derived `baseline_outputs` is retained.
 `keep_diagnostics=True` retains P2VM scan OPD/GD, ellipse phase/radius, fitted DC
 and residual RMS. The default omits these arrays from memory products and FITS,
 while all calculations used to derive the response and inverse stay unchanged.
+
+`make_wave` requires a `WavelengthReference`; loading a default is the caller's
+choice. `fit_p2vm(spectra, phase_reference=reference)` applies instrumental phase
+correction when reference spectra are provided, and omits it for `None`. The
+reference has axes `(output, frame, wavelength)` on the exact scan grid and has
+already had its selected DARK subtracted. It is not a `P2VMSpectra` field.
+`make_p2vm` accepts the same extracted reference array. File selection, extraction
+and choice of reference DARK belong to the script or recipe. The P2VM recipe
+explicitly reuses its main DARK when no PHASE_DARK_CALIB is selected.
 
 ## Raw bench input
 
@@ -83,8 +92,8 @@ shutters; no additional temporary SOF tags are introduced.
 ## FITS products
 
 Python field renames (`matrix`, `baseline_outputs`) do not change FITS extension
-or column names. `FrameReducer` contains calculation state only; GUI callers keep
-the selected calibration directory themselves.
+or column names. `FrameReducer` contains calculation state only and is constructed
+from explicitly loaded FLAT, WAVE and P2VM products.
 
 Reduced FITS files use `HIERARCH PLANETES FORMAT = 6`. P2VM scan diagnostics are
 optional. The reader also accepts previous format-4/5 files, ignoring their old private SHA-256 field
@@ -117,6 +126,11 @@ columns use E/C and floating image payloads use 32-bit real components. Reads
 return native float64/complex128 arrays, so FITS round trips preserve the stored
 precision rather than the original unrounded calculation arrays.
 
+Writers generate per-HDU checksums, stage outputs and refuse overwrites. Recipes
+also apply CPL DFS signatures. They do not automatically reopen and decode the
+completed files; round-trip checks are exercised by the development tests. Product
+reads still verify checksums, units, category and physical row identities.
+
 ## What is checked and where
 
 - At the calculation entry points, fixed telescope/baseline identities and
@@ -145,7 +159,9 @@ in the calling script; they do not build a product provenance graph.
 
 ## Parameters
 
-Each recipe declares canonical names and aliases in its own `PARAMETERS` dictionary.
+Each recipe declares canonical names and aliases locally. Scientific parameters
+are listed in its `PARAMETERS` dictionary; the P2VM file-selection switch
+`phase-correction` is declared directly on that recipe.
 Python step functions own scientific arguments, units and defaults.
 `recipes/parameters.py` translates the recipe declarations and reads defaults from
 the function signature; science modules contain no CPL parameter registry.
@@ -157,7 +173,7 @@ in the recipe; the SOF helper neither reads products nor changes value types.
 | --- | --- | --- |
 | bad_pixel_threshold | planetes.calib.bad-dark-threshold | 5.0 |
 | aperture_width_pixels | planetes.calib.profile-width | 10.0 pixel full aperture |
-| phase_correction | planetes.calib.phase-correction | true |
+| phase-correction (recipe only) | planetes.calib.phase-correction | true |
 | keep_diagnostics | planetes.calib.keep-diagnostics | false |
 | wavelength_min_m / max_m / channels | planetes.calib.wavelength-min-m / wavelength-max-m / wavelength-channels | 1.15e-6 / 1.30e-6 m / 151 |
 | gd_search_min_m / max_m (P2VM) | planetes.calib.gd-search-min-m / gd-search-max-m | -30e-6 / +30e-6 m |
@@ -171,8 +187,8 @@ SOF quantities and allowed classes are stated in README and implemented in each
 recipe. All entries have RAW/CALIB group and image/table type matching their role;
 outputs are final PRODUCT frames. LINE_LIST and PHASE_REFERENCE/PHASE_DARK_CALIB
 are documented project roles where no strictly equivalent GRAVITY input exists.
-A phase DARK without reference fails; a disabled reference is excluded from DFS
-used inputs. Repeated FLAT_RAW/P2VM_RAW tags remain unchanged; duplicate physical
+With a disabled or absent reference, neither optional reference input is read or
+registered among DFS used inputs. An unused PHASE_DARK_CALIB alone is ignored. Repeated FLAT_RAW/P2VM_RAW tags remain unchanged; duplicate physical
 shutter combinations or incomplete sets fail.
 
 ## Step APIs

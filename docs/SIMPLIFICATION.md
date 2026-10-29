@@ -1,4 +1,4 @@
-# PLANETES 0.12.0：简单科学产品与明确的步骤 API
+# PLANETES 0.13.0：简单科学产品与明确的步骤 API
 
 0.7曾将`products.py`从401行缩减到119行；0.8统一步骤、字段和参数名称，
 0.8.1合并Dark类型后为109行；0.9.0移除固定配对副本后为106行，继续使用普通数据类。
@@ -61,8 +61,8 @@ flowchart LR
 
 保留当前 main 的台架输入支持：Python 显式望远镜/基线映射、不完整 header，
 非 ADU 拒绝、多 cube 歧义拒绝或显式低层 hdu 选择。SOF 类别保持不变。
-Qt6采集helper使用`io.acquisition`的`CaptureMetadata`、`build_raw_header()`和`write_raw()`。GUI自己持有目录路径，不再从
-FrameReducer读取目录；overlay使用`baseline_outputs`。portable patches同步更新。
+采集程序可调用`io.acquisition`的`CaptureMetadata`、`build_raw_header()`和`write_raw()`。
+Qt6项目独立维护；本仓库不再携带GUI补丁、manifest和部署文档。
 
 QC 仍由发布入口的 `include_qc` 选择，保留当前 Python/recipe 默认 True；
 传 False 可跳过测量和附加。encoder 只编码传入结果，产品数据类不管理 QC。
@@ -104,7 +104,7 @@ ROI、曝光来源、detector、单位和已知shutter矛盾检查保留。
 
 `io/hdu.py`集中定义浮点存盘32位、计算64位；复数对应complex64/128。
 算法不声明float32/64，不做精度转换。索引和flags继续用整数/bool。
-raw每16帧读入后转换一次，产品读入和GUI入口同理；写出时统一舍入。
+raw每16帧读入后转换一次，产品读入和数组输入边界同理；写出时统一舍入。
 数组级调用者在入口准备计算精度数组，不增加逐算法wrapper或dtype参数。
 
 暗场统计合并每块的mean/M2，避免E[x²]−E[x]²。保留population RMS和原判坏规则。
@@ -122,7 +122,7 @@ phase reference明确用T4及43/42/41，不再通过`telescope-1`隐含配对。
 原有相位操作顺序、双重transmission归一化、全24输出cross-talk响应保持。
 
 保留12项开发测试。真实数据对照及椭圆兜底统计见[当前修改报告](CHANGE_REPORT.md)；
-0.10精度改动和GUI验证见[上一版报告](https://github.com/zexwu/planetes_pipe/blob/08904a20ce7a3d4942b4af8c418765172aeff14e/docs/CHANGE_REPORT.md)。
+0.10精度改动见[上一版报告](https://github.com/zexwu/planetes_pipe/blob/08904a20ce7a3d4942b4af8c418765172aeff14e/docs/CHANGE_REPORT.md)。
 
 [P2VM流程图](p2vm_flow.png) · [科学约定](SCIENTIFIC_METHODS.md) ·
 [产品接口](PRODUCT_CONTRACT.md)
@@ -141,3 +141,21 @@ raw reader分别解释header和保存的setup，一次选择最终物理字段�
 优先、JSON补缺、来源标志按保存记录保留；已知矛盾继续报错。
 
 [修改报告](CHANGE_REPORT.md)列出本轮接口变化、备份和数值对照。
+
+## 0.13.0 的明确输入
+
+读取函数负责读取，科学步骤负责计算。文件入口检查关键文件语义；数组入口
+保留必要的轴检查；内部流程不再重新猜输入。默认文件与标定选择留在调用处。
+
+- 删除`load_dark`：分别读取DARK产品、从raw生成暗场，或用内存帧构造Dark。
+- `make_wave`必传reference；默认线表仅由recipe或脚本选择。
+- `fit_p2vm`/`make_p2vm`接收参考光谱或None，不接受相位开关或参考暗场。
+  reference文件及其DARK在recipe/脚本中明确选定和提取，不再用零帧数组表示缺失。
+- `P2VMSpectra`只含telescope/scan光谱、输出身份和波长。
+- DFS直接填写刚创建的stub，不再用额外helper重新判断stub是否符合内部约定。
+- 写出保留checksum、DFS签名、临时发布和不覆盖；删除自动读回解码。
+  现有测试承担round-trip对照，读取外部产品仍检查单位、checksum和身份。
+- 删除Qt6集成补丁、manifest、专用文档和`load_reducer`目录包装；
+  `FrameReducer(flat, wave, p2vm)`作为数组科学接口保留。
+
+raw HDU搜索、format-3 header/JSON调和规则不在本轮改动。

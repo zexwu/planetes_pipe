@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 
 import numpy as np
-from p2vm_fixture import calibration_spectra
+from p2vm_fixture import calibration_arrays, calibration_spectra
 
 from planetes.extraction import extract_sparse_spectra
 from planetes.instrument import N_DATA
@@ -72,8 +72,8 @@ class ScienceTests(unittest.TestCase):
 
     def test_p2vm_inverts_known_full_rank_instrument_response(self):
         spectra = calibration_spectra(n_wave=15)
-        p2vm = fit_p2vm(spectra, phase_correction=False)
-        diagnostic = fit_p2vm(spectra, phase_correction=False, keep_diagnostics=True)
+        p2vm = fit_p2vm(spectra)
+        diagnostic = fit_p2vm(spectra, keep_diagnostics=True)
         self.assertIsNone(p2vm.opd_m)
         self.assertIsNotNone(diagnostic.opd_m)
         self.assertEqual(p2vm.matrix.tobytes(), diagnostic.matrix.tobytes())
@@ -85,9 +85,8 @@ class ScienceTests(unittest.TestCase):
                 p2vm.matrix[:, :, wave] @ matrix[:, :, wave], np.eye(N_DATA), atol=1e-12
             )
         outputs = {**p2vm.baseline_outputs, 0: p2vm.baseline_outputs[1]}
+        reference = calibration_arrays(n_wave=15)[2]
         with self.assertRaisesRegex(ValueError, "mapping"):
-            reduce_spectra(
-                spectra.phase_reference, replace(p2vm, baseline_outputs=outputs)
-            )
+            reduce_spectra(reference, replace(p2vm, baseline_outputs=outputs))
         with self.assertRaisesRegex(ValueError, "dimensions"):
-            reduce_spectra(spectra.phase_reference[..., :1], p2vm)
+            reduce_spectra(reference[..., :1], p2vm)

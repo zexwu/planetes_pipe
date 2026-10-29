@@ -18,7 +18,6 @@ from .instrument import (
     REAL_SLICE,
     _check_baselines,
 )
-from .io.fits import read_product
 from .io.hdu import as_compute_array
 from .io.raw import check_raw_calibrations, read_raw_metadata
 from .products import Dark, Flat, P2VM, P2VMRed, Wave
@@ -214,13 +213,3 @@ class FrameReducer:
             gd_search_min_m=gd_search_min_m,
             gd_search_max_m=gd_search_max_m,
         )
-
-
-def load_reducer(directory: Path) -> FrameReducer:
-    """Read a calibration directory and prepare one array-only live reducer."""
-    directory = Path(directory).expanduser().resolve()
-    return FrameReducer(
-        read_product(directory / "planetes_flat.fits"),
-        read_product(directory / "planetes_wave.fits"),
-        read_product(directory / "planetes_p2vm.fits"),
-    )

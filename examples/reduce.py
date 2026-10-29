@@ -5,10 +5,11 @@ from pathlib import Path
 
 from planetes.dark import make_dark_products
 from planetes.flat import make_flat
-from planetes.io.fits import write_product
+from planetes.io.fits import read_product, write_product
 from planetes.p2vm import make_p2vm
 from planetes.reduction import reduce_science
-from planetes.wavelength import make_wave
+from planetes.products import WavelengthReference
+from planetes.wavelength import make_wave, wavelength_reference_path
 
 calibration_raw = Path("/absolute/calibration-raw")
 science_raw = Path("/absolute/science-raw")
@@ -27,8 +28,9 @@ baseline_cubes = {
     n: calibration_raw / f"bsl{n}.fits" for n in ("43", "42", "41", "32", "31", "21")
 }
 flat = make_flat(telescope_flats, main_dark, bad)
-wave = make_wave(calibration_raw / "wave.fits", lamp_dark, flat)
-# Add an explicit phase_reference and matching phase_dark here when available.
+reference = read_product(wavelength_reference_path(), WavelengthReference)
+wave = make_wave(calibration_raw / "wave.fits", lamp_dark, flat, reference=reference)
+# No instrumental phase reference is selected here.
 p2vm = make_p2vm(
     flat,
     wave,

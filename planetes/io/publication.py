@@ -1,4 +1,4 @@
-"""Verified non-overwriting publication with rollback of owned links."""
+"""Non-overwriting publication with rollback of owned links."""
 
 import os
 import tempfile
@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 @contextmanager
-def publish_outputs(paths, *, verify):
-    """Stage/verify all outputs, publish without overwrite, rollback only owned links."""
+def publish_outputs(paths):
+    """Stage all outputs, publish without overwrite, rollback only owned links."""
     paths = [Path(p).absolute() for p in paths]
     if len(set(paths)) != len(paths):
         raise ValueError("Duplicate output destination")
@@ -25,8 +25,6 @@ def publish_outputs(paths, *, verify):
         temporary = [Path(directory) / p.name for p in paths]
         try:
             yield temporary
-            for p in temporary:
-                verify(p)
             for source, target in zip(temporary, paths, strict=True):
                 os.link(source, target)
                 published.append((target, source.stat().st_dev, source.stat().st_ino))
