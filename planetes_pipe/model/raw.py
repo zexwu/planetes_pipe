@@ -27,3 +27,10 @@ class Raw:
     category: str
     shutters: tuple[bool | None, bool | None, bool | None, bool | None]
     setup: DetectorSetup
+
+
+def shutter_identity(shutters: tuple[bool | None, ...]) -> str:
+    """Open shutter numbers in descending physical order, e.g. '4' or '43'."""
+    if None in shutters:
+        raise ValueError("Missing shutter states; cannot identify calibration input")
+    return "".join(str(n) for n in range(4, 0, -1) if shutters[n - 1])

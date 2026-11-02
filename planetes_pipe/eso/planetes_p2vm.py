@@ -2,7 +2,6 @@
 from planetes_pipe.io import p2vm as p2vm_io
 from planetes_pipe.io import flat as flat_io
 from planetes_pipe.io import wave as wave_io
-from contextlib import ExitStack
 from planetes_pipe.io import raw as raw_io
 from planetes_pipe.io import dark as dark_io
 
@@ -104,17 +103,11 @@ class PlanetesP2VM(ui.PyRecipe):
                     if frame.tag not in ("PHASE_REFERENCE", "PHASE_DARK_CALIB")
                 ]
             )
-        flats = {read_shutter_id(path, "FLAT_RAW"): path for path in paths["FLAT_RAW"]}
-        scans = {read_shutter_id(path, "P2VM_RAW"): path for path in paths["P2VM_RAW"]}
-        with ExitStack() as raw_files:
-            telescope_flats_raw = {
-                key: raw_files.enter_context(raw_io.read(path, category="FLAT_RAW"))
-                for key, path in (flats).items()
-            }
-            baseline_cubes_raw = {
-                key: raw_files.enter_context(raw_io.read(path, category="P2VM_RAW"))
-                for key, path in (scans).items()
-            }
+        flats, scans = paths["FLAT_RAW"], paths["P2VM_RAW"]
+        with (
+            raw_io.read_many(flats, category="FLAT_RAW") as telescope_flats_raw,
+            raw_io.read_many(scans, category="P2VM_RAW") as baseline_cubes_raw,
+        ):
             product = make_p2vm(
                 flat,
                 wave,
@@ -128,5 +121,5 @@ class PlanetesP2VM(ui.PyRecipe):
             [("planetes_p2vm.fits", product, measure_quality(product), p2vm_io.encode)],
             used,
             self,
-            reference=scans["43"],
+            reference=next(p for p in scans if read_shutter_id(p, "P2VM_RAW") == "43"),
         )

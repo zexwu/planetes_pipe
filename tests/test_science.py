@@ -9,7 +9,7 @@ from p2vm_fixture import calibration_arrays, calibration_spectra
 from planetes_pipe.processing.extraction import extract_sparse_spectra
 from planetes_pipe.model.instrument import layout
 from planetes_pipe.processing.p2vm import build_v2pm, fit_p2vm, fit_abcd_ellipse
-from planetes_pipe.processing.science import normalize_coherent_flux, reduce_spectra
+from planetes_pipe.processing.reduce import normalize_coherent_flux, reduce_spectra
 from planetes_pipe.processing.wave import match_peaks_grid
 
 

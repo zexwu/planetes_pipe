@@ -24,7 +24,7 @@ from planetes_pipe.processing.p2vm import fit_p2vm
 from planetes_pipe.model.products import Dark, P2VMRed
 from planetes_pipe.processing.dark import measure_quality as dark_quality
 from planetes_pipe.processing.wave import measure_quality as wave_quality
-from planetes_pipe.processing.science import reduce_spectra
+from planetes_pipe.processing.reduce import reduce_spectra
 
 from planetes_pipe.model import products as product_types
 

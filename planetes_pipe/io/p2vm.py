@@ -97,14 +97,23 @@ def write(path: Path, product: P2VM, *, quality=None) -> None:
 
 
 def read_scan_opd(
-    baseline_cubes: Mapping[str, Path], dl_gain: Mapping[str, float]
+    baseline_cubes: list[Path], dl_gain: Mapping[str, float]
 ) -> NDArray:
     """Read per-frame DL_SCAN positions and explicitly convert mechanical mm to OPD m."""
     if set(dl_gain) != set(layout.baselines):
         raise ValueError("dl_gain requires all six physical baselines")
+    from .common import read_shutters
+    from planetes_pipe.model.raw import shutter_identity
+
+    paths = {}
+    for path in baseline_cubes:
+        identity = shutter_identity(read_shutters(afits.getheader(path)))
+        if identity in paths:
+            raise ValueError(f"Duplicate scan shutter state: {identity}")
+        paths[identity] = path
     positions = []
     for baseline in layout.baselines:
-        table, header = afits.getdata(baseline_cubes[baseline], "DL_SCAN", header=True)
+        table, header = afits.getdata(paths[baseline], "DL_SCAN", header=True)
         if header["MOVINGDL"] != int(baseline[1]):
             raise ValueError(f"DL gain assumes the second arm moves: {baseline}")
         counts = table["NFRAMES"]

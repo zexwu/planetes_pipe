@@ -1,5 +1,17 @@
 # Optional PyEsoRex route
 
+On the Apple Silicon Mac, install into the shared workspace environment:
+
+```bash
+cd /Users/zexwu/PLANETES_new
+brew install cpl
+PATH="$PWD/.venv/bin:$PATH" CPLDIR=/opt/homebrew uv sync --locked
+uv run --locked pyesorex --recipe-dir=planetes_pipe/planetes_pipe/eso --recipes
+```
+
+The workspace enables the `eso` extra on macOS only. Python packages stay in
+the uv `.venv`; Homebrew supplies the native CPL library.
+
 SOF means **Set Of Frames**: a text file with one input per line:
 
 ```text

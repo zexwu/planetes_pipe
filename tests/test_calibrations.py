@@ -1,4 +1,5 @@
 """Raw calibration recovery, physical input checks and phase-reference darks."""
+from planetes_pipe.io.common import write_shutters
 from planetes_pipe.io import dark as dark_io
 from planetes_pipe.io import flat as flat_io
 from planetes_pipe.io import wave as wave_io
@@ -53,18 +54,15 @@ class CalibrationTests(unittest.TestCase):
             paths = {}
             for telescope in layout.telescopes:
                 path = Path(directory) / f"tel{telescope}.fits"
-                fits.PrimaryHDU(np.ones((2, 3, 5))).writeto(path)
+                header = fits.Header()
+                write_shutters(header, tuple(str(t) == telescope for t in range(1, 5)))
+                fits.PrimaryHDU(np.ones((2, 3, 5)), header=header).writeto(path)
                 paths[telescope] = path
             for shape in ((1, 5), (3, 1), (3, 4)):
                 with self.subTest(shape=shape):
                     with self.assertRaisesRegex(ValueError, "DARK detector shapes"):
                         with ExitStack() as raw_files:
-                            flats_raw = {
-                                key: raw_files.enter_context(
-                                    raw_io.read(path, category="FLAT_RAW", hdu=0)
-                                )
-                                for key, path in (paths).items()
-                            }
+                            flats_raw = [raw_files.enter_context(raw_io.read(path, category='FLAT_RAW', hdu=0)) for key, path in paths.items()]
                             make_flat(
                                 flats_raw,
                                 Dark(np.zeros(shape)),
@@ -110,15 +108,12 @@ class CalibrationTests(unittest.TestCase):
             for telescope, scale in zip(layout.telescopes, (0.8, 0.9, 1.1, 1.2), strict=True):
                 path = root / f"tel{telescope}.fits"
                 frame = scale * flat_image + dark_image
-                fits.PrimaryHDU(np.stack([frame, frame])).writeto(path)
+                header = fits.Header()
+                write_shutters(header, tuple(str(t) == telescope for t in range(1, 5)))
+                fits.PrimaryHDU(np.stack([frame, frame]), header=header).writeto(path)
                 paths[telescope] = path
             with ExitStack() as raw_files:
-                flats_raw = {
-                    key: raw_files.enter_context(
-                        raw_io.read(path, category="FLAT_RAW", hdu=0)
-                    )
-                    for key, path in (paths).items()
-                }
+                flats_raw = [raw_files.enter_context(raw_io.read(path, category='FLAT_RAW', hdu=0)) for key, path in paths.items()]
                 flat = make_flat(flats_raw, dark, bad)
             np.testing.assert_allclose(flat.flat_map_adu, flat_image, atol=1e-10)
             np.testing.assert_allclose(
@@ -152,7 +147,7 @@ class CalibrationTests(unittest.TestCase):
                 loaded.wavelength_map_m, truth_m, rtol=0, atol=2e-12
             )
 
-    def test_p2vm_file_interface_accepts_explicit_bench_identities(self):
+    def test_p2vm_uses_shutters_with_reversed_lists_and_arbitrary_names(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             paths = write_recipe_inputs(root / "versioned")
@@ -161,18 +156,8 @@ class CalibrationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "outside calibration"):
                 prepare_extraction(flat, wave, np.linspace(1.14e-6, 1.30e-6, 15))
             with ExitStack() as raw_files:
-                telescope_flats_raw = {
-                    key: raw_files.enter_context(raw_io.read(path, category="FLAT_RAW"))
-                    for key, path in (
-                        dict(zip(layout.telescopes, paths["FLAT_RAW"], strict=True))
-                    ).items()
-                }
-                baseline_cubes_raw = {
-                    key: raw_files.enter_context(raw_io.read(path, category="P2VM_RAW"))
-                    for key, path in (
-                        dict(zip(layout.baselines, paths["P2VM_RAW"], strict=True))
-                    ).items()
-                }
+                telescope_flats_raw = [raw_files.enter_context(raw_io.read(path, category='FLAT_RAW')) for key, path in dict(zip(layout.telescopes, paths['FLAT_RAW'], strict=True)).items()]
+                baseline_cubes_raw = [raw_files.enter_context(raw_io.read(path, category='P2VM_RAW')) for key, path in dict(zip(layout.baselines, paths['P2VM_RAW'], strict=True)).items()]
                 expected = make_p2vm(
                     flat,
                     wave,
@@ -184,29 +169,15 @@ class CalibrationTests(unittest.TestCase):
             def bench_files(role, identities):
                 result = {}
                 for identity, path in zip(identities, paths[role], strict=True):
-                    target = root / f"{role}_{identity}.fits"
+                    target = root / f"unrelated-{len(result)}-{role}.fits"
                     with fits.open(path) as hdus:
-                        fits.PrimaryHDU(hdus[1].data).writeto(target)
+                        fits.PrimaryHDU(hdus[1].data, header=hdus[0].header).writeto(target)
                     result[identity] = target
                 return result
 
             with ExitStack() as raw_files:
-                telescope_flats_raw = {
-                    key: raw_files.enter_context(
-                        raw_io.read(path, category="FLAT_RAW", hdu=0)
-                    )
-                    for key, path in (
-                        bench_files("FLAT_RAW", ("4", "3", "2", "1"))
-                    ).items()
-                }
-                baseline_cubes_raw = {
-                    key: raw_files.enter_context(
-                        raw_io.read(path, category="P2VM_RAW", hdu=0)
-                    )
-                    for key, path in (
-                        bench_files("P2VM_RAW", ("43", "42", "41", "32", "31", "21"))
-                    ).items()
-                }
+                telescope_flats_raw = [raw_files.enter_context(raw_io.read(path, category='FLAT_RAW', hdu=0)) for path in reversed(list(bench_files('FLAT_RAW', ('4', '3', '2', '1')).values()))]
+                baseline_cubes_raw = [raw_files.enter_context(raw_io.read(path, category='P2VM_RAW', hdu=0)) for path in reversed(list(bench_files('P2VM_RAW', ('43', '42', '41', '32', '31', '21')).values()))]
                 actual = make_p2vm(
                     flat,
                     wave,

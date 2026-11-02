@@ -1,7 +1,6 @@
 """FLAT step: telescope inputs, extraction aperture, detector response and traces."""
 from planetes_pipe.model.raw import Raw
 
-from collections.abc import Mapping
 from dataclasses import replace
 
 import numpy as np
@@ -11,7 +10,7 @@ from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, medfilt
 
 from .. import log
-from planetes_pipe.processing.common import frame_mean
+from planetes_pipe.processing.common import frame_mean, order_raws
 from planetes_pipe.model.instrument import layout, check_setup
 from planetes_pipe.model.products import Bad, Dark, Flat
 from planetes_pipe.model.quality import FlatQC
@@ -47,7 +46,7 @@ def _trace_illumination(
 
 
 def make_flat(
-    telescope_flats: Mapping[str, Raw],
+    telescope_flats: list[Raw],
     dark: Dark,
     bad: Bad,
     *,
@@ -58,9 +57,8 @@ def make_flat(
 
     Parameters
     ----------
-    telescope_flats : mapping of str to Raw
-        Four raw ADU cubes keyed by physical telescope: '4', '3', '2', '1'.
-        Header shutter states, when present, must agree with these identities.
+    telescope_flats : list of Raw
+        Four raw ADU cubes in any order; telescope identity comes from shutters.
     dark : Dark
         Selected mean dark in ADU on exactly the raw detector grid. Known DIT,
         ROI and detector settings must match; dimensions are checked even when
@@ -89,15 +87,9 @@ def make_flat(
     images receive equal weight. Physical outputs are ordered by increasing y.
     """
 
-    if set(telescope_flats) != set(layout.telescopes):
-        raise ValueError("Telescope flats require a Raw object for each of 4,3,2,1")
     maps = []
     setup = None
-    for name in layout.telescopes:
-        raw = telescope_flats[name]
-        for telescope, state in enumerate(raw.shutters, 1):
-            if state is not None and state != (str(telescope) in name):
-                raise ValueError(f"Flat for T{name} conflicts with recorded shutters")
+    for raw in order_raws(telescope_flats, layout.telescopes):
         check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
         if setup is None:
             setup = raw.setup

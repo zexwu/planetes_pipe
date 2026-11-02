@@ -6,7 +6,7 @@ from planetes_pipe import io
 from planetes_pipe.io.common import product_filename
 from planetes_pipe.io.raw import read_raw_metadata
 from planetes_pipe.model.products import Dark, Flat, Wave, P2VM
-from planetes_pipe.processing.science import reduce_science, measure_quality
+from planetes_pipe.processing.reduce import reduce_science, measure_quality
 
 SCIENCE = Path("/path/to/science.fits")
 CALIBRATIONS = Path("/path/to/reduced/calibration")

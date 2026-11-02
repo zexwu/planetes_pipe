@@ -1,6 +1,5 @@
 """SOF, CPL parameters and DFS adapter for the flat step."""
 from planetes_pipe.io import flat as flat_io
-from contextlib import ExitStack
 from planetes_pipe.io import raw as raw_io
 from planetes_pipe.io import bad as bad_io
 from planetes_pipe.io import dark as dark_io
@@ -54,16 +53,12 @@ class PlanetesFlat(ui.PyRecipe):
         paths, used = read_sof(frameset, {"DARK": 1, "BAD": 1, "FLAT_RAW": 4})
         dark = dark_io.read(paths['DARK'][0])
         bad = bad_io.read(paths['BAD'][0])
-        flats = {read_shutter_id(path, "FLAT_RAW"): path for path in paths["FLAT_RAW"]}
-        with ExitStack() as raw_files:
-            flats_raw = {
-                key: raw_files.enter_context(raw_io.read(path, category="FLAT_RAW"))
-                for key, path in (flats).items()
-            }
+        flats = paths["FLAT_RAW"]
+        with raw_io.read_many(flats, category="FLAT_RAW") as flats_raw:
             product = make_flat(flats_raw, dark, bad, **options)
         return save_products(
             [("planetes_flat.fits", product, measure_quality(product), flat_io.encode)],
             used,
             self,
-            reference=flats["4"],
+            reference=next(p for p in flats if read_shutter_id(p, "FLAT_RAW") == "4"),
         )

@@ -6,6 +6,7 @@ import unittest
 import numpy as np
 from astropy.io import fits
 from planetes_pipe.io import raw, p2vm
+from planetes_pipe.io.common import write_shutters
 from planetes_pipe.model.instrument import layout
 
 
@@ -39,9 +40,11 @@ class ScanIOTests(unittest.TestCase):
                 ], name="DL_SCAN")
                 table.header["MOVINGDL"] = int(baseline[1])
                 path = Path(directory) / f"{baseline}.fits"
-                fits.HDUList([fits.PrimaryHDU(), table]).writeto(path)
+                header = fits.Header()
+                write_shutters(header, tuple(str(t) in baseline for t in range(1, 5)))
+                fits.HDUList([fits.PrimaryHDU(header=header), table]).writeto(path)
                 paths[baseline] = path
-            actual = p2vm.read_scan_opd(paths, gains)
+            actual = p2vm.read_scan_opd(list(reversed(paths.values())), gains)
             expected = np.array([gains[b] * np.array([0., 30e-6, 30e-6, -30e-6])
                                  for b in layout.baselines])
             np.testing.assert_allclose(actual, expected, rtol=1e-15, atol=0)

@@ -1,5 +1,4 @@
 """Build DARK/BAD, FLAT, WAVE and P2VM from one selected raw dataset."""
-from contextlib import ExitStack
 from pathlib import Path
 
 from planetes_pipe import io
@@ -30,11 +29,9 @@ def main():
                       quality=dark.measure_quality(lamp_dark))
 
     # 2. FLAT: four shutters, excluding the middle metrology trace.
-    with ExitStack() as files:
-        flat_frames = {t: files.enter_context(io.raw.read(path, category="FLAT_RAW"))
-                       for t, path in flats.items()}
+    with io.raw.read_many(flats, category="FLAT_RAW") as flat_frames:
         flat_cal = flat.make_flat(flat_frames, dark_cal, bad, metrology_trace=True)
-    io.flat.write(OUTPUT / product_filename(flats["4"], flat_cal), flat_cal,
+    io.flat.write(OUTPUT / product_filename(flats[0], flat_cal), flat_cal,
                   quality=flat.measure_quality(flat_cal))
 
     # 3. WAVE: lamp spectrum and its matching dark.
@@ -45,11 +42,10 @@ def main():
 
     # 4. P2VM: reopen the consumed flat streams, then read the six scans.
     opd = io.p2vm.read_scan_opd(scans, DL_GAIN) if DL_GAIN is not None else None
-    with ExitStack() as files:
-        flat_frames = {t: files.enter_context(io.raw.read(path, category="FLAT_RAW"))
-                       for t, path in flats.items()}
-        scan_frames = {b: files.enter_context(io.raw.read(path, category="P2VM_RAW"))
-                       for b, path in scans.items()}
+    with (
+        io.raw.read_many(flats, category="FLAT_RAW") as flat_frames,
+        io.raw.read_many(scans, category="P2VM_RAW") as scan_frames,
+    ):
         p2vm_cal = p2vm.make_p2vm(
             flat_cal, wave_cal, dark_cal,
             telescope_flats=flat_frames, baseline_cubes=scan_frames,
@@ -57,7 +53,7 @@ def main():
             gd_search_min_m=-100e-6, gd_search_max_m=100e-6,
             keep_diagnostics=True,
         )
-    io.p2vm.write(OUTPUT / product_filename(scans["43"], p2vm_cal), p2vm_cal,
+    io.p2vm.write(OUTPUT / product_filename(scans[0], p2vm_cal), p2vm_cal,
                   quality=p2vm.measure_quality(p2vm_cal))
     print(OUTPUT.resolve())
 

@@ -194,12 +194,12 @@ shutter combinations or incomplete sets fail.
 
 ## Step APIs
 
-FLAT/P2VM file arguments accept only explicit `Mapping[str, Path]`: telescope
-keys `4,3,2,1` and baseline keys `43,42,41,32,31,21`. Known shutter contradictions,
-missing identities and repeated file assignments are rejected. Files with unknown
-shutters remain usable with those explicit Python mappings. Repeated SOF raw files
-are identified by `read_shutter_id` at the recipe boundary; unknown shutters need
-an explicit Python mapping. No path/metadata tuples flow into scientific steps.
+FLAT/P2VM processing accepts `list[Raw]` in any order. Physical telescope and
+baseline identities come only from recorded shutter states, inside processing.
+Missing, duplicate or incomplete shutter configurations are rejected; there is
+no dictionary-key override. `io.raw.find()` selects paths by header category,
+and `io.raw.read_many()` keeps a list of chunked streams open during processing.
+Python scripts do not need the instrument layout or telescope/baseline keys.
 
 Raw metadata contains only category, four shutter states and physical detector
 settings. `DetectorSetup` has exposure, ROI, binning and detector fields; no

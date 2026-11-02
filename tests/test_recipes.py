@@ -22,7 +22,7 @@ from p2vm_fixture import input_rows, metadata, write_raw, write_recipe_inputs
 
 import planetes_pipe
 from planetes_pipe.model.products import Flat, P2VM, P2VMRed, Wave
-from planetes_pipe.processing.science import reduce_science
+from planetes_pipe.processing.reduce import reduce_science
 
 
 @unittest.skipUnless(

@@ -13,7 +13,7 @@ from planetes_pipe.model.products import P2VMRed
 
 def _make_figure_grid(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
     """Create a labelled grid of diagnostic axes."""
-    options = {"sharex": True, "sharey": True, **kwargs}
+    options = {"sharex": True, "sharey": True, "figsize": (11.7, 8.3), **kwargs}
     fig, axes = plt.subplots(rows, columns, **options)
     axes = np.asarray(axes).ravel()
     for axis in axes:
@@ -69,6 +69,7 @@ def save_reduction_plots(
         wave_samples = np.arange(0, phase_deg.shape[-1], 10)
 
         def save(fig) -> None:
+            fig.tight_layout(rect=(0, 0, 1, .93))
             pdf.savefig(fig)
             plt.close(fig)
 

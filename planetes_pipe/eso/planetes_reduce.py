@@ -9,12 +9,12 @@ from planetes_pipe.io import dark as dark_io
 from cpl import ui
 
 from planetes_pipe import __version__
-from planetes_pipe.processing.science import measure_quality
+from planetes_pipe.processing.reduce import measure_quality
 from planetes_pipe.model.products import Dark, Flat, P2VM, Wave
 from planetes_pipe.eso.dfs import read_sof, save_products
 from planetes_pipe.eso.logging import recipe_logging
 from planetes_pipe.eso.parameters import make_parameters, read_parameters
-from planetes_pipe.processing.science import reduce_science
+from planetes_pipe.processing.reduce import reduce_science
 
 PARAMETERS = {
     "gd_search_min_m": (

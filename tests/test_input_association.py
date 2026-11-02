@@ -35,7 +35,7 @@ class CalibrationSelectionTests(unittest.TestCase):
         self.raw("SINGLE_SCI_RAW", "1234", 0.1)
         self.raw("DARK_RAW", "", 0.1, width=4)
         self.assertEqual(find_calibration_inputs(self.root),
-                         (self.dark, self.lamp_dark, self.lamp, self.flats, self.scans))
+                         (self.dark, self.lamp_dark, self.lamp, list(self.flats.values()), list(self.scans.values())))
 
     def test_duplicate_flat_is_not_silently_overwritten(self):
         self.raw("FLAT_RAW", "4", 0.1)

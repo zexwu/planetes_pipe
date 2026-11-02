@@ -1,12 +1,12 @@
 """P2VM calibration: scan response, photometric normalization and phase reference."""
 from planetes_pipe.model.raw import Raw
-
 from collections.abc import Mapping
 
 import numpy as np
 from numpy.typing import NDArray
 
 from .. import log
+from planetes_pipe.processing.common import order_raws
 from planetes_pipe.processing.extraction import extract_spectra, prepare_extraction
 from planetes_pipe.model.instrument import layout, _check_baselines, check_setup
 from planetes_pipe.model.products import P2VMSpectra, Dark, Flat, P2VM, Wave
@@ -655,8 +655,8 @@ def make_p2vm(
     wave: Wave,
     main_dark: Dark,
     *,
-    telescope_flats: Mapping[str, Raw],
-    baseline_cubes: Mapping[str, Raw],
+    telescope_flats: list[Raw],
+    baseline_cubes: list[Raw],
     phase_reference: NDArray | None = None,
     scan_opd_m: NDArray | None = None,
     keep_diagnostics: bool = False,
@@ -674,10 +674,10 @@ def make_p2vm(
     main_dark : Dark
         Mean dark in ADU used for both telescope-flat and baseline-scan sequences.
         Known exposure and detector settings must match each input.
-    telescope_flats : mapping of str to Raw
-        Four raw ADU cubes keyed by physical telescope '4', '3', '2', '1'.
-    baseline_cubes : mapping of str to Raw
-        Six raw ADU scan cubes keyed by '43', '42', '41', '32', '31', '21'.
+    telescope_flats : list of Raw
+        Four raw ADU cubes in any order, identified by recorded shutters.
+    baseline_cubes : list of Raw
+        Six raw ADU scan cubes in any order, identified by recorded shutters.
     phase_reference : ndarray or None, optional
         Extracted ADU spectra (24 outputs, frame, wavelength) on the exact target
         grid. The caller selects its independent DARK and extracts it beforehand.
@@ -726,8 +726,8 @@ def extract_p2vm_spectra(
     wave: Wave,
     main_dark: Dark,
     *,
-    telescope_flats: Mapping[str, Raw],
-    baseline_cubes: Mapping[str, Raw],
+    telescope_flats: list[Raw],
+    baseline_cubes: list[Raw],
     wavelength_m: NDArray,
 ) -> P2VMSpectra:
     """Extract calibration spectra and identify the outputs belonging to each baseline.
@@ -740,10 +740,10 @@ def extract_p2vm_spectra(
         Wavelength map [m] on the same detector grid.
     main_dark : Dark
         Mean image [ADU] selected for every telescope and baseline input.
-    telescope_flats : mapping of str to Raw
-        Raw ADU files keyed by telescope '4', '3', '2', '1'.
-    baseline_cubes : mapping of str to Raw
-        Raw ADU files keyed by baseline '43', '42', '41', '32', '31', '21'.
+    telescope_flats : list of Raw
+        Four raw cubes in any order, identified by recorded shutters.
+    baseline_cubes : list of Raw
+        Six raw scan cubes in any order, identified by recorded shutters.
     wavelength_m : ndarray, shape (wavelength,)
         Increasing target wavelengths [m], covered by all detector outputs.
 
@@ -756,38 +756,22 @@ def extract_p2vm_spectra(
 
     Notes
     -----
-    Known shutter and detector metadata must match the explicit file identities
-    and calibrations. Output identification requires agreement between telescope
-    illumination and baseline modulation; it does not infer identity from names.
+    Recorded shutters determine the physical input identities. Known detector
+    metadata must match the calibrations. Output identification requires agreement
+    between telescope illumination and baseline modulation; it does not infer identity from names.
     """
 
-    if set(telescope_flats) != set(layout.telescopes):
-        raise ValueError("Telescope flats require a Raw object for each of 4,3,2,1")
-    if set(baseline_cubes) != set(layout.baselines):
-        raise ValueError(
-            "Baseline scans require a Raw object for each of 43,42,41,32,31,21"
-        )
     extractor = prepare_extraction(flat, wave, wavelength_m)
 
     baseline_spectra = []
-    for baseline in layout.baselines:
-        raw = baseline_cubes[baseline]
-        for telescope, state in enumerate(raw.shutters, 1):
-            if state is not None and state != (str(telescope) in baseline):
-                raise ValueError(
-                    f"Scan for {baseline} conflicts with recorded shutters"
-                )
+    for raw in order_raws(baseline_cubes, layout.baselines):
         check_setup(raw.setup, main_dark.setup, exposure=True, role="DARK")
         check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
         baseline_spectra.append(extract_spectra(raw, extractor, main_dark))
     baseline_spectra = np.asarray(baseline_spectra)
 
     telescope_spectra = []
-    for name in layout.telescopes:
-        raw = telescope_flats[name]
-        for telescope, state in enumerate(raw.shutters, 1):
-            if state is not None and state != (str(telescope) in name):
-                raise ValueError(f"Flat for T{name} conflicts with recorded shutters")
+    for raw in order_raws(telescope_flats, layout.telescopes):
         check_setup(raw.setup, main_dark.setup, exposure=True, role="DARK")
         check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
         telescope_spectra.append(extract_spectra(raw, extractor, main_dark))

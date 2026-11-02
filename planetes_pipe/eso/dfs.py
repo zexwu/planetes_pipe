@@ -12,6 +12,7 @@ from planetes_pipe.io.common import product_filename
 from planetes_pipe.io.common import new_fits_file
 from planetes_pipe.io.raw import read_raw_metadata
 from planetes_pipe.model.products import P2VM, P2VMRed, Wave
+from planetes_pipe.model.raw import shutter_identity
 from planetes_pipe.eso.parameters import STATIC_NAME
 
 
@@ -92,31 +93,8 @@ def read_sof(frameset, required: dict[str, int], optional: tuple[str, ...] = ())
 
 
 def read_shutter_id(path: Path, category: str) -> str:
-    """Identify a telescope/beam pair from physical shutter readback in a raw header.
-
-    Parameters
-    ----------
-    path : Path
-        Raw FITS cube using the standard IMAGING_DATA_SC image extension.
-    category : str
-        Expected raw role, normally FLAT_RAW or P2VM_RAW.
-
-    Returns
-    -------
-    identity : str
-        Open telescope numbers in descending physical order, e.g. '4' or '43'.
-
-    Notes
-    -----
-    All four shutter states must be known. Unknown readback raises ValueError;
-    bench files with missing metadata require explicit Python identity mappings.
-    """
-    raw = read_raw_metadata(path, category=category)
-    if None in raw.shutters:
-        raise ValueError(
-            f"Unknown shutters for {path}; use Python with an explicit file mapping"
-        )
-    return "".join(str(n) for n in range(4, 0, -1) if raw.shutters[n - 1])
+    """Identify recorded shutters for the product's timestamp/header reference."""
+    return shutter_identity(read_raw_metadata(path, category=category).shutters)
 
 
 def save_products(outputs, used, recipe, *, reference: Path):

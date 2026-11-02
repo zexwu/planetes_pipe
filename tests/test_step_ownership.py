@@ -38,12 +38,7 @@ class StepOwnershipTests(unittest.TestCase):
                     physical = RawMetadata("FLAT_RAW", tuple(str(t) == telescope for t in range(1, 5)), setup)
                     write_raw(paths[telescope], image[None], physical)
                 with ExitStack() as raw_files:
-                    flats_raw = {
-                        key: raw_files.enter_context(
-                            raw_io.read(path, category="FLAT_RAW")
-                        )
-                        for key, path in (paths).items()
-                    }
+                    flats_raw = [raw_files.enter_context(raw_io.read(path, category='FLAT_RAW')) for key, path in paths.items()]
                     flat = make_flat(flats_raw, dark, bad, metrology_trace=True)
             expected = np.delete(centers, 12)
             np.testing.assert_allclose(flat.trace_y_pixels[:, 32], expected, atol=0.03)

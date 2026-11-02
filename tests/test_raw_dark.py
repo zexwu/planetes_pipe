@@ -14,6 +14,22 @@ from planetes_pipe.processing.dark import make_dark_products, measure_quality
 
 
 class RawDarkTests(unittest.TestCase):
+    def test_find_and_read_many_preserve_chunks_and_close_streams(self):
+        cube = np.zeros((35, 2, 3))
+        metadata = RawMetadata("FLAT_RAW", (False, False, False, True),
+                               DetectorSetup(width=3, height=2))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("arbitrary-a.fits", "arbitrary-b.fits"):
+                write_raw(root / name, cube, metadata)
+            paths = raw.find(root, category="FLAT_RAW")
+            self.assertEqual(len(paths), 2)
+            self.assertEqual(raw.find(root, category="P2VM_RAW"), [])
+            with raw.read_many(paths, category="FLAT_RAW") as sources:
+                self.assertEqual([len(next(s.frames)) for s in sources], [16, 16])
+            for source in sources:
+                self.assertEqual(list(source.frames), [])
+
     def test_chunks_statistics_roundtrip_and_raw_immutability(self):
         cube = 1e6 + np.random.default_rng(22).normal(size=(35, 4, 5))
         metadata = RawMetadata("DARK_RAW", (False,) * 4, DetectorSetup(

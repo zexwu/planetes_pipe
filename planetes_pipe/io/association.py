@@ -61,4 +61,4 @@ def find_calibration_inputs(directory: Path):
     main_dark, lamp_dark = matching_dark(flats["4"]), matching_dark(lamp)
     for path in [*flats.values(), *scans.values()]:
         check_setup(metadata[path].setup, metadata[main_dark].setup, exposure=True, role="DARK")
-    return main_dark, lamp_dark, lamp, flats, scans
+    return main_dark, lamp_dark, lamp, list(flats.values()), list(scans.values())

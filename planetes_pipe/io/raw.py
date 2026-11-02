@@ -1,6 +1,6 @@
 """Read raw FITS headers and stream detector frames from an explicit image HDU."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from dataclasses import replace
 from planetes_pipe.model.raw import Raw, RawMetadata
 from pathlib import Path
@@ -106,3 +106,17 @@ def read(path: Path, *, category: str, hdu: int | str = "IMAGING_DATA_SC"):
             yield Raw(frames, metadata.category, metadata.shutters, metadata.setup)
         finally:
             frames.close()
+
+
+def find(directory: Path, *, category: str) -> list[Path]:
+    """Find raw files by FITS type, without inferring roles from filenames."""
+    return [path for path in sorted(Path(directory).glob("*.fits"))
+            if (header := afits.getheader(path)).get("ESO DPR TYPE") == RAW_TYPES[category]["dpr_type"]
+            and "ESO PRO CATG" not in header]
+
+
+@contextmanager
+def read_many(paths: list[Path], *, category: str):
+    """Keep a list of chunked raw streams open until the processing step finishes."""
+    with ExitStack() as files:
+        yield [files.enter_context(read(path, category=category)) for path in paths]
