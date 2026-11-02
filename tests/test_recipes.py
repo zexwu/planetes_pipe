@@ -1,4 +1,11 @@
 """Optional PyEsoRex P2VM-to-science smoke test."""
+from planetes_pipe.io import bad as bad_io
+from planetes_pipe.io import dark as dark_io
+from planetes_pipe.io import flat as flat_io
+from planetes_pipe.io import p2vm as p2vm_io
+from planetes_pipe.io import science as science_io
+from planetes_pipe.io import wave as wave_io
+from planetes_pipe.io import raw as raw_io
 
 import logging
 import subprocess
@@ -14,9 +21,8 @@ from astropy.io import fits
 from p2vm_fixture import input_rows, metadata, write_raw, write_recipe_inputs
 
 import planetes_pipe
-from planetes_pipe.io.fits import read_product, write_product
-from planetes_pipe.products import Flat, P2VM, P2VMRed, Wave
-from planetes_pipe.reduction import reduce_science
+from planetes_pipe.model.products import Flat, P2VM, P2VMRed, Wave
+from planetes_pipe.processing.science import reduce_science
 
 
 @unittest.skipUnless(
@@ -24,7 +30,7 @@ from planetes_pipe.reduction import reduce_science
 )
 class ESOChainTests(unittest.TestCase):
     def test_science_recipe_preserves_dark_subtraction_and_masks(self):
-        recipes = Path(planetes_pipe.__file__).parent / "recipes"
+        recipes = Path(planetes_pipe.__file__).parent / "eso"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             inputs = write_recipe_inputs(root / "inputs")
@@ -82,8 +88,8 @@ class ESOChainTests(unittest.TestCase):
             science_file = root / "PLANETES.2026-02-05T210609.fits"
             write_raw(science_file, signal + dark, metadata("SINGLE_SCI_RAW", "1234"))
             dark_calib = root / "dark_calibration.fits"
-            original = read_product(inputs["DARK"])
-            write_product(
+            original = dark_io.read(inputs["DARK"])
+            dark_io.write(
                 dark_calib,
                 replace(
                     original, mean_adu=np.full(signal.shape[1:], 7, dtype=np.float32)
@@ -119,21 +125,22 @@ class ESOChainTests(unittest.TestCase):
                 timeout=60,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            actual = read_product(
-                output / "PLANETES.2026-02-05T210609_singlescip2vmred.fits", P2VMRed
+            actual = science_io.read(
+                output / "PLANETES.2026-02-05T210609_singlescip2vmred.fits"
             )
-            flat = read_product(inputs["FLAT"], Flat)
-            wave = read_product(inputs["WAVE"], Wave)
-            p2vm = read_product(science_inputs["P2VM"], P2VM)
-            expected = reduce_science(
-                science_file,
-                read_product(dark_calib),
-                flat,
-                wave,
-                p2vm,
-                gd_search_min_m=-12e-6,
-                gd_search_max_m=12e-6,
-            )
+            flat = flat_io.read(inputs["FLAT"])
+            wave = wave_io.read(inputs["WAVE"])
+            p2vm = p2vm_io.read(science_inputs["P2VM"])
+            with raw_io.read(science_file, category="SINGLE_SCI_RAW") as raw_input:
+                expected = reduce_science(
+                    raw_input,
+                    dark_io.read(dark_calib),
+                    flat,
+                    wave,
+                    p2vm,
+                    gd_search_min_m=-1.2e-05,
+                    gd_search_max_m=1.2e-05,
+                )
             for field in fields(expected):
                 before, after = (
                     getattr(expected, field.name),
@@ -163,7 +170,7 @@ class ESOChainTests(unittest.TestCase):
                 self.assertNotIn("ESO QC REJECTED RATIO", hdus[0].header)
 
     def test_dark_recipe_dynamic_and_static_product_names(self):
-        recipes = Path(planetes_pipe.__file__).parent / "recipes"
+        recipes = Path(planetes_pipe.__file__).parent / "eso"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "PLANETES.2026-02-05TUNKNOWN.0001.fits"
@@ -200,13 +207,15 @@ class ESOChainTests(unittest.TestCase):
                     stem = "planetes" if static else source.stem
                     for category in ("dark", "bad"):
                         path = output / f"{stem}_{category}.fits"
-                        read_product(path)  # Includes checksum and unit checks.
+                        (dark_io if category == "dark" else bad_io).read(
+                            path
+                        )  # Includes checksum and unit checks.
                         header = fits.getheader(path)
                         self.assertEqual(header["ESO PRO CATG"], category.upper())
                         self.assertEqual(header["ESO PRO REC1 RAW1 NAME"], source.name)
 
     def test_recipe_logging_restores_python_configuration_after_failure(self):
-        from planetes_pipe.recipes.logging import recipe_logging
+        from planetes_pipe.eso.logging import recipe_logging
 
         logger = planetes_pipe.log
         original = logger.handlers, logger.level, logger.propagate

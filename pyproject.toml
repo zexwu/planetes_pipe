@@ -24,6 +24,7 @@ eso = [
 
 [tool.setuptools]
 include-package-data = false
+package-dir = {"" = "."}
 
 [tool.setuptools.packages.find]
 include = ["planetes_pipe*"]
@@ -31,9 +32,6 @@ namespaces = false
 
 [tool.setuptools.dynamic]
 version = {attr = "planetes_pipe.__version__"}
-
-[tool.setuptools.package-data]
-planetes_pipe = ["data/*.ecsv", "data/*.fits"]
 
 [tool.ruff]
 line-length = 88

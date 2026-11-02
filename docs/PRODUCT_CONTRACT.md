@@ -5,7 +5,7 @@
 The scientific functions return **plain dataclasses** from `planetes.products`.
 They store arrays and optional detector context; file provenance and association
 are handled at the I/O/recipe boundary. Units and array axes are visible in each field's name/comment.
-`planetes.io.fits` alone defines serialization; `recipes/` binds SOF roles,
+Each product module in `planetes_pipe.io` defines its serialization; `eso/` binds SOF roles,
 recipe parameters, CPL DFS and file registration. These layers are independent.
 
 ESO GRAVITY's **DARK, BAD, FLAT, WAVE, P2VM** categories and the distinct
@@ -21,7 +21,7 @@ Official references:
 
 ## Precision boundary
 
-`io/hdu.py` defines storage as float32/complex64 and computation as
+`io/common.py` defines storage as float32/complex64 and computation as
 float64/complex128. Product FITS reads promote floating payloads once; raw reads
 promote each 16-frame block. Writers narrow new floating payloads once. Integer
 raw pixels, indices, flags and labels retain their types. Existing files stay
@@ -43,7 +43,6 @@ in scientific dataclasses or passed through algorithm parameters.
 | `Wave` | `wavelength_map_m` `(output,x)`; optional fit residuals | WAVE solution |
 | `P2VM` | `matrix` `(16,24,wavelength)` plus wavelength, inferred output mapping and physical response; optional fit diagnostics | P2VM response/inverse |
 | `P2VMRed` | per-frame `photometric_flux_adu`, complex `coherent_flux_adu`, `visibility_amplitude`, `flags`; optional GD and differential phase | Science intermediate, **not VIS** |
-| `WavelengthReference` | laboratory `wavelength_m`, origins | Static line list |
 | `P2VMSpectra` | telescope/scan spectra, wavelength and explicit output identity | Internal P2VM fit input, not a file product |
 
 `P2VMRed.group_delay_m` and `.differential_phase_deg` are `None` in the
@@ -55,7 +54,7 @@ type. Temporal RMS is None until measured; frame count is None when unknown and
 1 for a single measured frame. BAD detection requires RMS. QC always measures
 the available mean and omits unknown RMS. The existing
 complete DARK file category still requires RMS and a frame count of at least two.
-`DetectorSetup` is defined in `instrument.py`; unknown
+`DetectorSetup` is defined in `model/instrument.py`; unknown
 header fields are `None`. Static telescope order is 4,3,2,1; baseline order
 43,42,41,32,31,21; each baseline's outputs are A,C,B,D.
 `instrument.BASELINE_PAIRS` defines telescope-axis indices once. Products no longer
@@ -64,8 +63,7 @@ carry `baseline_telescopes`; their data-derived `baseline_outputs` is retained.
 and residual RMS. The default omits these arrays from memory products and FITS,
 while all calculations used to derive the response and inverse stay unchanged.
 
-`make_wave` requires a `WavelengthReference`; loading a default is the caller's
-choice. `fit_p2vm(spectra, phase_reference=reference)` applies instrumental phase
+`make_wave` uses the fixed `REFERENCE_WAVELENGTH_M` array in `processing/wave.py`. `fit_p2vm(spectra, phase_reference=reference)` applies instrumental phase
 correction when reference spectra are provided, and omits it for `None`. The
 reference has axes `(output, frame, wavelength)` on the exact scan grid and has
 already had its selected DARK subtracted. It is not a `P2VMSpectra` field.
@@ -109,7 +107,6 @@ P2VM scan diagnostics remain optional.
 | WAVE | `WAVE_DATA_SC` metre-valued detector wavelength columns; optional `PLANETES_WAVE_FIT` |
 | P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC` (transmission, coherence, phase), `PLANETES_P2VM_INVERSE` and optional fitting diagnostics |
 | SINGLE_SCI_P2VMRED | `PLANETES_FLUX` and `PLANETES_VIS`: per-frame station indices, instrumental flux/coherence, visibility amplitude, flags, GD [m] and differential phase [deg] |
-| LINE_LIST | laboratory wavelength [m] and origin labels |
 
 All products carry `ESO PRO CATG/TYPE/SCIENCE`, named extensions, physical
 units and per-HDU FITS checksum/DATASUM. DARK/FLAT detector settings are stored
@@ -155,7 +152,7 @@ reads still verify checksums, units, category and physical row identities.
 - QC is computed explicitly by the script/recipe, then passed as `quality` to the
   writer. `quality=None` writes no QC. Numerical definitions are unchanged; QC
   never changes scientific masks or weights. All keyword names, including the
-  existing micrometre cards, are listed explicitly in `io/keywords.py`.
+  existing micrometre cards, are listed explicitly in `各产品读写模块`.
 
 The raw FITS keyword dictionary and calibrated VIS/VIS2/T3 OIFITS remain
 subsequent work. Python-only calls keep their input selection and parameters
@@ -164,11 +161,11 @@ in the calling script; they do not build a product provenance graph.
 ## Parameters
 
 Each recipe declares scientific parameter names and aliases locally. The common
-`planetes.dfs.static-name` output option is declared in `recipes/parameters.py`. Scientific parameters
+`planetes.dfs.static-name` output option is declared in `eso/parameters.py`. Scientific parameters
 are listed in its `PARAMETERS` dictionary; the P2VM file-selection switch
 `phase-correction` is declared directly on that recipe.
 Python step functions own scientific arguments, units and defaults.
-`recipes/parameters.py` translates the recipe declarations and reads defaults from
+`eso/parameters.py` translates the recipe declarations and reads defaults from
 the function signature; science modules contain no CPL parameter registry.
 Each recipe passes its required tag/count pairs to `read_sof`. The result contains
 one path list per tag and classified DFS input frames. Product loading is explicit
@@ -180,7 +177,6 @@ in the recipe; the SOF helper neither reads products nor changes value types.
 | aperture_width_pixels | planetes.calib.profile-width | 10.0 pixel full aperture |
 | phase-correction (recipe only) | planetes.calib.phase-correction | true |
 | keep_diagnostics | planetes.calib.keep-diagnostics | false |
-| wavelength_min_m / max_m / channels | planetes.calib.wavelength-min-m / wavelength-max-m / wavelength-channels | 1.15e-6 / 1.30e-6 m / 151 |
 | gd_search_min_m / max_m (P2VM) | planetes.calib.gd-search-min-m / gd-search-max-m | -30e-6 / +30e-6 m |
 | gd_search_min_m / max_m (science) | planetes.reduce.gd-search-min-m / gd-search-max-m | -100e-6 / +100e-6 m |
 
@@ -190,7 +186,7 @@ mask, line rejection, weighting or scientific default is changed.
 
 SOF quantities and allowed classes are stated in README and implemented in each
 recipe. All entries have RAW/CALIB group and image/table type matching their role;
-outputs are final PRODUCT frames. LINE_LIST and PHASE_REFERENCE/PHASE_DARK_CALIB
+outputs are final PRODUCT frames. PHASE_REFERENCE/PHASE_DARK_CALIB
 are documented project roles where no strictly equivalent GRAVITY input exists.
 With a disabled or absent reference, neither optional reference input is read or
 registered among DFS used inputs. An unused PHASE_DARK_CALIB alone is ignored. Repeated FLAT_RAW/P2VM_RAW tags remain unchanged; duplicate physical
@@ -229,7 +225,7 @@ for FrameReducer preview. The deleted wavelength-grid helper is replaced by
 
 ## Product filenames
 
-`io.fits.product_filename(reference_raw, product)` preserves the raw filename
+`io.common.product_filename(reference_raw, product)` preserves the raw filename
 stem and appends the lowercase `ESO PRO CATG` with underscores removed, following
 GRAVITY's dynamic naming convention. A `TUNKNOWN.0006` marker stays literal;
 names do not establish a UTC observation time or create a `DATE-OBS` value.
@@ -242,4 +238,16 @@ same reference, preserving its existing observation-time cards. `--static-name=t
 fixed `planetes_*.fits` output names listed in README. It does not allow overwrites.
 
 Python scripts choose the reference explicitly and pass the resulting path to
-`write_product`. Existing explicit paths are honored without automatic renaming.
+each product module’s `write()`. Existing explicit paths are honored without automatic renaming.
+
+Raw-to-DARK processing uses `io.raw.read()` as a context manager. It yields
+`model.raw.Raw` with recorded metadata and a one-pass iterator of up to 16
+float64 frames per chunk. Consume it inside the context; early or exceptional
+exit closes the iterator and file. `processing.dark.make_dark_products()` takes
+this object, never a path or HDU. `io.dark` and `io.bad` provide direct read/write.
+
+P2VM derives its wavelength grid from the intersection of FLAT trace-fit ranges
+and WAVE coverage, sampled at the median native output wavelengths. There are no
+manual wavelength bounds or channel-count parameters. FLAT `PROFILE_PARAMS.XRANGE`
+stores inclusive one-based fitted detector-column limits per output. Older FLATs
+without this column must be regenerated before creating a new P2VM.

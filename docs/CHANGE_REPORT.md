@@ -27,7 +27,7 @@ FLAT 使用 T4，P2VM 使用 43 基线，使 SOF 排序不影响文件名。DFS 
 `--static-name=true` 保留此前固定名称，不改变禁止覆盖的写入行为。
 
 Python 增加 `product_filename(reference, product)`，示例和 SOF 模板同步更新。
-`write_product` 仍严格使用调用者给定的路径，不自动改名。时间戳、毫秒和
+各产品模块的 `write()` 仍严格使用调用者给定的路径，不自动改名。时间戳、毫秒和
 `TUNKNOWN.000x` 按原样保留，不从当前时间或 mtime 补造 DATE-OBS/时区。
 
 在 mba 建立独立 `.venv` 与 CPL 7.4 安装，使用 Python 3.13.11、PyCPL
@@ -63,7 +63,7 @@ Ruff 和格式检查通过。移除 docstring 后的 AST 对照确认：生产�
 | raw.py | 从明确的类别和HDU读取物理header、分块读取cube |
 | fits.py | 各产品的具体FITS字段编解码，以及显式保存 |
 | hdu.py | 精度/大小端、checksum、单文件暂存发布 |
-| keywords.py | 明确的FITS名称、类别和QC映射 |
+| 各产品的 encode/decode | 直接声明 FITS 名称；QC 字段在 model/quality.py |
 
 删除acquisition.py和publication.py。原来的6个功能文件收敛为4个；未新增manager、
 serializer、注册器、输入配置对象或通用validation层。
@@ -86,7 +86,7 @@ Python调用直接写为：
 
 ```python
 quality = measure_quality(product)
-write_product(path, product, quality=quality)
+product_io.write(path, product, quality=quality)
 ```
 
 省略quality就不写QC。writer和encoder都不再计算统计；recipe在调用处显式测量QC。
@@ -107,7 +107,7 @@ checksum保留一次显式检查，删除Astropy自动检查与手动检查的�
 QC已有m/um keyword逐项声明，移除通过replace派生keyword的逻辑，实际名称和值保持。
 删除raw定义表中仅供已移除采集writer使用的字段，编码器统一使用已有keyword常量。
 
-随包LINE_LIST去掉私有格式号卡；其谱线值、origin标签和原表精度保持不变。
+波长参考谱线直接定义在 `processing/wave.py`；保留原表数值精度和来源注释。
 生产package不再提供raw采集写入接口，测试只用一个简短函数生成固定synthetic fixture。
 外部采集/GUI项目未改动。
 

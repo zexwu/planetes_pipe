@@ -1,0 +1,5 @@
+/absolute/PLANETES_new/test_data/raw/science/PLANETES.2026-02-05T210609.fits SINGLE_SCI_RAW
+/absolute/PLANETES_new/test_data/reduced/PLANETES.2026-02-05T210637_dark.fits DARK
+/absolute/PLANETES_new/test_data/reduced/PLANETES.2026-02-05TUNKNOWN.0002_flat.fits FLAT
+/absolute/PLANETES_new/test_data/reduced/PLANETES.2026-02-05T205537_wave.fits WAVE
+/absolute/PLANETES_new/test_data/reduced/PLANETES.2026-02-05TUNKNOWN.0006_p2vm.fits P2VM

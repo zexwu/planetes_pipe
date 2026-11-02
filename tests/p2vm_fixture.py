@@ -1,16 +1,34 @@
 """Deterministic four-telescope calibration signals for P2VM regression tests."""
+from planetes_pipe.io.raw import RAW_TYPES
+from planetes_pipe.io import bad as bad_io
+from planetes_pipe.io import dark as dark_io
+from planetes_pipe.io import flat as flat_io
+from planetes_pipe.io import p2vm as p2vm_io
+from planetes_pipe.io import science as science_io
+from planetes_pipe.io import wave as wave_io
 
+from planetes_pipe.io.common import write_setup, write_shutters
 from itertools import combinations
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
 
-from planetes_pipe.instrument import BASELINES, TELESCOPES, DetectorSetup
-from planetes_pipe.io.fits import write_product
-from planetes_pipe.io import keywords as kw
-from planetes_pipe.io.raw import RawMetadata
-from planetes_pipe.products import P2VMSpectra, Dark, Flat, Wave
+from planetes_pipe.model.instrument import layout, DetectorSetup
+from planetes_pipe.model.raw import RawMetadata
+from planetes_pipe.model.products import P2VMSpectra, Dark, Flat, Wave
+
+from planetes_pipe.model import products as product_types
+
+product_io = {
+    product_types.Dark: dark_io,
+    product_types.Bad: bad_io,
+    product_types.Flat: flat_io,
+    product_types.Wave: wave_io,
+
+    product_types.P2VM: p2vm_io,
+    product_types.P2VMRed: science_io,
+}
 
 
 def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
@@ -50,6 +68,7 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
         flat_map_adu=np.ones((24, n_wave)),
         trace_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1).astype(float),
         setup=setup(n_wave),
+        trace_x_range=np.tile([0, n_wave - 1], (24, 1)),
     )
     wave = Wave(wavelength_map_m=np.tile(wavelength, (24, 1)))
     return (
@@ -85,18 +104,16 @@ def metadata(category, active=(), n_wave=151, height=24):
 
 def write_raw(path: Path, cube, physical: RawMetadata):
     """Write only the known physical cards needed by these synthetic fixtures."""
-    definition = kw.RAW_TYPES[physical.category]
+    definition = RAW_TYPES[physical.category]
     header = fits.Header()
     header["INSTRUME"] = "PLANETES"
-    header["HIERARCH " + kw.DPR_TYPE] = definition["dpr_type"]
-    header["HIERARCH " + kw.DIT] = physical.setup.exposure_s
-    header["HIERARCH " + kw.DETECTOR_ID] = physical.setup.detector
-    for name, key in kw.ROI_KEYS.items():
-        value = getattr(physical.setup, name)
-        header["HIERARCH " + key] = value + (1 if name.startswith("origin_") else 0)
-    for key, state in zip(kw.SHUTTER_KEYS, physical.shutters, strict=True):
-        header["HIERARCH " + key] = state
-    image = fits.ImageHDU(cube, name=kw.RAW_IMAGE)
+    header["HIERARCH ESO DPR TYPE"] = definition["dpr_type"]
+    header["HIERARCH ESO DET WIN1 DIT1"] = physical.setup.exposure_s
+    header["HIERARCH ESO DET ID"] = physical.setup.detector
+    write_setup(header, physical.setup)
+    header["HIERARCH ESO DET WIN1 DIT1"] = (physical.setup.exposure_s, "")
+    write_shutters(header, physical.shutters)
+    image = fits.ImageHDU(cube, name="IMAGING_DATA_SC")
     image.header["BUNIT"] = "adu"
     fits.HDUList([fits.PrimaryHDU(header=header), image]).writeto(path, checksum=True)
 
@@ -116,7 +133,7 @@ def write_recipe_inputs(directory: Path):
     paths = {}
     for tag, product in [("FLAT", flat), ("WAVE", wave)]:
         path = directory / f"{tag.lower()}.fits"
-        write_product(path, product)
+        product_io[type(product)].write(path, product)
         paths[tag] = path
     dark = Dark(
         np.zeros((24, 151), dtype=np.float32),
@@ -126,11 +143,11 @@ def write_recipe_inputs(directory: Path):
     )
     for tag in ("DARK", "PHASE_DARK_CALIB"):
         path = directory / f"{tag.lower()}.fits"
-        write_product(path, dark)
+        dark_io.write(path, dark)
         paths[tag] = path
     for tag, names, cubes in [
-        ("FLAT_RAW", TELESCOPES, telescope),
-        ("P2VM_RAW", BASELINES, baseline),
+        ("FLAT_RAW", layout.telescopes, telescope),
+        ("P2VM_RAW", layout.baselines, baseline),
     ]:
         paths[tag] = []
         for name, spectra in zip(names, cubes):

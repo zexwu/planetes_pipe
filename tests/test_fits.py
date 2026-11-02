@@ -1,4 +1,10 @@
 """Scientific FITS round trips, raw reading and non-overwriting publication."""
+from planetes_pipe.io import bad as bad_io
+from planetes_pipe.io import dark as dark_io
+from planetes_pipe.io import flat as flat_io
+from planetes_pipe.io import p2vm as p2vm_io
+from planetes_pipe.io import science as science_io
+from planetes_pipe.io import wave as wave_io
 
 import tempfile
 import unittest
@@ -9,15 +15,28 @@ import numpy as np
 from astropy.io import fits
 from p2vm_fixture import calibration_arrays, calibration_spectra, metadata, write_raw
 
-from planetes_pipe.dark import detect_bad_pixels, measure_dark
-from planetes_pipe.io.fits import product_filename, read_product, write_product
-from planetes_pipe.io.hdu import as_compute_array
+from planetes_pipe.processing.dark import detect_bad_pixels, measure_dark
+from planetes_pipe.io.common import product_filename
+from planetes_pipe.io.common import as_compute_array
 from planetes_pipe.io.raw import iter_raw_cube as iter_cube
 from planetes_pipe.io.raw import read_raw_metadata
-from planetes_pipe.p2vm import fit_p2vm
-from planetes_pipe.products import Dark, P2VMRed
-from planetes_pipe.qc import measure_quality
-from planetes_pipe.reduction import reduce_spectra
+from planetes_pipe.processing.p2vm import fit_p2vm
+from planetes_pipe.model.products import Dark, P2VMRed
+from planetes_pipe.processing.dark import measure_quality as dark_quality
+from planetes_pipe.processing.wave import measure_quality as wave_quality
+from planetes_pipe.processing.science import reduce_spectra
+
+from planetes_pipe.model import products as product_types
+
+product_io = {
+    product_types.Dark: dark_io,
+    product_types.Bad: bad_io,
+    product_types.Flat: flat_io,
+    product_types.Wave: wave_io,
+
+    product_types.P2VM: p2vm_io,
+    product_types.P2VMRed: science_io,
+}
 
 
 class ScienceProductTests(unittest.TestCase):
@@ -53,8 +72,8 @@ class ScienceProductTests(unittest.TestCase):
         product = replace(self.product, coherent_flux_adu=coherent)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "science.fits"
-            write_product(path, product)
-            loaded = read_product(path, P2VMRed)
+            science_io.write(path, product)
+            loaded = science_io.read(path)
             for field in fields(product):
                 before, after = (
                     getattr(product, field.name),
@@ -94,14 +113,14 @@ class CalibrationFitsTests(unittest.TestCase):
                 tempfile.TemporaryDirectory() as tmp,
             ):
                 path = Path(tmp) / "calibration.fits"
-                write_product(path, product)
+                product_io[type(product)].write(path, product)
                 with fits.open(path, mode="update") as hdus:
                     self.assertNotIn("PLANETES_META", hdus)
                     self.assertNotIn("PLANETES FORMAT", hdus[0].header)
                     # Product layout, not a private version number, determines reading.
                     hdus[0].header["HIERARCH PLANETES FORMAT"] = -1
                     hdus[0].add_checksum()
-                loaded = read_product(path, type(product))
+                loaded = product_io[type(product)].read(path)
                 for field in fields(product):
                     before, after = (
                         getattr(product, field.name),
@@ -123,19 +142,19 @@ class CalibrationFitsTests(unittest.TestCase):
     def test_fits_writer_preserves_existing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "wave.fits"
-            write_product(path, self.wave)
+            wave_io.write(path, self.wave)
             self.assertFalse(
                 any(key.startswith("ESO QC ") for key in fits.getheader(path))
             )
             qc_path = Path(tmp) / "wave_with_qc.fits"
-            write_product(qc_path, self.wave, quality=measure_quality(self.wave))
+            wave_io.write(qc_path, self.wave, quality=wave_quality(self.wave))
             header = fits.getheader(qc_path)
             self.assertEqual(
                 header["ESO QC MINWAVE UM SC"], header["ESO QC MINWAVE SC"] * 1e6
             )
             original = path.read_bytes()
             with self.assertRaises(OSError):
-                write_product(path, self.wave)
+                wave_io.write(path, self.wave)
             self.assertEqual(path.read_bytes(), original)
             self.assertEqual(list(Path(tmp).glob(".planetes-*")), [])
 
@@ -197,10 +216,10 @@ class RawFitsTests(unittest.TestCase):
                 np.testing.assert_array_equal(dark.mean_adu, cube[0])
                 self.assertEqual(dark.n_frames, count)
                 self.assertIsNone(dark.temporal_rms_adu)
-                quality = measure_quality(dark)
-                self.assertEqual(quality["dark_median_adu"][0], np.median(cube[0]))
-                self.assertNotIn("dark_rms_median_adu", quality)
+                quality = dark_quality(dark)
+                self.assertEqual(quality.median_adu, np.median(cube[0]))
+                self.assertIsNone(quality.rms_median_adu)
                 with self.assertRaisesRegex(ValueError, "temporal RMS"):
                     detect_bad_pixels(dark)
                 with self.assertRaisesRegex(ValueError, "Saved DARK"):
-                    write_product(Path(tmp) / "product.fits", dark)
+                    dark_io.write(Path(tmp) / "product.fits", dark)

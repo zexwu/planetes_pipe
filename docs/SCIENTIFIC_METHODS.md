@@ -3,7 +3,7 @@
 This note describes the retained numerical operations. Public arrays, units,
 FITS encoding and parameters are defined in [the product contract](PRODUCT_CONTRACT.md).
 Each step file contains its file entry point, parameters and array calculations.
-Python and PyEsoRex call the same functions; CPL imports stay in recipes/.
+Python and PyEsoRex call the same functions; CPL imports stay in eso/.
 
 ## Dark statistics (`dark.py`)
 
@@ -183,7 +183,7 @@ closure-phase definition or OIFITS/Phase 3 product is introduced here.
 
 Floating input is adapted to float64/complex128 at the I/O or live-frame boundary;
 scientific arrays stay at that precision. New floating files use float32/complex64.
-Integers/flags retain their types. Precision is defined in `io/hdu.py`, not inside
+Integers/flags retain their types. Precision is defined in `io/common.py`, not inside
 the numerical steps. This changes rounding compared with 0.9.0; the report
 separates calculation changes from calibration-file and final-output rounding.
 

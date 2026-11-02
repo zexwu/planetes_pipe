@@ -6,11 +6,11 @@ from dataclasses import replace
 import numpy as np
 from p2vm_fixture import calibration_arrays, calibration_spectra
 
-from planetes_pipe.extraction import extract_sparse_spectra
-from planetes_pipe.instrument import N_DATA
-from planetes_pipe.p2vm import build_v2pm, fit_p2vm, fit_abcd_ellipse
-from planetes_pipe.reduction import normalize_coherent_flux, reduce_spectra
-from planetes_pipe.wavelength import match_peaks_grid
+from planetes_pipe.processing.extraction import extract_sparse_spectra
+from planetes_pipe.model.instrument import layout
+from planetes_pipe.processing.p2vm import build_v2pm, fit_p2vm, fit_abcd_ellipse
+from planetes_pipe.processing.science import normalize_coherent_flux, reduce_spectra
+from planetes_pipe.processing.wave import match_peaks_grid
 
 
 class ScienceTests(unittest.TestCase):
@@ -82,7 +82,7 @@ class ScienceTests(unittest.TestCase):
         )
         for wave in range(len(p2vm.wavelength_m)):
             np.testing.assert_allclose(
-                p2vm.matrix[:, :, wave] @ matrix[:, :, wave], np.eye(N_DATA), atol=1e-12
+                p2vm.matrix[:, :, wave] @ matrix[:, :, wave], np.eye(layout.n_data), atol=1e-12
             )
         outputs = {**p2vm.baseline_outputs, 0: p2vm.baseline_outputs[1]}
         reference = calibration_arrays(n_wave=15)[2]

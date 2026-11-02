@@ -36,7 +36,7 @@ P2VMRed保存逐帧信号，平均后的VIS/OIFITS和天文传递函数标定属
 不再写入或强制检查私有格式号和BAD位定义字符串，按实际产品字段读取。
 raw类别由调用者明确给出，HDU默认IMAGING_DATA_SC；非标准数据显式传hdu=0等。
 删除自动HDU搜索、类别猜测、重复维度检查和仅包装getheader的函数。
-随包LINE_LIST去掉旧metadata和指纹，保留原表精度、全部谱线值与标签。
+波长参考谱线直接定义在 `processing/wave.py`；保留原表数值精度和来源注释。
 
 ## 保留的计算边界
 
@@ -46,7 +46,7 @@ raw类别由调用者明确给出，HDU默认IMAGING_DATA_SC；非标准数据�
 - QC仅报告少量可用统计，脚本/recipe显式计算并传给writer；不改变mask、拟合或权重。
 - 每个输出独立暂存、生成checksum并拒绝覆盖；删除多文件回滚、inode核对及同目录约束。
   checksum只检查一次；完整round-trip由现有测试检查。
-- CPL参数与DFS实际输入由recipe记录；CPL import仅存在于recipes目录。
+- CPL参数与DFS实际输入由recipe记录；CPL import仅存在于eso目录。
 
 Qt6项目独立维护。本仓库不含GUI补丁、manifest或部署文档。
 `FrameReducer(flat, wave, p2vm)`保留为数组级科学接口。

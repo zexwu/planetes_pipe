@@ -1,7 +1,9 @@
 # QC：当前保留的描述性统计
 
-`qc.measure_quality(product)` 返回 `{metric: (value, comment)}`，
-`io/keywords.py` 负责 FITS keyword 映射。只报告已测、有限的值，不设阈值，
+`model/quality.py` 中的 QC dataclass 只定义每种 product 的 QC 指标与单位/注释。
+`dark`、`flat`、`wavelength`、`p2vm`、`reduction` 各自的
+`measure_quality(product)` 返回对应的 `DarkQC`、`BadQC`、`FlatQC`、`WaveQC` 或 `P2VMQC` 实例，
+QC 字段 metadata 同时声明 FITS keyword 和注释；FITS 名称直接写在对应产品的读写函数里。只报告已测、有限的值，不设阈值，
 不修改拟合、mask 或权重。未知或无法计算的统计直接省略，不填零，
 不再维护 `missing`、`QC_STATUS_KEYS` 或 `qc_status`。
 
@@ -22,10 +24,12 @@
 GRAVITY GD rejection、最终平均 VIS 等不适用指标的占位说明。原 trace/sigma
 数组仍保留；可选 P2VM diagnostics 保存拟合中间量，均不变成自动剔除规则。
 
-`qc.diagnostics()` 仍可单独返回逆矩阵条件数、visibility flag fraction 和均值，
+`p2vm.diagnostics()` 返回逆矩阵条件数；`reduction.diagnostics()` 返回
+visibility flag fraction 和均值，
 不写成自行命名的 ESO QC。脚本/recipe先调用`measure_quality(product)`，再将
-结果显式传给`write_product(..., quality=quality)`或DFS writer；省略quality就不写QC。
-writer和encoder只编码传入结果，不测量统计。现有m/um QC名称在keywords.py中逐项声明，
+结果显式传给`io.<product>.write(..., quality=quality)`或DFS writer；省略quality就不写QC。
+P2VMRED 尚无注册 QC，`reduction.measure_quality()` 返回 `None`。
+writer和encoder只编码传入结果，不测量统计。现有m/um QC名称在model/quality.py字段旁逐项声明，
 不通过字符串替换派生keyword。
 
 0.10.0 的 QC 在存盘舍入前的计算结果上测量；科学数组随后按统一策略存为32位。

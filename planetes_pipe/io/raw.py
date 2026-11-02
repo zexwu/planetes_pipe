@@ -1,50 +1,38 @@
 """Read raw FITS headers and stream detector frames from an explicit image HDU."""
 
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import replace
+from planetes_pipe.model.raw import Raw, RawMetadata
 from pathlib import Path
 
-import numpy as np
 from astropy.io import fits as afits
 
-from ..instrument import DetectorSetup
-from . import keywords as kw
-from .hdu import as_compute_array
+from planetes_pipe.model.instrument import DetectorSetup
+from .common import as_compute_array, read_setup, read_shutters
+
+RAW_TYPES = {
+    "DARK_RAW": {"dpr_type": "DARK", "open_shutters": 0},
+    "FLAT_RAW": {"dpr_type": "FLAT", "open_shutters": 1},
+    "P2VM_RAW": {"dpr_type": "P2VM", "open_shutters": 2},
+    "WAVELAMP_RAW": {"dpr_type": "WAVE,LAMP", "open_shutters": 4},
+    "SINGLE_SCI_RAW": {"dpr_type": "OBJECT,SINGLE", "open_shutters": 4},
+}
 
 CHUNK_FRAMES = 16
 
 
-@dataclass(frozen=True, slots=True)
-class RawMetadata:
-    """Raw category, physical shutter states and detector settings."""
-
-    category: str
-    shutters: tuple[bool | None, bool | None, bool | None, bool | None]
-    setup: DetectorSetup
-
-
-def _detector_hdu(hdus, hdu: int | str):
-    """Read the selected cube and reject known unit or dimension mismatches."""
-    image = hdus[hdu]
-    if len(image.shape) != 3 or min(image.shape) < 1:
-        raise ValueError("Expected a nonempty three-dimensional raw detector cube")
-    for header in (hdus[0].header, image.header):
-        if "BUNIT" in header and str(header["BUNIT"]).strip().lower() != "adu":
-            raise ValueError("Raw detector values must be ADU")
-    return image
-
-
 def read_raw_metadata(
-    path: Path, *, category: str, hdu: int | str = kw.RAW_IMAGE
+    path: Path, *, category: str, hdu: int | str = "IMAGING_DATA_SC"
 ) -> RawMetadata:
     """Read physical detector and shutter metadata for an explicitly classified raw file.
 
     Parameters
     ----------
     path : Path
-        Raw FITS file containing a nonempty (frame, y, x) detector cube.
+        Raw FITS file containing a (frame, y, x) detector cube in ADU.
     category : str
         Expected role: DARK_RAW, FLAT_RAW, WAVELAMP_RAW, P2VM_RAW or SINGLE_SCI_RAW.
-        A declared DPR TYPE and known shutter states must agree with this role.
+        Input role selected by the caller; recorded shutters are passed through.
     hdu : int or str, optional
         Selected image HDU; default IMAGING_DATA_SC. No automatic HDU search.
 
@@ -57,56 +45,26 @@ def read_raw_metadata(
 
     Notes
     -----
-    Known non-ADU units are rejected. Missing BUNIT follows the bench ADU
-    convention. Missing exposure/shutter metadata is not evidence of a match;
-    callers choose calibrations and explicit file identities. Raw data are read only.
+    Metadata are decoded as recorded. Callers select the input role; processing
+    checks that selected calibrations match the detector setup. Raw data are read only.
     """
-    definition = kw.RAW_TYPES[category]
     with afits.open(path, memmap=True) as hdus:
-        header = hdus[0].header
-        if kw.PRO_CATEGORY in header:
-            raise ValueError(f"Expected raw FITS, found pipeline product: {path}")
-        image = _detector_hdu(hdus, hdu)
-        declared = str(header.get(kw.DPR_TYPE, "")).strip().upper()
-        if declared and declared != definition["dpr_type"]:
-            raise ValueError(f"Expected {category}, header declares {declared}")
-
-        shutters = tuple(header.get(key) for key in kw.SHUTTER_KEYS)
-        if any(state is not None and type(state) is not bool for state in shutters):
-            raise ValueError("Recorded shutter states must be boolean")
-        known_open = sum(state is True for state in shutters)
-        if (
-            not known_open
-            <= definition["open_shutters"]
-            <= known_open + shutters.count(None)
-        ):
-            raise ValueError("Raw category and recorded shutter states conflict")
-
-        roi = {name: header.get(key) for name, key in kw.ROI_KEYS.items()}
-        for name in ("origin_x", "origin_y"):
-            if roi[name] is not None:
-                roi[name] -= 1  # FITS origins are one-based.
-        for name, size in (("height", image.shape[1]), ("width", image.shape[2])):
-            if roi[name] is not None and roi[name] != size:
-                raise ValueError(f"Raw {name} disagrees with cube dimensions")
-            roi[name] = size
-        if any(
-            roi[name] is not None and roi[name] < 0 for name in ("origin_x", "origin_y")
-        ) or any(
-            roi[name] is not None and roi[name] < 1
-            for name in ("binning_x", "binning_y")
-        ):
-            raise ValueError("Invalid detector ROI origin or binning")
-        exposure = header.get(kw.DIT, header.get(kw.UIT))
-        if exposure is not None and (not np.isfinite(exposure) or exposure <= 0):
-            raise ValueError("Exposure must be positive finite seconds")
-        setup = DetectorSetup(
-            **roi, exposure_s=exposure, detector=header.get(kw.DETECTOR_ID)
-        )
-        return RawMetadata(category, shutters, setup)
+        return _metadata(hdus, category, hdu)
 
 
-def iter_raw_cube(path: Path, *, hdu: int | str = kw.RAW_IMAGE):
+def _metadata(hdus, category, hdu):
+    header = hdus[0].header
+    image = hdus[hdu]
+    setup = replace(
+        read_setup(header) or DetectorSetup(),
+        height=image.shape[1],
+        width=image.shape[2],
+        exposure_s=header.get("ESO DET WIN1 DIT1", header.get("ESO DET WIN1 UIT1")),
+    )
+    return RawMetadata(category, read_shutters(header), setup)
+
+
+def iter_raw_cube(path: Path, *, hdu: int | str = "IMAGING_DATA_SC"):
     """Yield detector frames from one explicitly selected raw FITS image HDU.
 
     Parameters
@@ -124,10 +82,27 @@ def iter_raw_cube(path: Path, *, hdu: int | str = kw.RAW_IMAGE):
 
     Notes
     -----
-    The FITS handle stays open during iteration. This checks image dimensions
-    and declared units; physical role/setup checking uses read_raw_metadata.
+    The FITS handle stays open during iteration; samples are decoded as ADU.
     """
     with afits.open(path, memmap=True) as hdus:
-        data = _detector_hdu(hdus, hdu).data
+        data = hdus[hdu].data
         for start in range(0, len(data), CHUNK_FRAMES):
             yield as_compute_array(data[start : start + CHUNK_FRAMES])
+
+
+@contextmanager
+def read(path: Path, *, category: str, hdu: int | str = "IMAGING_DATA_SC"):
+    """Open a raw cube; consume Raw.frames inside this context in 16-frame chunks."""
+    with afits.open(path, memmap=True) as hdus:
+        metadata = _metadata(hdus, category, hdu)
+        image = hdus[hdu]
+
+        def chunks():
+            for start in range(0, image.shape[0], CHUNK_FRAMES):
+                yield as_compute_array(image.data[start:start + CHUNK_FRAMES])
+
+        frames = chunks()
+        try:
+            yield Raw(frames, metadata.category, metadata.shutters, metadata.setup)
+        finally:
+            frames.close()
