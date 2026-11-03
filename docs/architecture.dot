@@ -1,23 +1,18 @@
 digraph Architecture {
-  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.15.0 — 调用处选择输入，步骤直接计算", labelloc=t];
+  graph [rankdir=TB, bgcolor="white", pad=0.25, nodesep=0.4, ranksep=0.55, fontname="PingFang SC", fontsize=20, label="PLANETES 0.16.0 — 每个产品一个模块", labelloc=t];
   node [shape=box, style="rounded", fontname="PingFang SC", fontsize=14, color="#64748b", margin="0.16,0.12"];
   edge [fontname="PingFang SC", fontsize=11, color="#64748b", arrowsize=0.7];
-  python [label="Python / examples/reduce.py"];
-  recipes [label="PyEsoRex → recipes/\nread_sof：路径分组 / 数量\n显式 read_product · shutter → 路径映射\n默认线表 / 相位参考及 DARK 在此选择\nsave_products · CPL 参数 / DFS\n全部 CPL import 限定在这里"];
-  steps [label="五个同级科学步骤\ndark.py · flat.py · wavelength.py · p2vm.py · reduction.py\n\nFLAT / P2VM：具名路径映射\n其他文件步骤：单个 Path\n读文件 → 本步骤计算 → 返回具名结果\n每个文件保留物理参数、默认值、算法和 helper\n波长 / OPD / GD 全部使用 m\n浮点计算 float64 / complex128", style="rounded,filled", fillcolor="#eff6ff"];
-  extraction [label="extraction.py\n共用像素提取 · 波数重采样\n16 帧读取/提取，仍拼接全量光谱"];
-  io [label="io/raw.py · io/fits.py\nraw：明确类别 / HDU，不自动搜索\n物理字段只读写 FITS header\n产品 FITS 读写\n读入升精度 / 写出降精度\n磁盘 float32 ↔ 计算 float64（复数对应）\n读取核对单位与 checksum；写出不自动读回\n单文件暂存 / checksum / 不覆盖\nwriter 只编码传入的 quality"];
-  products [label="products.py · instrument.py\nDark · Bad · Flat · Wave · P2VM · P2VMRed\n具名数组与固定物理通道约定"];
-  qc [label="qc.py → io/keywords.py\n少量可用统计 → FITS keyword\n不修改拟合、mask 或权重"];
+  python [label="Python 脚本 / examples\n<step>.run(文件…, output_dir=…)"];
+  recipes [label="eso/recipes.py（PyEsoRex）\n读 SOF / CPL 参数 → 调用同一个 run()\n签名 DATAMD5 · 登记 PRODUCT\n唯一 import CPL 的文件"];
+  steps [label="dark.py · flat.py · wave.py · p2vm/ · reduce.py\n\n每个模块从上到下：\n数据类 → 算法 → qc() → read_/write_ → run()\n波长 / OPD / GD 使用 m；计算 float64", style="rounded,filled", fillcolor="#eff6ff"];
+  shared [label="extraction.py · kernels.py\n共用提取 / group delay · 全部 numba kernel"];
+  files [label="files.py\nraw：memmap 读取，不加载整个 cube\n产品：checksum · 不覆盖\nQC 卡片 · PRO 溯源 header"];
+  base [label="instrument.py · keywords.py\n通道顺序 · DetectorSetup · Raw\n全部 keyword / tag / QC / recipe 参数"];
   {rank=same; python; recipes;}
-  python -> steps [label="明确文件身份 / 标定选择"];
-  recipes -> steps [label="与 Python 相同的路径映射 / 产品"];
-  steps -> extraction;
-  steps -> products;
-  steps -> io [label="读 raw / 载入已有标定"];
-  python -> io [label="显式保存结果"];
-  recipes -> io [label="共用产品编码"];
-  python -> qc [label="显式计算 quality"];
-  qc -> io [label="传入结果，不在 writer 计算"];
-  recipes -> qc [label="显式计算 quality"];
+  python -> steps;
+  recipes -> steps [label="同一个 run()"];
+  steps -> shared;
+  steps -> files [label="读 raw / 读写产品"];
+  files -> base;
+  steps -> base;
 }

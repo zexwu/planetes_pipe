@@ -1,8 +1,12 @@
-"""PLANETES scientific reduction and optional ESO recipe adapters."""
+"""PLANETES reduction: one module per step (dark, flat, wave, p2vm, reduce).
+
+Each step module holds its product, algorithm, QC, FITS layout and run()
+entry point; the optional PyEsoRex recipes in eso/ call those run() functions.
+"""
 
 import logging
 
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 log = logging.getLogger("planetes_pipe")
 
 

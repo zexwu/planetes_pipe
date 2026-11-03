@@ -1,0 +1,375 @@
+"""SINGLE_SCI_P2VMRED: per-frame instrumental fluxes, visibility, group delay and phase.
+
+    from planetes_pipe import reduce
+    out = reduce.run(science_raw, dark, flat, wave, p2vm, output_dir="science")
+"""
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+from numpy.typing import NDArray
+
+from planetes_pipe import files, log
+from planetes_pipe.dark import Dark, read_dark
+from planetes_pipe.extraction import (SpectralExtractor, estimate_group_delay, extract_spectra,
+                                      prepare_extraction)
+from planetes_pipe.files import as_compute_array
+from planetes_pipe.flat import Flat, read_flat
+from planetes_pipe.instrument import Raw, check_setup, layout
+from planetes_pipe.p2vm import P2VM, read_p2vm
+from planetes_pipe.wave import Wave, read_wave
+
+@dataclass(slots=True)
+class P2VMRed:
+    """Per-frame P2VM reduction, NOT an averaged VIS/OIFITS product.
+
+    GD and differential phase may be omitted for live previews; a saved
+    P2VMRED product requires both.
+    """
+
+    photometric_flux_adu: NDArray  # (frame, telescope, wavelength)
+    coherent_flux_adu: NDArray  # complex (frame, baseline, wavelength)
+    visibility_amplitude: NDArray  # (frame, baseline, wavelength)
+    flags: NDArray  # bool (frame, baseline, wavelength)
+    wavelength_m: NDArray
+    baseline_outputs: dict[int, list[int]]  # baseline index -> A,C,B,D outputs
+    group_delay_m: NDArray | None = None  # (frame, baseline)
+    differential_phase_deg: NDArray | None = None  # (frame, baseline, wavelength)
+
+
+def reduce_science(
+    raw: Raw,
+    dark: Dark,
+    flat: Flat,
+    wave: Wave,
+    p2vm: P2VM,
+    *,
+    gd_search_min_m: float = -100e-6,
+    gd_search_max_m: float = 100e-6,
+) -> P2VMRed:
+    """Extract all science frames and compute instrumental interferometric observables.
+
+    Parameters
+    ----------
+    raw : Raw
+        Raw SINGLE_SCI_RAW ADU cube, shaped (frame, y, x).
+    dark : Dark
+        Mean dark in ADU selected for this science exposure and detector setup.
+    flat : Flat
+        Detector response and extraction geometry on the science detector grid.
+    wave : Wave
+        Detector wavelength map in metres, compatible with the selected FLAT.
+    p2vm : P2VM
+        Instrumental inverse and its saved target wavelength grid in metres.
+    gd_search_min_m, gd_search_max_m : float, optional
+        Coarse GD initialization interval in metres, default [-100e-6, 100e-6).
+        Subsequent Newton updates are not constrained to this interval.
+
+    Returns
+    -------
+    reduced : P2VMRed
+        Per-frame photometry/coherent flux [ADU], visibility amplitude, invalid
+        flags, GD [m] and differential phase [deg], on the saved P2VM grid.
+
+    Notes
+    -----
+    No temporal averaging, transfer-function calibration or uncertainty propagation
+    is performed. All frames are retained; run() writes the product.
+    """
+
+    check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
+    check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
+    extractor = prepare_extraction(flat, wave, p2vm.wavelength_m)
+    spectra = extract_spectra(raw, extractor, dark)
+    return reduce_spectra(
+        spectra, p2vm, gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m
+    )
+
+
+def reduce_spectra(
+    spectra: NDArray,
+    p2vm: P2VM,
+    *,
+    gd_search_min_m: float = -100e-6,
+    gd_search_max_m: float = 100e-6,
+    include_phase: bool = True,
+) -> P2VMRed:
+    """Apply the P2VM inverse and normalize the reconstructed coherent flux.
+
+    Parameters
+    ----------
+    spectra : ndarray, shape (24 outputs, frame, wavelength)
+        Already dark-subtracted and resampled spectra in ADU, on exactly the
+        wavelength grid stored in p2vm. Axis lengths are checked; an array alone
+        cannot establish wavelength-grid identity.
+    p2vm : P2VM
+        Inverse shaped (16 data channels, 24 outputs, wavelength), ordered as
+        T4,T3,T2,T1, six real coherent channels, then six imaginary channels.
+    gd_search_min_m, gd_search_max_m : float, optional
+        Coarse GD initialization interval [min, max) in metres. Newton refinement
+        can leave the interval. Ignored when include_phase is False.
+    include_phase : bool, optional
+        Compute GD and differential phase when True. False returns both as None
+        for live previews; these incomplete products cannot be saved as P2VMRED.
+
+    Returns
+    -------
+    reduced : P2VMRed
+        Photometry (frame, 4, wavelength) and complex coherence
+        (frame, 6, wavelength) in ADU; dimensionless VISAMP and boolean flags on
+        the coherence axes. GD is (frame, 6) in metres; phase is in degrees.
+
+    Notes
+    -----
+    Baseline order is 43,42,41,32,31,21. VISAMP = abs(C_ij)/sqrt(P_i*P_j).
+    Flags describe this normalization's validity, not an S/N or GD-quality cut.
+    GD and phase are calculated from all coherent channels without flag masking.
+    Differential phase removes GD, rotates by the mean phasor, subtracts the
+    arithmetic mean spectral angle and wraps to [-180, 180) degrees.
+    """
+    if (
+        p2vm.wavelength_m.ndim != 1
+        or p2vm.matrix.shape != (layout.n_data, layout.n_outputs, len(p2vm.wavelength_m))
+        or spectra.ndim != 3
+        or spectra.shape[0] != layout.n_outputs
+        or spectra.shape[-1] != len(p2vm.wavelength_m)
+    ):
+        raise ValueError("Science spectra and P2VM output/wavelength dimensions differ")
+    log.info("Applying P2VM to extract visibility for science spectra...")
+    channels = np.einsum("box,ofx->fbx", p2vm.matrix, spectra)
+    flux_adu = channels[:, :layout.n_telescopes, :]
+    coherent_adu = channels[:, layout.real_slice, :] + 1j * channels[:, layout.imag_slice, :]
+    visamp, flags = normalize_coherent_flux(coherent_adu, flux_adu)
+
+    if not include_phase:
+        return P2VMRed(
+            flux_adu,
+            coherent_adu,
+            visamp,
+            flags,
+            p2vm.wavelength_m,
+            p2vm.baseline_outputs,
+        )
+
+    gd_m = np.zeros((len(coherent_adu), layout.n_baselines))
+    log.info("Computing group delay for science spectra...")
+    for baseline in range(layout.n_baselines):
+        gd_m[:, baseline] = estimate_group_delay(
+            coherent_adu[:, baseline],
+            p2vm.wavelength_m,
+            search_range=(gd_search_min_m, gd_search_max_m),
+        )
+
+    phasor = coherent_adu * np.exp(
+        -2j * np.pi * gd_m[:, :, None] / p2vm.wavelength_m[None, :]
+    )
+    phasor *= phasor.mean(axis=2)[:, :, None].conj()
+    phase_deg = np.angle(phasor, deg=True)
+    phase_deg -= phase_deg.mean(axis=2)[:, :, None]
+    phase_deg = (phase_deg + 180) % 360 - 180
+
+    product = P2VMRed(
+        photometric_flux_adu=flux_adu,
+        coherent_flux_adu=coherent_adu,
+        visibility_amplitude=visamp,
+        flags=flags,
+        wavelength_m=p2vm.wavelength_m,
+        group_delay_m=gd_m,
+        differential_phase_deg=phase_deg,
+        baseline_outputs=p2vm.baseline_outputs,
+    )
+    log.info("Reduction for science spectra completed.")
+
+    log.info("--- Step: REDUCE science spectra [DONE] ---")
+    return product
+
+
+def normalize_coherent_flux(
+    coherent_flux: NDArray, flux: NDArray
+) -> tuple[NDArray, NDArray]:
+    """Normalize coherent amplitudes by the fixed baseline photometric products.
+
+    Parameters
+    ----------
+    coherent_flux : complex ndarray, shape (frame, 6, wavelength)
+        Coherent flux in ADU, in baseline order 43,42,41,32,31,21.
+    flux : ndarray, shape (frame, 4, wavelength)
+        Photometry in ADU, in telescope order T4,T3,T2,T1.
+
+    Returns
+    -------
+    visamp : ndarray, shape (frame, 6, wavelength)
+        abs(coherent_flux) / sqrt(P_i * P_j), or NaN for invalid samples.
+    flags : ndarray of bool, shape (frame, 6, wavelength)
+        True when the photometric product is nonpositive/nonfinite or the complex
+        coherent flux is nonfinite. This tests the product, not each flux separately.
+
+    Notes
+    -----
+    No clipping at visibility one and no statistical rejection are applied.
+    """
+    visamp = np.full(coherent_flux.shape, np.nan)
+    flag = np.ones(coherent_flux.shape, dtype=bool)
+
+    for baseline, (telescope_1, telescope_2) in enumerate(layout.baseline_pairs):
+        flux_product = flux[:, telescope_1, :] * flux[:, telescope_2, :]
+        valid = (
+            (flux_product > 0)
+            & np.isfinite(flux_product)
+            & np.isfinite(coherent_flux[:, baseline, :])
+        )
+        visamp[:, baseline, :][valid] = np.abs(
+            coherent_flux[:, baseline, :][valid]
+        ) / np.sqrt(flux_product[valid])
+        flag[:, baseline, :] = ~valid
+
+    return visamp, flag
+
+
+@dataclass(slots=True)
+class FrameReducer:
+    """Prepare calibrations once for repeated reduction of raw, unbinned frames.
+
+    Parameters
+    ----------
+    flat : Flat
+        Detector response and sparse extraction geometry.
+    wave : Wave
+        Wavelength map in metres on the same detector grid.
+    p2vm : P2VM
+        Response inverse and the target wavelength grid used for every frame.
+
+    Notes
+    -----
+    Construction prepares read-only extraction arrays; it does not load files.
+    Pass the selected DARK to each reduce_frame call. NDArray-only live frames do
+    not carry exposure metadata, so the caller must ensure calibration matching.
+    """
+
+    flat: Flat
+    wave: Wave
+    p2vm: P2VM
+    extractor: SpectralExtractor = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.extractor = prepare_extraction(
+            self.flat, self.wave, self.p2vm.wavelength_m
+        )
+
+    @property
+    def n_baselines(self) -> int:
+        return layout.n_baselines
+
+    @property
+    def wavelength_m(self) -> NDArray:
+        return self.extractor.wavelength_m
+
+    def reduce_frame(
+        self,
+        raw: NDArray,
+        *,
+        dark: Dark,
+        include_phase: bool = False,
+        gd_search_min_m: float = -100e-6,
+        gd_search_max_m: float = 100e-6,
+    ) -> P2VMRed:
+        """Reduce one raw detector frame using the prepared extraction and P2VM.
+
+        Parameters
+        ----------
+        raw : ndarray, shape (y, x)
+            Unbinned ADU image; converted to calculation precision at this boundary.
+        dark : Dark
+            Selected mean image in ADU on exactly the prepared detector grid.
+        include_phase : bool, optional
+            False by default for previews. True also computes GD and differential phase.
+        gd_search_min_m, gd_search_max_m : float, optional
+            Coarse GD interval in metres, used only with include_phase=True.
+            Newton refinement may leave these initialization bounds.
+
+        Returns
+        -------
+        reduced : P2VMRed
+            Instrumental observables with a length-one frame axis. GD and differential
+            phase are None unless requested. The raw frame is not modified.
+        """
+        cube = as_compute_array(raw)[None, :, :]
+        spectra = self.extractor.extract(cube, dark)
+        return reduce_spectra(
+            spectra,
+            self.p2vm,
+            include_phase=include_phase,
+            gd_search_min_m=gd_search_min_m,
+            gd_search_max_m=gd_search_max_m,
+        )
+
+
+def write_reduced(path: Path, product: P2VMRed, *, header=None) -> None:
+    """Save per-frame observables (requires GD and differential phase); never overwrite."""
+    if product.group_delay_m is None or product.differential_phase_deg is None:
+        raise ValueError("Saved P2VMRED requires GD and differential phase")
+    nf, nt, nw = product.photometric_flux_adu.shape
+    nb = layout.n_baselines
+    stations = np.asarray(layout.telescopes, dtype=int)
+    pairs = np.asarray([[int(layout.telescopes[t]) for t in pair]
+                        for pair in layout.baseline_pairs])
+    files.save_product(path, "SINGLE_SCI_P2VMRED", [
+        files.detector_table(product.baseline_outputs),
+        files.table("PLANETES_WAVELENGTH", [files.column("WAVELENGTH", product.wavelength_m, "m")]),
+        files.table("PLANETES_FLUX", [
+            files.column("FRAME", np.repeat(np.arange(1, nf + 1), nt)),
+            files.column("STA_INDEX", np.tile(stations, nf)),
+            files.column("FLUXDATA", product.photometric_flux_adu.reshape(-1, nw), "adu"),
+        ]),
+        files.table("PLANETES_VIS", [
+            files.column("FRAME", np.repeat(np.arange(1, nf + 1), nb)),
+            files.column("STA_INDEX", np.tile(pairs, (nf, 1))),
+            files.column("VISDATA", product.coherent_flux_adu.reshape(-1, nw), "adu"),
+            files.column("VISAMP", product.visibility_amplitude.reshape(-1, nw)),
+            files.column("FLAG", product.flags.reshape(-1, nw)),
+            files.column("GDELAY", product.group_delay_m.reshape(-1), "m"),
+            files.column("DIFFPHASE", product.differential_phase_deg.reshape(-1, nw), "deg"),
+        ]),
+    ], header=header)
+
+
+def read_reduced(path: Path) -> P2VMRed:
+    """Read a checksummed SINGLE_SCI_P2VMRED; rows are frame-major as written."""
+    with files.open_product(path, "SINGLE_SCI_P2VMRED") as hdus:
+        wavelength = files.read_column(hdus, "PLANETES_WAVELENGTH", "WAVELENGTH")
+        nt, nb, nw = layout.n_telescopes, layout.n_baselines, len(wavelength)
+        nf = len(hdus["PLANETES_FLUX"].data) // nt
+
+        def vis(name):
+            return files.read_column(hdus, "PLANETES_VIS", name).reshape(nf, nb, -1)
+
+        return P2VMRed(
+            photometric_flux_adu=files.read_column(
+                hdus, "PLANETES_FLUX", "FLUXDATA").reshape(nf, nt, nw),
+            coherent_flux_adu=vis("VISDATA"),
+            visibility_amplitude=vis("VISAMP"),
+            flags=vis("FLAG"),
+            wavelength_m=wavelength,
+            baseline_outputs=files.baseline_outputs(hdus["IMAGING_DETECTOR_SC"].data["REGNAME"]),
+            group_delay_m=vis("GDELAY").reshape(nf, nb),
+            differential_phase_deg=vis("DIFFPHASE"),
+        )
+
+
+def run(science_raw, dark, flat, wave, p2vm, *, output_dir,
+        gd_search_min_m=-100e-6, gd_search_max_m=100e-6) -> dict[str, Path]:
+    """Recipe planetes_reduce: SINGLE_SCI_RAW + DARK, FLAT, WAVE, P2VM -> P2VMRED."""
+    product = reduce_science(
+        files.read_raw(science_raw, "SINGLE_SCI_RAW"), read_dark(dark), read_flat(flat),
+        read_wave(wave), read_p2vm(p2vm),
+        gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m,
+    )
+    header = files.provenance(
+        "planetes_reduce", science_raw,
+        {"SINGLE_SCI_RAW": [science_raw], "DARK": [dark], "FLAT": [flat], "WAVE": [wave],
+         "P2VM": [p2vm]},
+        gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m)
+    out = files.output_paths(output_dir, science_raw, "SINGLE_SCI_P2VMRED")
+    write_reduced(out["SINGLE_SCI_P2VMRED"], product, header=header)
+    return out

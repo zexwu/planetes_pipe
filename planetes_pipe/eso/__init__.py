@@ -1,1 +1,1 @@
-"""PyEsoRex recipes (recipes.py), generated from planetes_pipe.steps; CPL is confined here."""
+"""PyEsoRex recipes: point --recipe-dir here. CPL is used only in recipes.py."""

@@ -3,8 +3,8 @@ from pathlib import Path
 
 from astropy.io import fits
 
-from planetes_pipe import steps
-from planetes_pipe.io.raw import read_raw_metadata
+from planetes_pipe import reduce
+from planetes_pipe.files import read_raw
 
 SCIENCE = Path("/path/to/science.fits")
 CALIBRATIONS = Path("/path/to/reduced/calibration")
@@ -20,11 +20,11 @@ def main():
                    and all(h.get(k) == v for k, v in keywords.items()))
         return path
 
-    exposure = read_raw_metadata(SCIENCE, category="SINGLE_SCI_RAW").setup.exposure_s
+    exposure = read_raw(SCIENCE, "SINGLE_SCI_RAW").setup.exposure_s
     if exposure is None:
         raise ValueError("Select a dark explicitly when science exposure is unknown")
     # The step also checks detector/ROI compatibility before subtracting the dark.
-    reduced = steps.reduce(
+    reduced = reduce.run(
         SCIENCE,
         product("DARK", **{"ESO DET WIN1 DIT1": exposure}),
         product("FLAT"),

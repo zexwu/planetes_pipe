@@ -25,5 +25,5 @@ Existing outputs are never overwritten.
 
 The old 2026-02-05 dataset has missing calibration exposure metadata and uses
 its own explicit selections in `../../test_data/reduce.py`.
-Both scripts call `planetes_pipe.steps`, the same code as the optional
+Both scripts call each step's `run()`, the same code as the optional
 [PyEsoRex route](../docs/eso/README.md); SOF files are only needed there.

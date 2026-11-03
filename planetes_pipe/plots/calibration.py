@@ -5,8 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 
-from planetes_pipe.model.instrument import layout
-from planetes_pipe.model.products import Bad, Dark, Flat, P2VM, Wave
+from planetes_pipe.instrument import layout
+from planetes_pipe.dark import Bad, Dark
+from planetes_pipe.flat import Flat
+from planetes_pipe.p2vm import P2VM
+from planetes_pipe.wave import Wave
 
 
 def save_calibration_plots(

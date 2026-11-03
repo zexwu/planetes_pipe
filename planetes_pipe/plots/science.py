@@ -7,8 +7,8 @@ import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 
 from planetes_pipe import log
-from planetes_pipe.model.instrument import layout
-from planetes_pipe.model.products import P2VMRed
+from planetes_pipe.instrument import layout
+from planetes_pipe.reduce import P2VMRed
 
 
 def _make_figure_grid(rows: int, columns: int, xlabel: str, ylabel: str, **kwargs):
