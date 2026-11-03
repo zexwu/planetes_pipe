@@ -13,7 +13,6 @@ from planetes_pipe.model.instrument import check_setup
 from planetes_pipe.io.raw import read_raw_metadata
 from planetes_pipe.processing.extraction import extract_spectra, prepare_extraction
 from planetes_pipe.processing.p2vm import make_p2vm
-from planetes_pipe.model.products import Dark, Flat, Wave
 from planetes_pipe.eso.dfs import read_sof, save_products, read_shutter_id
 from planetes_pipe.eso.logging import recipe_logging
 from planetes_pipe.eso.parameters import make_parameters, read_parameters

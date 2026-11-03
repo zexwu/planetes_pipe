@@ -9,7 +9,6 @@ from cpl import ui
 from planetes_pipe import __version__
 from planetes_pipe.processing.flat import measure_quality
 from planetes_pipe.processing.flat import make_flat
-from planetes_pipe.model.products import Bad, Dark
 from planetes_pipe.eso.dfs import read_sof, save_products, read_shutter_id
 from planetes_pipe.eso.logging import recipe_logging
 from planetes_pipe.eso.parameters import make_parameters, read_parameters
