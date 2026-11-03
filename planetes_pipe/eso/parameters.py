@@ -1,76 +1,54 @@
-"""Translate Python science parameters to the documented CPL names and aliases."""
+"""Declare a step function's options as CPL parameters and read them back."""
 
 from inspect import signature
 
 from cpl import ui
 
+from planetes_pipe.steps import PARAMETERS
+
 STATIC_NAME = "planetes.dfs.static-name"
 
 
-def make_parameters(definitions, function):
-    """Declare CPL parameters using the scientific function's existing defaults.
-
-    Parameters
-    ----------
-    definitions : mapping
-        Python keyword -> (canonical CPL name, CLI alias, help description).
-    function : callable
-        Scientific step whose signature defines each keyword's default value.
-
-    Returns
-    -------
-    parameters : cpl.ui.ParameterList
-        Executor-facing science parameters with shared Python defaults, followed by
-        the common static-name output option (False by default).
-    """
-    defaults = signature(function).parameters
-    parameters = []
-    for name in definitions:
-        canonical, alias, description = definitions[name]
-        parameter = ui.ParameterValue(
-            name=canonical,
-            context=canonical.rsplit(".", 1)[0],
-            description=description,
-            default=defaults[name].default,
-        )
-        parameter.cli_alias = alias
-        parameters.append(parameter)
-    static_name = ui.ParameterValue(
-        name=STATIC_NAME,
-        context="planetes.dfs",
-        description="Use fixed recipe output names instead of reference raw filenames",
-        default=False,
+def _parameter(name, description, default):
+    parameter = ui.ParameterValue(
+        name=name, context=name.rsplit(".", 1)[0], description=description, default=default
     )
-    static_name.cli_alias = "static-name"
-    parameters.append(static_name)
+    parameter.cli_alias = name.rsplit(".", 1)[1]
+    return parameter
+
+
+def make_parameters(step, context: str, *extra):
+    """CPL parameters for the step's options, defaults taken from its signature.
+
+    `extra` holds recipe-only (name, description, default) options; the common
+    static-name option is appended last.
+    """
+    parameters = [
+        _parameter(f"planetes.{context}.{PARAMETERS[name][0]}", PARAMETERS[name][1],
+                   "" if item.default is None else item.default)
+        for name, item in signature(step).parameters.items()
+        if name in PARAMETERS
+    ]
+    parameters += [_parameter(*item) for item in extra]
+    parameters.append(_parameter(
+        STATIC_NAME, "Use fixed recipe output names instead of reference raw filenames", False
+    ))
     return ui.ParameterList(parameters)
 
 
-def read_parameters(recipe, settings, definitions):
-    """Reset a recipe's parameters and translate the settings for its scientific step.
+def read_parameters(recipe, settings) -> dict:
+    """Apply this invocation's settings; return {option name: value}.
 
-    Parameters
-    ----------
-    recipe : cpl.ui.PyRecipe
-        Recipe holding the declared ParameterList.
-    settings : mapping
-        Canonical CPL parameter name -> value for this invocation.
-    definitions : mapping
-        Python keyword -> (canonical CPL name, CLI alias, help description).
-
-    Returns
-    -------
-    options : dict
-        Scientific keyword arguments ready for the step call. Recipe-only options
-        remain in recipe.parameters and are handled explicitly by the recipe.
-
-    Notes
-    -----
-    Reset defaults before applying settings so repeated calls do not inherit
-    previous values. Logging is configured separately for the whole invocation.
+    Defaults are restored first so repeated calls do not inherit previous values.
     """
     for parameter in recipe.parameters:
         parameter.value = parameter.default
     for name, value in settings.items():
         recipe.parameters[name].value = value
-    return {name: recipe.parameters[definitions[name][0]].value for name in definitions}
+    return {parameter.name.rsplit(".", 1)[1]: parameter.value for parameter in recipe.parameters}
+
+
+def step_options(step, values: dict) -> dict:
+    """Keyword arguments for the step function from {option name: value}."""
+    return {name: values[PARAMETERS[name][0]]
+            for name in signature(step).parameters if name in PARAMETERS}

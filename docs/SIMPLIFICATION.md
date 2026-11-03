@@ -14,7 +14,7 @@
 | reduce_science | reduce_spectra |
 
 FLAT/P2VM使用固定的`{identity: Path}`：望远镜`4,3,2,1`，
-基线`43,42,41,32,31,21`。SOF身份读取在recipe入口完成。
+基线`43,42,41,32,31,21`。`steps.py`每个recipe一个函数；PyEsoRex recipe只读取SOF和参数后调用同一函数。
 路径映射始终只存路径，不在中途变成path/metadata tuple。
 
 `make_wave`明确传入线表；默认文件由recipe或脚本选择。

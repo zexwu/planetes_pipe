@@ -1,12 +1,10 @@
 """One science cube + an existing calibration directory -> instrumental observables."""
-from astropy.io import fits
 from pathlib import Path
 
-from planetes_pipe import io
-from planetes_pipe.io.common import product_filename
+from astropy.io import fits
+
+from planetes_pipe import steps
 from planetes_pipe.io.raw import read_raw_metadata
-from planetes_pipe.model.products import Dark, Flat, Wave, P2VM
-from planetes_pipe.processing.reduce import reduce_science, measure_quality
 
 SCIENCE = Path("/path/to/science.fits")
 CALIBRATIONS = Path("/path/to/reduced/calibration")
@@ -14,31 +12,27 @@ OUTPUT = CALIBRATIONS.parent / "science"
 
 
 def main():
-    paths = list(CALIBRATIONS.glob("*.fits"))
-    categories = {path: fits.getheader(path).get("ESO PRO CATG") for path in paths}
-    (flat_path,) = (path for path in paths if categories[path] == "FLAT")
-    (wave_path,) = (path for path in paths if categories[path] == "WAVE")
-    (p2vm_path,) = (path for path in paths if categories[path] == "P2VM")
-    flat, wave, p2vm = (
-        io.flat.read(flat_path),
-        io.wave.read(wave_path),
-        io.p2vm.read(p2vm_path),
-    )
-    setup = read_raw_metadata(SCIENCE, category="SINGLE_SCI_RAW").setup
-    if setup.exposure_s is None:
+    headers = {path: fits.getheader(path) for path in CALIBRATIONS.glob("*.fits")}
+
+    def product(category, **keywords):
+        """The single calibration of this category matching the given header values."""
+        (path,) = (p for p, h in headers.items() if h.get("ESO PRO CATG") == category
+                   and all(h.get(k) == v for k, v in keywords.items()))
+        return path
+
+    exposure = read_raw_metadata(SCIENCE, category="SINGLE_SCI_RAW").setup.exposure_s
+    if exposure is None:
         raise ValueError("Select a dark explicitly when science exposure is unknown")
-    darks = [io.dark.read(path) for path in paths if categories[path] == "DARK"]
-    (dark,) = (
-        p
-        for p in darks
-        if p.setup is not None and p.setup.exposure_s == setup.exposure_s
-    )
     # The step also checks detector/ROI compatibility before subtracting the dark.
-    with io.raw.read(SCIENCE, category="SINGLE_SCI_RAW") as raw_input:
-        result = reduce_science(raw_input, dark, flat, wave, p2vm)
-    path = OUTPUT / product_filename(SCIENCE, result)
-    io.science.write(path, result, quality=measure_quality(result))
-    print(path)
+    reduced = steps.reduce(
+        SCIENCE,
+        product("DARK", **{"ESO DET WIN1 DIT1": exposure}),
+        product("FLAT"),
+        product("WAVE"),
+        product("P2VM"),
+        output_dir=OUTPUT,
+    )
+    print(reduced["SINGLE_SCI_P2VMRED"])
 
 
 if __name__ == "__main__":

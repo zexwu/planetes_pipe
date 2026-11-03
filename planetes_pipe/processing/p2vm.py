@@ -650,6 +650,30 @@ def wavelength_grid(flat: Flat, wave: Wave) -> NDArray:
     return grid
 
 
+def extract_phase_reference(raw: Raw, dark: Dark, flat: Flat, wave: Wave) -> NDArray:
+    """Extract an instrumental phase-reference exposure onto the P2VM target grid.
+
+    Parameters
+    ----------
+    raw : Raw
+        Phase-reference ADU cube with all shutters open.
+    dark : Dark
+        Mean dark in ADU selected for this exposure; its own DARK when the
+        exposure differs from the calibration scans.
+    flat, wave : Flat, Wave
+        The same calibrations later passed to make_p2vm.
+
+    Returns
+    -------
+    spectra : ndarray, shape (24 outputs, frame, wavelength)
+        Dark-subtracted ADU spectra, ready for make_p2vm(phase_reference=...).
+    """
+    check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
+    check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
+    extractor = prepare_extraction(flat, wave, wavelength_grid(flat, wave))
+    return extract_spectra(raw, extractor, dark)
+
+
 def make_p2vm(
     flat: Flat,
     wave: Wave,

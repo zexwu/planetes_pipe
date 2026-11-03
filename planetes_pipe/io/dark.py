@@ -52,8 +52,8 @@ def read(path: Path) -> Dark:
         return decode(hdus)
 
 
-def write(path: Path, product: Dark, *, quality=None) -> None:
+def write(path: Path, product: Dark, *, quality=None, header=None) -> None:
     """Save this product without overwriting a file or recomputing QC."""
-    with encode(product, quality=quality) as hdus:
+    with encode(product, header, quality=quality) as hdus:
         with new_fits_file(path) as temporary:
             hdus.writeto(temporary, checksum=True)

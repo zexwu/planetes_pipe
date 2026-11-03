@@ -21,7 +21,6 @@ from astropy.io import fits
 from p2vm_fixture import input_rows, metadata, write_raw, write_recipe_inputs
 
 import planetes_pipe
-from planetes_pipe.model.products import Flat, P2VM, P2VMRed, Wave
 from planetes_pipe.processing.reduce import reduce_science
 
 
@@ -213,6 +212,35 @@ class ESOChainTests(unittest.TestCase):
                         header = fits.getheader(path)
                         self.assertEqual(header["ESO PRO CATG"], category.upper())
                         self.assertEqual(header["ESO PRO REC1 RAW1 NAME"], source.name)
+
+    def test_p2vm_recipe_signs_products_and_records_phase_inputs(self):
+        recipes = Path(planetes_pipe.__file__).parent / "eso"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            inputs = write_recipe_inputs(root / "inputs")
+            for path in inputs["P2VM_RAW"]:
+                with fits.open(path, mode="update") as hdus:
+                    hdus[0].header["HIERARCH ESO DPR TECH"] = "INTERFEROMETRY"
+                    hdus[0].add_checksum()
+            sof = root / "p2vm.sof"
+            sof.write_text("".join(f"{p} {tag}\n" for tag, p in input_rows(inputs)))
+            output = root / "out"
+            output.mkdir()
+            result = subprocess.run(
+                [sys.executable, "-m", "pyesorex", f"--recipe-dir={recipes}",
+                 "planetes_p2vm", "--static-name=true", str(sof)],
+                cwd=output, capture_output=True, text=True, timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            path = output / "planetes_p2vm.fits"
+            p2vm_io.read(path)  # Checksums still valid after signing.
+            header = fits.getheader(path)
+            self.assertEqual(len(header["DATAMD5"]), 32)
+            self.assertEqual(header["PIPEFILE"], path.name)
+            self.assertEqual(header["ESO PRO TECH"], "INTERFEROMETRY")
+            self.assertEqual(header["ESO PRO DATANCOM"], 11)  # 4 flats, 6 scans, reference.
+            calibrations = [header[f"ESO PRO REC1 CAL{n} CATG"] for n in range(1, 5)]
+            self.assertEqual(calibrations, ["DARK", "FLAT", "WAVE", "PHASE_DARK_CALIB"])
 
     def test_recipe_logging_restores_python_configuration_after_failure(self):
         from planetes_pipe.eso.logging import recipe_logging

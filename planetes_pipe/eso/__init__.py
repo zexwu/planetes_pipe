@@ -1,1 +1,1 @@
-"""Five PyEsoRex entry points; CPL parameters and DFS are confined here."""
+"""PyEsoRex recipes (recipes.py), generated from planetes_pipe.steps; CPL is confined here."""

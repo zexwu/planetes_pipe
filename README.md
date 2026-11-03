@@ -26,7 +26,11 @@ are read only; product writers refuse existing destinations.
 - `io/dark.py`, `flat.py`, `wave.py`, `p2vm.py`, `science.py`: each product's
   `read()`, `encode()` and `write()`. `io/common.py` holds shared FITS operations.
 - `plots/`: diagnostic plots and PDF reports.
-- `eso/`: optional CPL/PyEsoRex adapters; see [SOF usage](docs/eso/README.md).
+- `steps.py`: one function per recipe, files in → product files out. Python and
+  PyEsoRex run these same functions.
+- `io/provenance.py`: the DICD `PRO` provenance header written on every product.
+- `eso/recipes.py`: optional PyEsoRex recipes; each reads its SOF and CPL options,
+  calls a `steps` function, then signs the products. See [SOF usage](docs/eso/README.md).
 Wavelength reference lines are defined directly in `processing/wave.py`.
 
 Wavelength, OPD and GD use metres. Telescope order is 4,3,2,1; baselines are
@@ -46,13 +50,22 @@ uv run --locked python -m unittest discover -s bench/tests -v
 Keep the sibling bench compatible when changing public APIs or product formats.
 `build/` is disposable setuptools output, not source or a runtime dependency.
 
-DARK calculation consumes raw chunks while the file is open:
+Each step is a plain function, the same one its PyEsoRex recipe calls. It
+returns `{product category: written path}`:
 
 ```python
-from planetes_pipe.io import raw, dark
-from planetes_pipe.processing.dark import make_dark_products, measure_quality
+from planetes_pipe import steps
+
+dark = steps.dark("dark.fits", output_dir="calibration")
+flat = steps.flat(dark["DARK"], dark["BAD"], flat_raws, output_dir="calibration")
+```
+
+For in-memory work, use the scientific functions directly:
+
+```python
+from planetes_pipe.io import raw
+from planetes_pipe.processing.dark import make_dark_products
 
 with raw.read(input_path, category="DARK_RAW") as frames:
     result, bad = make_dark_products(frames)
-dark.write(output_path, result, quality=measure_quality(result))
 ```

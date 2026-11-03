@@ -1,178 +1,59 @@
-"""CPL binding of explicit categories/parameters and product publication."""
-from planetes_pipe.io.common import CATEGORIES
-from planetes_pipe.io.raw import RAW_TYPES
+"""SOF reading and product signing/registration for the PyEsoRex recipes."""
 
+import os
 from pathlib import Path
 
-from astropy.io import fits as afits
-from cpl import core, dfs, ui
+from cpl import ui
 
-from planetes_pipe import __version__
-from planetes_pipe.io.common import product_filename
-from planetes_pipe.io.common import new_fits_file
-from planetes_pipe.io.raw import read_raw_metadata
-from planetes_pipe.model.products import P2VM, P2VMRed, Wave
-from planetes_pipe.model.raw import shutter_identity
-from planetes_pipe.eso.parameters import STATIC_NAME
-
-
-def cpl_frame_type(cls):
-    """Return the CPL image/table classification for a scientific product class.
-
-    Parameters
-    ----------
-    cls : type
-        Product class, not an instance. Wave, P2VM and
-        P2VMRed use TABLE; detector Dark/Bad/Flat products use IMAGE.
-
-    Returns
-    -------
-    frame_type : cpl.ui.Frame.FrameType
-        Classification used when registering the generated DFS product.
-    """
-    return (
-        ui.Frame.FrameType.TABLE
-        if cls in (Wave, P2VM, P2VMRed)
-        else ui.Frame.FrameType.IMAGE
-    )
+TABLE_CATEGORIES = ("WAVE", "P2VM", "SINGLE_SCI_P2VMRED")
+STATIC_NAMES = {
+    "DARK": "planetes_dark.fits",
+    "BAD": "planetes_bad.fits",
+    "FLAT": "planetes_flat.fits",
+    "WAVE": "planetes_wave.fits",
+    "P2VM": "planetes_p2vm.fits",
+    "SINGLE_SCI_P2VMRED": "planetes_reduced.fits",
+}
 
 
-def read_sof(frameset, required: dict[str, int], optional: tuple[str, ...] = ()):
-    """Check SOF roles/counts and classify input frames for DFS provenance.
-
-    Parameters
-    ----------
-    frameset : cpl.ui.FrameSet
-        Recipe inputs, each with an explicit SOF tag and filename.
-    required : dict of str to int
-        Required tag -> exact input count. Missing or excess entries fail.
-    optional : tuple of str, optional
-        Additional allowed tags, each with at most one input. Other tags fail.
-
-    Returns
-    -------
-    paths : dict of str to list of Path
-        Paths grouped by tag. Products are not loaded or substituted into this map.
-    used : cpl.ui.FrameSet
-        Classified RAW/CALIB frames. A recipe must remove unused optional inputs
-        before passing this set to save_products.
-    """
-    grouped = {}
+def read_sof(frameset, required: dict[str, int], optional=()) -> dict[str, list[Path]]:
+    """Group SOF paths by tag, checking required counts and at most one optional."""
+    paths = {}
     for frame in frameset:
         if frame.tag not in required and frame.tag not in optional:
             raise ValueError(f"Unexpected input tag: {frame.tag}")
-        grouped.setdefault(frame.tag, []).append(Path(frame.file))
-    missing = set(required) - grouped.keys()
-    if missing:
-        raise ValueError(f"Missing required input tags: {sorted(missing)}")
+        paths.setdefault(frame.tag, []).append(Path(frame.file))
     for tag, count in required.items():
-        if len(grouped[tag]) != count:
-            raise ValueError(
-                f"Expected {count} {tag} input(s), got {len(grouped[tag])}"
-            )
+        if len(paths.get(tag, [])) != count:
+            raise ValueError(f"Expected {count} {tag} input(s), got {len(paths.get(tag, []))}")
     for tag in optional:
-        if len(grouped.get(tag, [])) > 1:
+        if len(paths.get(tag, [])) > 1:
             raise ValueError(f"Expected at most one {tag} input")
-
-    used = ui.FrameSet()
-    for tag in (*required, *optional):
-        for path in grouped.get(tag, []):
-            used.append(
-                ui.Frame(
-                    file=str(path),
-                    tag=tag,
-                    group=ui.Frame.FrameGroup.RAW
-                    if tag in RAW_TYPES or tag == "PHASE_REFERENCE"
-                    else ui.Frame.FrameGroup.CALIB,
-                    frameType=ui.Frame.FrameType.TABLE
-                    if tag in ("WAVE", "P2VM")
-                    else ui.Frame.FrameType.IMAGE,
-                )
-            )
-    return grouped, used
+    return paths
 
 
-def read_shutter_id(path: Path, category: str) -> str:
-    """Identify recorded shutters for the product's timestamp/header reference."""
-    return shutter_identity(read_raw_metadata(path, category=category).shutters)
+def publish(written: dict[str, Path], *, static_name: bool):
+    """Sign (DATAMD5, PIPEFILE) and register written products as final PRODUCT frames.
 
-
-def save_products(outputs, used, recipe, *, reference: Path):
-    """Write, sign and register the products of one ESO recipe invocation.
-
-    Parameters
-    ----------
-    outputs : iterable of tuple
-        (static_filename, product, quality, encode) for each output. The fixed name is
-        used only with static-name=True. quality is the already measured QC
-        dataclass or None; no statistics are computed by the writer.
-    used : cpl.ui.FrameSet
-        Actual raw/calibration inputs used by the recipe, excluding disabled inputs.
-    recipe : cpl.ui.PyRecipe
-        Recipe name and current ParameterList for DFS provenance recording.
-    reference : Path
-        Raw input used for output naming and DFS header inheritance. Its stem is
-        preserved, including any timestamp or UNKNOWN marker. Recipes choose a
-        fixed physical input for multi-file calibrations, independently of SOF
-        order. Existing observation-time cards are inherited without invention.
-
-    Returns
-    -------
-    products : cpl.ui.FrameSet
-        Published outputs registered as final PRODUCT frames with their categories.
-
-    Notes
-    -----
-    CPL supplies input and parameter provenance; the shared encoder supplies data
-    and scientific units. Checksums and DFS signatures are completed before each
-    file is published. Existing paths are never overwritten. A later failure does
-    not remove an earlier completed output.
+    With static_name, each product is first renamed to its fixed recipe name;
+    an existing file is never replaced.
     """
-    inherit = next(frame for frame in used if Path(frame.file) == reference)
-    # CPL takes primary observation cards from the first RAW even when inherit
-    # is supplied. GRAVITY puts its reference first for this same reason.
-    used = ui.FrameSet(
-        [inherit] + [frame for frame in used if Path(frame.file) != reference]
-    )
     products = ui.FrameSet()
-    for static_filename, product, quality, encode in outputs:
-        output = (
-            static_filename
-            if recipe.parameters[STATIC_NAME].value
-            else product_filename(reference, product)
+    for category, path in written.items():
+        if static_name:
+            target = path.with_name(STATIC_NAMES[category])
+            os.link(path, target)
+            path.unlink()
+            path = target
+        frame = ui.Frame(
+            file=str(path),
+            tag=category,
+            group=ui.Frame.FrameGroup.PRODUCT,
+            level=ui.Frame.FrameLevel.FINAL,
+            frameType=ui.Frame.FrameType.TABLE
+            if category in TABLE_CATEGORIES
+            else ui.Frame.FrameType.IMAGE,
         )
-        with new_fits_file(output) as path:
-            properties = core.PropertyList()
-            properties.append(
-                core.Property(
-                    "ESO PRO CATG", core.Type.STRING, CATEGORIES[type(product)]
-                )
-            )
-            dfs.save_propertylist(
-                used,
-                recipe.parameters,
-                used,
-                recipe.name,
-                properties,
-                f"planetes-pipe/{__version__}",
-                str(path),
-                inherit=inherit,
-            )
-            with afits.open(path, mode="update") as hdus:
-                encoded = encode(product, hdus[0].header, quality=quality)
-                hdus[0].header = encoded[0].header
-                for item in encoded[1:]:
-                    hdus.append(item)
-                for item in hdus:
-                    item.add_checksum()
-            frame = ui.Frame(
-                file=str(path),
-                tag=CATEGORIES[type(product)],
-                group=ui.Frame.FrameGroup.PRODUCT,
-                level=ui.Frame.FrameLevel.FINAL,
-                frameType=cpl_frame_type(type(product)),
-            )
-            ui.FrameSet([frame]).sign_products()
-        frame.file = str(output)
+        ui.FrameSet([frame]).sign_products()
         products.append(frame)
     return products
