@@ -48,7 +48,8 @@ planetes_pipe/
     raw.py          raw data: the Raw cube, reading raw files, DET/shutter headers
     products.py     product FITS: write/read, extensions, provenance header
   instrument.py     channel order: telescopes, baselines, ABCD outputs
-  plots.py          diagnostic PDF reports
+  plots/            diagnostic PDFs, one module per product as in steps/;
+                    plots.report(product_file) or `python -m planetes_pipe.plots FILE...`
   eso/recipes.py    PyEsoRex recipes; the only file that imports CPL
 examples/           two complete reduction scripts
 tests/              test_<module>.py per module; fixtures.py builds synthetic raw files;
@@ -99,6 +100,10 @@ not final calibrated OIFITS.
   and a recipe class in `eso/recipes.py`.
 - **A shared algorithm**: keep it in its step module until a second step needs it,
   then move it to `steps/extraction.py`. Numba kernels stay next to the code that calls them.
+
+Every product file gets its diagnostic PDF with `plots.report(path)` (next to it,
+`<product>.pdf`); the bench night reduction writes them automatically. The P2VM
+report starts with GRAVITY's quality checks (gravi_visual) and a GOOD/WARNING/BAD verdict.
 
 [Methods](docs/methods.md) · [Products and QC](docs/products.md) · [Code style](docs/code_style.md) ·
 [Changes](docs/changes.md)

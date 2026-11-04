@@ -1,3 +1,21 @@
+# PLANETES 0.22.0：每种产品一个诊断 PDF
+
+- `plots.py` 拆成 `plots/` 包，与 `steps/` 一一对应：`dark`、`flat`、`wave`、`p2vm`、
+  `science`，以及共用的 `pages`。每个模块的 `pages(product, ...)` 生成 matplotlib
+  `Figure`（不经过 pyplot，因此不需要 GUI 后端）。0.16 时曾把 `plots/` 合并成一个文件；
+  这次按产品拆分，规则与 `steps/` 相同。
+- `plots.report(product_file)` 按 PRO.CATG 选模块，在产品旁写出 `<product>.pdf`；命令行
+  `python -m planetes_pipe.plots FILE...`。不覆盖已有 PDF。`save_calibration_plots` 与
+  `save_reduction_plots` 保留原签名，由各模块的页面组成。
+- P2VM 报告按 GRAVITY `gravi_visual_p2vm.py` 补齐：质量汇总（输出相对透过率 0.7–1.3；
+  中心 70 % 波段内归一化 coherence 0.80–1.03，超出不得多于 5 % 的通道；另加 raw 饱和），
+  GOOD/WARNING/BAD 判定；每路输出的相对透过率；coherent flux 传递矩阵；visibility 传递
+  函数；输出相位表；c-matrix。另加两页扫描诊断：ABCD 椭圆的单位圆，以及条纹相位减去
+  2π·OPD/λ 的残差（不 unwrap，按 wrap 后的差值）。
+- DARK/BAD、FLAT、WAVE 各有自己的页面：探测器图与分布、按类型的坏像素、光迹与宽度、
+  望远镜通量、波长解与谱线残差。
+- 数值结果不变。
+
 # PLANETES 0.21.0：记录 raw 饱和
 
 - `io/raw.py` 新增 `SATURATION_ADU = 4095`（探测器 12 位读出的截断值）、
