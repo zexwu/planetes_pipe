@@ -26,7 +26,7 @@ class RawTests(unittest.TestCase):
     def test_bench_cubes_keep_missing_metadata_and_all_frames(self):
         cube = np.arange(17 * 3 * 5, dtype=np.int16).reshape(17, 3, 5)
         for primary in (True, False):
-            with self.subTest(primary=primary), tempfile.TemporaryDirectory() as tmp:
+            with self.subTest(primary=primary), tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
                 path = Path(tmp) / "bench.fits"
                 hdus = (
                     [fits.PrimaryHDU(cube)]
@@ -45,7 +45,7 @@ class RawTests(unittest.TestCase):
                 self.assertTrue(all(chunk.dtype == np.float64 for chunk in chunks))
                 np.testing.assert_array_equal(np.concatenate(chunks), cube)
                 self.assertEqual(path.read_bytes(), original)
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path = Path(tmp) / "raw.fits"
             physical = metadata("DARK_RAW", n_wave=5, height=3)
             write_raw(path, cube, physical)
@@ -75,7 +75,7 @@ class RawTests(unittest.TestCase):
             self.assertEqual(measured.temporal_rms_adu.item(), 1.0)
             self.assertEqual(measured.mean_adu.dtype, np.float64)
         for dark, count in ((Dark(np.asarray(cube[0], dtype=float)), None), (single, 1)):
-            with tempfile.TemporaryDirectory() as tmp:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
                 np.testing.assert_array_equal(dark.mean_adu, cube[0])
                 self.assertEqual(dark.n_frames, count)
                 self.assertIsNone(dark.temporal_rms_adu)
@@ -89,7 +89,7 @@ class RawTests(unittest.TestCase):
 
     def test_find_raw_selects_by_header_type(self):
         metadata = RawMetadata("FLAT_RAW", (False, False, False, True), cards(WIN_NX=3, WIN_NY=2))
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             root = Path(directory)
             for name in ("arbitrary-a.fits", "arbitrary-b.fits"):
                 write_raw(root / name, np.zeros((35, 2, 3)), metadata)
@@ -98,7 +98,7 @@ class RawTests(unittest.TestCase):
 
     def test_read_raw_closes_file_and_keeps_cube_readable(self):
         metadata = RawMetadata("DARK_RAW", (False,) * 4, cards(WIN_NX=2, WIN_NY=2))
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             path = Path(directory) / "raw.fits"
             write_raw(path, np.arange(140.).reshape(35, 2, 2), metadata)
             handle = fits.open(path, memmap=True)
@@ -110,7 +110,7 @@ class RawTests(unittest.TestCase):
 
     def test_raw_does_not_parse_scan_table(self):
         cube = np.arange(35 * 2 * 3, dtype=float).reshape(35, 2, 3)
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             path = Path(directory) / "raw.fits"
             # Deliberately unrelated columns: reading pixels does not need a scan.
             fits.HDUList([

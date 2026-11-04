@@ -38,7 +38,7 @@ class HeaderTests(unittest.TestCase):
                     self.assertIn(key, header, f"{path.name}: missing {key}")
 
     def test_p2vm_and_science_products(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
             inputs = write_recipe_inputs(root / "inputs")
             calibration = p2vm.run(inputs["DARK"], inputs["FLAT"], inputs["WAVE"],

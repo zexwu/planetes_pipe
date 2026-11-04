@@ -26,7 +26,7 @@ class DarkTests(unittest.TestCase):
         metadata = RawMetadata("DARK_RAW", (False,) * 4, cards(
             DIT=.1, WIN_NX=5, WIN_NY=4, DET_ID="test",
             WIN_STRX=1, WIN_STRY=1, WIN_BINX=1, WIN_BINY=1))
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             path = Path(directory) / "raw.fits"
             write_raw(path, cube, metadata)
             original = path.read_bytes()
@@ -51,7 +51,7 @@ class DarkTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), original)
 
     def test_dark_run_writes_products_with_provenance(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
             source = root / "PLANETES.2026-02-05T200000.fits"
             write_raw(source, np.arange(30, dtype=float).reshape(2, 3, 5),

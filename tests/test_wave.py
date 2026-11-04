@@ -40,7 +40,7 @@ class WaveTests(unittest.TestCase):
             )
             lamp_image += profile * spectrum
 
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             root = Path(directory)
             for name, image in (("dark", dark_image), ("lamp_dark", lamp_dark_image)):
                 fits.PrimaryHDU(np.stack([image - 1, image + 1])).writeto(

@@ -41,7 +41,7 @@ class FlatTests(unittest.TestCase):
             )
 
     def test_flat_rejects_dark_shape_without_det_cards(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             paths = {}
             for telescope in layout.telescopes:
                 path = Path(directory) / f"tel{telescope}.fits"
@@ -66,7 +66,7 @@ class FlatTests(unittest.TestCase):
             centers = 40 + 44 * np.arange(25) + shift
             image = sum(1000 * np.exp(-0.5 * ((y - center) / 2)**2)
                         * np.exp(-0.5 * ((x - 32) / 12)**2) for center in centers)
-            with tempfile.TemporaryDirectory() as directory:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
                 paths = {}
                 for telescope in layout.telescopes:
                     paths[telescope] = Path(directory) / f"{telescope}.fits"

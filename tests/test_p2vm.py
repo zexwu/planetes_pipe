@@ -34,7 +34,7 @@ class WavelengthGridTests(unittest.TestCase):
         flat.trace_x_range[0] = [3, 7]
         wave.wavelength_map_m[:] = np.arange(11) * 1e-9 + 1e-6
         wave.wavelength_map_m[0] += 0.2e-9
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             path = Path(directory) / "flat.fits"
             write_flat(path, flat)
             xrange = fits.getdata(path, "PROFILE_PARAMS")["XRANGE"][0]
@@ -62,7 +62,7 @@ class WavelengthGridTests(unittest.TestCase):
 
 class P2VMTests(unittest.TestCase):
     def test_p2vm_uses_shutters_with_reversed_lists_and_arbitrary_names(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             root = Path(tmp)
             paths = write_recipe_inputs(root / "versioned")
             flat, wave = read_flat(paths["FLAT"]), read_wave(paths["WAVE"])
@@ -94,7 +94,7 @@ class P2VMTests(unittest.TestCase):
             self.assertEqual(actual.baseline_outputs, expected.baseline_outputs)
 
     def test_phase_dark_is_independent_from_main_dark(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
             inputs = write_recipe_inputs(root / "inputs")
             reference = inputs["PHASE_REFERENCE"]
@@ -169,7 +169,7 @@ class P2VMTests(unittest.TestCase):
             np.testing.assert_allclose(np.exp(1j * recovered), np.exp(1j * measured), atol=1e-12)
 
     def test_explicit_scan_conversion_preserves_frame_order_units_and_sign(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             paths = {}
             gains = {baseline: (-1 if i % 2 else 1) for i, baseline in enumerate(layout.baselines)}
             for baseline in layout.baselines:

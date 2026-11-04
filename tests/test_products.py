@@ -34,7 +34,7 @@ class CalibrationFitsTests(unittest.TestCase):
         for product in [self.flat, self.wave, self.p2vm, self.p2vm_diagnostics]:
             with (
                 self.subTest(product=type(product).__name__),
-                tempfile.TemporaryDirectory() as tmp,
+                tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp,
             ):
                 path = Path(tmp) / "calibration.fits"
                 write_product(path, product)
@@ -58,7 +58,7 @@ class CalibrationFitsTests(unittest.TestCase):
                         self.assertEqual(before, after)
 
     def test_fits_writer_preserves_existing_file(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             path = Path(tmp) / "wave.fits"
             write_wave(path, self.wave)
             header = fits.getheader(path)

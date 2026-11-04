@@ -36,7 +36,7 @@ class ReducedProductTests(unittest.TestCase):
         coherent[0, 0, 0] = complex(-0.0, -0.0)
         coherent[0, 0, 1] = complex(np.nan, np.nan)
         product = replace(self.product, coherent_flux_adu=coherent)
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             path = Path(temporary) / "science.fits"
             write_reduced(path, product)
             loaded = read_reduced(path)

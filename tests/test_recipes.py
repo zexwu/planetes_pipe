@@ -28,7 +28,7 @@ from planetes_pipe.steps.wave import read_wave
 class ESOChainTests(unittest.TestCase):
     def test_science_recipe_preserves_dark_subtraction_and_masks(self):
         recipes = Path(planetes_pipe.__file__).parent / "eso"
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
             inputs = write_recipe_inputs(root / "inputs")
             # Give each scan a distinct timestamp/unknown-time identity, then
@@ -161,7 +161,7 @@ class ESOChainTests(unittest.TestCase):
 
     def test_dark_recipe_names_products_after_the_raw_input(self):
         recipes = Path(planetes_pipe.__file__).parent / "eso"
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
             source = root / "PLANETES.2026-02-05TUNKNOWN.0001.fits"
             write_raw(
@@ -189,7 +189,7 @@ class ESOChainTests(unittest.TestCase):
 
     def test_p2vm_recipe_signs_products_and_records_phase_inputs(self):
         recipes = Path(planetes_pipe.__file__).parent / "eso"
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
             root = Path(temporary)
             inputs = write_recipe_inputs(root / "inputs")
             for path in inputs["P2VM_RAW"]:
