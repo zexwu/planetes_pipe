@@ -2,5 +2,5 @@ include README.md pyproject.toml
 recursive-include planetes_pipe *.py
 recursive-include tests *.py
 recursive-include examples *.py *.md
-recursive-include docs *.md *.dot *.svg *.in
+recursive-include docs *.md *.dot *.svg
 global-exclude __pycache__ *.py[cod] .DS_Store

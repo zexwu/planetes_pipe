@@ -21,9 +21,9 @@ SOF means **Set Of Frames**: a text file with one input per line:
 The first column is a file path; the second is the recipe's input role. Shutter
 identity still comes from the FITS header. Python examples do not need SOFs.
 
-These `.sof.in` templates describe the legacy `test_data` dataset. Copy a template
-to `.sof`, replace `/absolute/PLANETES_new` with your workspace path, and update
-product paths if you generated a different reduced directory.
+Each recipe's inputs (tag and count) are listed in `planetes_pipe/eso/recipes.py`
+and [products.md](../products.md). Ready-to-run SOFs for the 2026-02-05 bench data
+are in the workspace at `test_data/sof/`.
 
 For example, with CPL/PyCPL/PyEsoRex installed, run in a fresh output directory:
 
