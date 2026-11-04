@@ -14,11 +14,16 @@ from planetes_pipe.steps.p2vm import P2VM
 from planetes_pipe.steps.science import P2VMRed
 from planetes_pipe.steps.wave import Wave
 
+# Line colours of the A, C, B, D outputs, as matplotlib's default cycle draws them.
+ABCD_COLORS = ('C0', 'C1', 'C2', 'C3')
+
 
 def save_calibration_plots(
     dark: Dark, bad: Bad, flat: Flat, wave: Wave, p2vm: P2VM, output: Path,
 ) -> None:
     """Write product maps, fitted traces, wavelength and instrumental P2VM diagnostics.
+
+    P2VM pages: transmission, normalized coherence and phase per baseline and output.
 
     Trace plots cover each output's P2VM wavelength interval only. Optional
     residual and OPD pages are included when saved in the P2VM product.
@@ -60,6 +65,19 @@ def save_calibration_plots(
             axes[1].axhline(0, color='gray', lw=.7)
         axes[1].set(xlabel='Accepted line x [pixel]', ylabel='Wavelength residual [nm]')
         _save(pdf, fig, 'Wavelength solution — all accepted line residuals', top=0.95)
+
+        fig, axes = plt.subplots(2, 3)
+        for b, (ax, pair) in enumerate(zip(axes.flat, layout.baselines)):
+            t1, t2 = layout.baseline_pairs[b]
+            for o, label, color in zip(p2vm.baseline_outputs[b], layout.abcd_order, ABCD_COLORS):
+                ax.plot(wavelength, p2vm.transmission[o, t1], color=color, label=f'{label} T{pair[0]}')
+                ax.plot(wavelength, p2vm.transmission[o, t2], color=color, ls='--',
+                        label=f'{label} T{pair[1]}')
+            ax.set(title=f'S{pair[0]}–S{pair[1]}: T{pair[0]} solid, T{pair[1]} dashed',
+                   xlabel='Wavelength [nm]', ylabel='Transmission')
+        axes[0, 0].legend(fontsize=7, ncol=2)
+        _save(pdf, fig, 'P2VM transmission — share of each telescope in each output; for every '
+                        'telescope and wavelength the mean over the 24 outputs is 1', top=0.95)
 
         for quantity in ('coherence', 'phase'):
             fig, axes = plt.subplots(2, 3)
