@@ -1,8 +1,9 @@
-"""Product FITS files: writing, reading, extensions, QC cards and DICD provenance.
+"""Product FITS files: write and read, the product header, and extension helpers.
 
-Each step module describes its own extensions with column()/image_hdu() and calls
-save_product()/open_product(); everything shared between products is here.
-Floating data are stored as computed (float64/complex128). No CPL is used.
+Order: the file API (save_product, open_product, product_path); the primary
+header (provenance: inherited raw cards + DICD §4.7.1 PRO records); helpers that
+step modules use to describe their extensions. Floating data are stored as
+computed (float64/complex128). Keywords come from keywords.py. No CPL is used.
 """
 
 from contextlib import contextmanager
@@ -15,37 +16,63 @@ from astropy.io import fits as afits
 
 from planetes_pipe import __version__
 from planetes_pipe.instrument import DetectorSetup, layout
+from planetes_pipe.keywords import (
+    DATE,
+    DPR_TECH,
+    INHERIT,
+    INSTRUME,
+    PIPEFILE,
+    PRO_CAL_CATG,
+    PRO_CAL_NAME,
+    PRO_CATG,
+    PRO_DATANCOM,
+    PRO_DID,
+    PRO_DRS,
+    PRO_PARAM_NAME,
+    PRO_PARAM_VALUE,
+    PRO_PIPELINE,
+    PRO_RAW_CATG,
+    PRO_RAW_NAME,
+    PRO_RECIPE,
+    PRO_SCIENCE,
+    PRO_TECH,
+    PRO_TYPE,
+    sorted_by_category,
+)
 from planetes_pipe.raw import write_setup
 
 
 def save_product(path: Path, category: str, extensions: list, *, header=None,
                  qc: dict | None = None, setup: DetectorSetup | None = None) -> None:
-    """Write a product: primary header, QC, extensions and checksums. Existing files raise OSError.
+    """Write a product file; an existing file raises OSError.
 
-    header is a provenance() header or None. DPR keywords are removed; PRO
-    CATG/TYPE/SCIENCE, PIPEFILE and the detector setup are written.
+    header is a provenance() header, or None for a product made outside a recipe.
+    qc maps QC Keywords to measured values; None and non-finite values are omitted.
     """
-    hdr = afits.Header() if header is None else header.copy()
-    for key in list(hdr):
-        if key.startswith("ESO DPR "):
-            del hdr[key]
-    hdr["INSTRUME"] = "PLANETES"
-    hdr["HIERARCH ESO PRO CATG"] = category
-    hdr["HIERARCH ESO PRO TYPE"] = "REDUCED"
-    hdr["HIERARCH ESO PRO SCIENCE"] = category == "SINGLE_SCI_P2VMRED"
-    set_card(hdr, "PIPEFILE", Path(path).name, "Filename of data product")
+    primary = afits.Header() if header is None else header.copy()
+    INSTRUME.set(primary, "PLANETES")
+    PIPEFILE.set(primary, Path(path).name)
+    PRO_CATG.set(primary, category)
+    PRO_TYPE.set(primary, "REDUCED")
+    PRO_SCIENCE.set(primary, category == "SINGLE_SCI_P2VMRED")
+    PRO_DID.set(primary, "PRO-1.17")
     if setup is not None:
-        write_setup(hdr, setup)
-    write_qc(hdr, qc)
+        write_setup(primary, setup)
+    for keyword, value in (qc or {}).items():
+        if value is not None and np.isfinite(value):
+            keyword.set(primary, value)
+    for extension in extensions:
+        INHERIT.set(extension.header, True)
+    hdus = afits.HDUList([afits.PrimaryHDU(header=sorted_by_category(primary)), *extensions])
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    afits.HDUList([afits.PrimaryHDU(header=hdr), *extensions]).writeto(path, checksum=True)
+    hdus.writeto(path, checksum=True)
 
 
 @contextmanager
 def open_product(path: Path, category: str):
     """Open a product, checking that it is of the expected category."""
     with afits.open(path) as hdus:
-        if hdus[0].header.get("ESO PRO CATG") != category:
+        if PRO_CATG.get(hdus[0].header) != category:
             raise ValueError(f"Expected a {category} product: {path}")
         yield hdus
 
@@ -57,6 +84,90 @@ def product_path(output_dir, reference, category: str) -> Path:
     (timestamp or UNKNOWN marker); no time is invented.
     """
     return Path(output_dir) / f"{Path(reference).stem}_{category.lower().replace('_', '')}.fits"
+
+
+def provenance(recipe: str, reference, inputs: dict, **options) -> afits.Header:
+    """Header for the products of one step call: the reference raw's cards plus PRO records.
+
+    Parameters
+    ----------
+    recipe : str
+        Recipe identifier, e.g. 'planetes_dark'.
+    reference : path
+        Raw input whose observation cards the products inherit.
+    inputs : dict
+        SOF tag -> list of paths actually used. Raw and calibration files are
+        numbered separately (PRO.REC1.RAWi / CALi), reference raw first.
+    **options
+        Recipe options by Python keyword, recorded as PRO.REC1.PARAMi with the
+        command-line name (underscores become dashes).
+
+    Notes
+    -----
+    Follows DICD §4.7.1 and CPL DFS. save_product adds PRO.CATG/TYPE/SCIENCE/DID
+    and PIPEFILE; EsoRex adds DATAMD5 when it signs the products.
+    """
+    reference = Path(reference)
+    raw_header = afits.getheader(reference)
+    header = _inherited(raw_header)
+    DATE.set(header, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3])
+    PRO_TECH.set(header, DPR_TECH.get(raw_header, "UNDEFINED"))
+    PRO_RECIPE.set(header, recipe)
+    PRO_DRS.set(header, f"astropy-{astropy.__version__}")
+    PRO_PIPELINE.set(header, f"planetes-pipe/{__version__}")
+
+    used = sorted(((Path(path), tag) for tag, paths in inputs.items() for path in paths),
+                  key=lambda item: item[0] != reference)
+    raws = [(path, tag) for path, tag in used if is_raw(tag)]
+    calibrations = [(path, tag) for path, tag in used if not is_raw(tag)]
+    for n, (path, tag) in enumerate(raws, 1):
+        PRO_RAW_NAME.at(n).set(header, path.name)
+        PRO_RAW_CATG.at(n).set(header, tag)
+    PRO_DATANCOM.set(header, len(raws))
+    for n, (path, tag) in enumerate(calibrations, 1):
+        PRO_CAL_NAME.at(n).set(header, path.name)
+        PRO_CAL_CATG.at(n).set(header, tag)
+    for n, (name, value) in enumerate(options.items(), 1):
+        PRO_PARAM_NAME.at(n).set(header, name.replace("_", "-"))
+        PRO_PARAM_VALUE.at(n).set(header, _format(value))
+    return header
+
+
+# Raw primary cards a product does not inherit (as CPL DFS): structure, checksums,
+# file identity. DPR, PRO and non-ESO hierarchical cards are not inherited either.
+_NOT_INHERITED = {"SIMPLE", "BITPIX", "NAXIS", "EXTEND", "COMMENT", "HISTORY", "",
+                  "CHECKSUM", "DATASUM", "ARCFILE", "ORIGFILE", "DATAMD5", "PIPEFILE"}
+
+
+def _inherited(raw_header: afits.Header) -> afits.Header:
+    """The reference raw's observation cards, as a product header starts from."""
+    header = afits.Header()
+    for card in raw_header.cards:
+        key = card.keyword
+        if key in _NOT_INHERITED or key.startswith("NAXIS"):
+            continue
+        hierarchical = " " in key
+        if hierarchical and (not key.startswith("ESO ") or key.startswith(("ESO DPR ", "ESO PRO "))):
+            continue
+        header.append(card)
+    return header
+
+
+def is_raw(tag: str) -> bool:
+    """RAW (not calibration) input in the DICD and CPL frame-group sense."""
+    return tag.endswith("_RAW") or tag == "PHASE_REFERENCE"
+
+
+def _format(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return ",".join(f"{key}:{_format(gain)}" for key, gain in value.items())
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
 
 
 # numpy dtype (without byte order) -> FITS binary-table format letter.
@@ -112,106 +223,3 @@ def baseline_outputs(labels) -> dict[int, list[int]]:
     labels = list(labels)
     return {i: [labels.index(name + "-" + phase) for phase in layout.abcd_order]
             for i, name in enumerate(layout.baselines)}
-
-
-def write_qc(header, values: dict | None) -> None:
-    """Write {keyword: (value, comment)} from a product's qc(); unmeasured values are omitted."""
-    for key, (number, comment) in (values or {}).items():
-        if number is not None and np.isfinite(number):
-            set_card(header, key, number, comment)
-
-
-def set_card(header, key: str, value, comment: str = "") -> None:
-    """Set a card, trimming the comment so the card fits 80 columns untruncated."""
-    name = "HIERARCH " + key if " " in key or len(key) > 8 else key
-    header[name] = value
-    used = len(header.cards[name].image.rstrip())
-    room = 80 - used - 3
-    header[name] = (value, comment[:room] if room > 0 else "")
-
-
-def is_raw(tag: str) -> bool:
-    """RAW (not calibration) input in the DICD and CPL frame-group sense."""
-    return tag.endswith("_RAW") or tag == "PHASE_REFERENCE"
-
-
-PRO_DID = "PRO-1.17"
-
-
-# Removed from the inherited raw header, as CPL DFS does.
-_STRUCTURAL = {"SIMPLE", "BITPIX", "NAXIS", "EXTEND", "COMMENT", "HISTORY", ""}
-
-
-_REMOVED = {"CHECKSUM", "DATASUM", "ARCFILE", "ORIGFILE", "DATAMD5", "PIPEFILE"}
-
-
-def _format(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, dict):
-        return ",".join(f"{key}:{_format(gain)}" for key, gain in value.items())
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, float):
-        return f"{value:g}"
-    return str(value)
-
-
-def provenance(recipe: str, reference, inputs: dict, **options) -> afits.Header:
-    """Primary header for the products of one step call: inherited raw cards + PRO provenance.
-
-    Parameters
-    ----------
-    recipe : str
-        Recipe identifier, e.g. 'planetes_dark'.
-    reference : path
-        Raw input whose primary header is inherited (DPR and file identity removed).
-    inputs : dict
-        SOF tag -> list of paths actually used. Raw and calibration files are
-        numbered separately (PRO REC1 RAWi / CALi), reference raw first.
-    **options
-        Recipe options by Python keyword, recorded as PRO REC1 PARAMi with the
-        command-line name (underscores become dashes).
-
-    Notes
-    -----
-    The keywords follow CPL DFS. PRO CATG and PIPEFILE are added by save_product;
-    DATAMD5 is added when EsoRex signs the products.
-    """
-    reference = Path(reference)
-    source = afits.getheader(reference)
-    header = afits.Header()
-    for card in source.cards:
-        key = card.keyword
-        if key in _STRUCTURAL or key in _REMOVED or key.startswith("NAXIS"):
-            continue
-        if " " in key and (not key.startswith("ESO ") or key.startswith(("ESO DPR ", "ESO PRO "))):
-            continue
-        set_card(header, key, card.value, card.comment)
-    set_card(header, "DATE", datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S"),
-             "file creation date (YYYY-MM-DDThh:mm:ss UT)")
-    entries = [(Path(path), tag) for tag, paths in inputs.items() for path in paths]
-    entries.sort(key=lambda item: item[0] != reference)
-    raws = [(path, tag) for path, tag in entries if is_raw(tag)]
-    calibrations = [(path, tag) for path, tag in entries if not is_raw(tag)]
-    pro = [
-        ("DID", PRO_DID, "Data dictionary for PRO"),
-        ("TYPE", "REDUCED", "Product type"),
-        ("TECH", source.get("ESO DPR TECH", "UNDEFINED"), "Observation technique"),
-        ("REC1 ID", recipe, "Pipeline recipe (unique) identifier"),
-        ("REC1 DRS ID", f"astropy-{astropy.__version__}", "Data Reduction System identifier"),
-        ("REC1 PIPE ID", f"planetes-pipe/{__version__}", "Pipeline (unique) identifier"),
-    ]
-    for n, (path, tag) in enumerate(raws, 1):
-        pro += [(f"REC1 RAW{n} NAME", path.name, "File name of raw frame"),
-                (f"REC1 RAW{n} CATG", tag, "Category of raw frame")]
-    pro.append(("DATANCOM", len(raws), "Number of combined frames"))
-    for n, (path, tag) in enumerate(calibrations, 1):
-        pro += [(f"REC1 CAL{n} NAME", path.name, "File name of calibration frame"),
-                (f"REC1 CAL{n} CATG", tag, "Category of calibration frame")]
-    for n, (name, value) in enumerate(options.items(), 1):
-        pro += [(f"REC1 PARAM{n} NAME", name.replace("_", "-"), ""),
-                (f"REC1 PARAM{n} VALUE", _format(value), "")]
-    for key, value, comment in pro:
-        set_card(header, f"ESO PRO {key}", value, comment)
-    return header

@@ -47,8 +47,9 @@
 
 - 文件入口明确给出raw类别；标准HDU作为默认值，非标准数据显式指定hdu。
   不自动搜索图像或从缺失信息推测身份。
-- QC 由产品模块的 `qc()` 计算，返回 `{keyword: (value, comment)}`，`write_<x>()`
-  写出时调用。每个输出独立完成写出，不为成组文件增加事务、回滚或状态管理。
+- FITS keyword 只通过 `Keyword` 对象读写（`DIT.get(header)`、`DIT.set(header, v)`），
+  名称、单位和注释只定义一次；代码里不出现 `"HIERARCH ESO ..."` 字符串。QC keyword
+  定义在产品模块的 `qc()` 旁，`qc()` 返回 `{Keyword: value}`，`write_<x>()` 写出时调用。每个输出独立完成写出，不为成组文件增加事务、回滚或状态管理。
 
 ## 命名
 

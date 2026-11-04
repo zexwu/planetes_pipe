@@ -15,6 +15,7 @@ from fixtures import input_rows, metadata, write_raw, write_recipe_inputs
 import planetes_pipe
 from planetes_pipe.dark import read_bad, read_dark, write_dark
 from planetes_pipe.flat import read_flat
+from planetes_pipe.keywords import DPR_TECH
 from planetes_pipe.p2vm import read_p2vm
 from planetes_pipe.raw import read_raw
 from planetes_pipe.science import read_reduced, reduce_science
@@ -193,7 +194,7 @@ class ESOChainTests(unittest.TestCase):
             inputs = write_recipe_inputs(root / "inputs")
             for path in inputs["P2VM_RAW"]:
                 with fits.open(path, mode="update") as hdus:
-                    hdus[0].header["HIERARCH ESO DPR TECH"] = "INTERFEROMETRY"
+                    DPR_TECH.set(hdus[0].header, "INTERFEROMETRY")
                     hdus[0].add_checksum()
             sof = root / "p2vm.sof"
             sof.write_text("".join(f"{p} {tag}\n" for tag, p in input_rows(inputs)))

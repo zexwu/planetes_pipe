@@ -19,6 +19,7 @@ from planetes_pipe import log, products
 from planetes_pipe.dark import Dark, read_dark
 from planetes_pipe.flat import Flat, extract_sparse_spectra, read_flat
 from planetes_pipe.instrument import layout
+from planetes_pipe.keywords import Keyword
 from planetes_pipe.raw import Raw, check_calibrations, read_raw
 
 
@@ -602,7 +603,13 @@ def _grid_search_kernel(
 
 
 
-def qc(product: Wave) -> dict:
+QC_WAVE_MIN = Keyword("QC.MINWAVE.SC", "Shortest wavelength covered by every output", "m")
+QC_WAVE_MAX = Keyword("QC.MAXWAVE.SC", "Longest wavelength covered by every output", "m")
+QC_WAVE_RMS = Keyword("QC.RMSWAVE.SC", "Sample stdev of accepted lamp fit residuals", "m")
+QC_WAVE_LINES = Keyword("QC.NWAVE.SC", "Number of accepted lamp fit residuals")
+
+
+def qc(product: Wave) -> dict[Keyword, float | None]:
     """Common wavelength coverage and lamp-residual sample stdev (ddof=1), metres."""
     residual = product.fit_residual_m
     n = 0 if residual is None else residual.size
@@ -610,10 +617,10 @@ def qc(product: Wave) -> dict:
     high = float(np.min(np.max(product.wavelength_map_m, axis=1)))
     std = float(np.std(residual, ddof=1)) if n >= 2 else None
     return {
-        "ESO QC MINWAVE SC": (low, "[m] Shortest wavelength covered by every output"),
-        "ESO QC MAXWAVE SC": (high, "[m] Longest wavelength covered by every output"),
-        "ESO QC RMSWAVE SC": (std, "[m] Sample stdev of accepted lamp fit residuals"),
-        "ESO QC NWAVE SC": (n, "Number of accepted lamp fit residuals"),
+        QC_WAVE_MIN: low,
+        QC_WAVE_MAX: high,
+        QC_WAVE_RMS: std,
+        QC_WAVE_LINES: n,
     }
 
 

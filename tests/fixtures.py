@@ -9,6 +9,7 @@ from astropy.io import fits
 from planetes_pipe.dark import Bad, Dark, write_bad, write_dark
 from planetes_pipe.flat import Flat, write_flat
 from planetes_pipe.instrument import DetectorSetup, layout
+from planetes_pipe.keywords import DPR_TYPE, INSTRUME
 from planetes_pipe.p2vm import P2VM, P2VMSpectra, write_p2vm
 from planetes_pipe.raw import RAW_TYPES, write_setup, write_shutters
 from planetes_pipe.science import P2VMRed, write_reduced
@@ -104,12 +105,9 @@ def metadata(category, active=(), n_wave=151, height=24):
 def write_raw(path: Path, cube, physical: RawMetadata):
     """Write only the known physical cards needed by these synthetic fixtures."""
     header = fits.Header()
-    header["INSTRUME"] = "PLANETES"
-    header["HIERARCH ESO DPR TYPE"] = RAW_TYPES[physical.category]
-    header["HIERARCH ESO DET WIN1 DIT1"] = physical.setup.exposure_s
-    header["HIERARCH ESO DET ID"] = physical.setup.detector
+    INSTRUME.set(header, "PLANETES")
+    DPR_TYPE.set(header, RAW_TYPES[physical.category])
     write_setup(header, physical.setup)
-    header["HIERARCH ESO DET WIN1 DIT1"] = (physical.setup.exposure_s, "")
     write_shutters(header, physical.shutters)
     image = fits.ImageHDU(cube, name="IMAGING_DATA_SC")
     image.header["BUNIT"] = "adu"

@@ -50,21 +50,27 @@ e.g. `PLANETES.2026-02-05T210609_singlescip2vmred.fits`. The reference is DARK_R
 WAVELAMP_RAW or SINGLE_SCI_RAW, the T4 flat for FLAT, and the 43 scan for P2VM.
 Existing files are never overwritten (`OSError`).
 
-The primary header (`products.provenance`, `products.save_product`) contains:
+Every keyword is a `Keyword` in ESO's short form (`DET.WIN1.DIT1` is the card
+`HIERARCH ESO DET WIN1 DIT1`) with its comment and unit, as in an ESO dictionary
+(DICD ESO-044156 §7.3). Cards are written as `value / [unit] comment`, shortened to
+one 80-column card. The primary header (`products.provenance`, `save_product`) holds:
 
-- the reference raw's cards, without DPR and file-identity cards;
-- `ESO PRO CATG/TYPE/TECH/SCIENCE/DID`, `ESO PRO REC1 ID/DRS ID/PIPE ID`,
-  `ESO PRO REC1 RAWi NAME/CATG`, `CALi NAME/CATG`, `PARAMi NAME/VALUE`,
-  `ESO PRO DATANCOM`, `PIPEFILE`, as CPL DFS writes them;
-- the detector setup (`ESO DET ...`) for DARK and FLAT;
+- the reference raw's cards, without structural, checksum, file-identity, DPR and
+  non-ESO hierarchical cards (as CPL DFS);
+- the DICD §4.7.1 keywords: `PIPEFILE`, `PRO.CATG/TYPE/TECH/SCIENCE/DID`,
+  `PRO.REC1.ID/DRS.ID/PIPE.ID`, `PRO.REC1.RAWi.NAME/CATG`, `CALi.NAME/CATG`,
+  `PARAMi.NAME/VALUE`, `PRO.DATANCOM`; `DATE` as `YYYY-MM-DDThh:mm:ss.sss` (§4.5);
+- the detector setup (`DET...`) for DARK and FLAT;
 - QC (below).
 
-PyEsoRex additionally signs each product (`DATAMD5`). Every HDU has CHECKSUM/DATASUM.
+Cards are ordered primary first, then by category DPR, OBS, TPL, GEN, TEL, ADA,
+INS, DET, then PRO and QC (§3.1.1.3). Extensions carry `INHERIT = T`. PyEsoRex
+additionally signs each product (`DATAMD5`). Every HDU has CHECKSUM/DATASUM.
 
 ## QC
 
-Each module's `qc(product)` returns `{keyword: (value, comment)}` and
-`write_<product>()` writes it.
+QC keywords are defined beside each module's `qc(product)`, which returns
+`{Keyword: value}`; `write_<product>()` writes them.
 Values that could not be measured are omitted. QC is descriptive: it never
 changes masks, weights or fits. Definitions follow GRAVITY 1.9.6
 (`gravi_calib.c`, `gravi_wave.c`, `gravi_p2vm.c`); they are not yet agreed with ESO.

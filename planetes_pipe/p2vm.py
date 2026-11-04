@@ -25,6 +25,7 @@ from planetes_pipe.extraction import (
 )
 from planetes_pipe.flat import Flat, read_flat
 from planetes_pipe.instrument import layout
+from planetes_pipe.keywords import Keyword
 from planetes_pipe.raw import Raw, check_calibrations, read_raw, read_raws
 from planetes_pipe.wave import Wave, read_wave
 
@@ -792,7 +793,10 @@ def unwrap_scan_phase(phase_rad: NDArray, scan_opd_m: NDArray, wavelength_m: NDA
     return corrected + phase_rad[anchor]
 
 
-def qc(product: P2VM) -> dict:
+QC_COHERENCE = Keyword("QC.P2VM_COHERENCE_SC{0}", "Mean normalized coherence, baseline {0}")
+
+
+def qc(product: P2VM) -> dict[Keyword, float]:
     """Mean coherence normalized by the two beams, per baseline; the fit is unchanged."""
     values = {}
     for baseline, outputs in product.baseline_outputs.items():
@@ -802,8 +806,8 @@ def qc(product: P2VM) -> dict:
         if (first > 0).all() and (second > 0).all():
             ratio = (product.coherence_amplitude[outputs, baseline, :]
                      / np.sqrt(first) / np.sqrt(second) / 2)
-            key = f"ESO QC P2VM_COHERENCE_SC{layout.baselines[baseline]}"
-            values[key] = (float(ratio.mean()), "Mean normalized coherence")
+            name = layout.baselines[baseline]
+            values[QC_COHERENCE.at(name)] = float(ratio.mean())
     return values
 
 

@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 
 from planetes_pipe import products
 from planetes_pipe.instrument import DetectorSetup
+from planetes_pipe.keywords import NFRAMES, Keyword
 from planetes_pipe.raw import Raw, read_raw, read_setup
 
 
@@ -179,21 +180,26 @@ def measure_dark(chunks: Iterable[NDArray]) -> Dark:
     return Dark(mean, rms if count >= 2 else None, count)
 
 
-def qc(product: Dark | Bad) -> dict:
-    """DARK median mean/temporal RMS in ADU, or BAD flag counts."""
+QC_DARK_MEDIAN = Keyword("QC.MEDIANDARK.SC", "Spatial median of the temporal mean", "adu")
+QC_DARK_RMS = Keyword("QC.DARKRMS.SC", "Spatial median of the temporal RMS", "adu")
+QC_BAD = Keyword("QC.BADPIX.SC", "Number of flagged pixels")
+QC_BAD_DARK = Keyword("QC.BADPIX_DARK.SC", "Number of hot or dead pixels")
+QC_BAD_NOISY = Keyword("QC.BADPIX_RMS.SC", "Number of noisy pixels")
+
+
+def qc(product: Dark | Bad) -> dict[Keyword, float | None]:
+    """DARK: medians of the temporal mean and RMS. BAD: flagged pixel counts."""
     if isinstance(product, Dark):
         rms = product.temporal_rms_adu
         return {
-            "ESO QC MEDIANDARK SC": (float(np.median(product.mean_adu)),
-                                     "[ADU] Spatial median of temporal mean"),
-            "ESO QC DARKRMS SC": (None if rms is None else float(np.median(rms)),
-                                  "[ADU] Spatial median of temporal population RMS"),
+            QC_DARK_MEDIAN: float(np.median(product.mean_adu)),
+            QC_DARK_RMS: float(np.median(rms)) if rms is not None else None,
         }
     flags = product.bad_pixel_flags
     return {
-        "ESO QC BADPIX SC": (int(np.count_nonzero(flags)), "Number of flagged pixels"),
-        "ESO QC BADPIX_DARK SC": (int(np.count_nonzero(flags & 3)), "Number hot or dead"),
-        "ESO QC BADPIX_RMS SC": (int(np.count_nonzero(flags & 4)), "Number noisy"),
+        QC_BAD: int(np.count_nonzero(flags)),
+        QC_BAD_DARK: int(np.count_nonzero(flags & 3)),
+        QC_BAD_NOISY: int(np.count_nonzero(flags & 4)),
     }
 
 
@@ -207,7 +213,7 @@ def write_dark(path: Path, product: Dark, *, header=None) -> None:
     ):
         raise ValueError("Saved DARK requires measured RMS and at least two frames")
     header = Header() if header is None else header.copy()
-    header["NFRAMES"] = product.n_frames
+    NFRAMES.set(header, product.n_frames)
     products.save_product(path, "DARK", [
         products.image_hdu("IMAGING_DATA_SC", product.mean_adu, "adu"),
         products.image_hdu("IMAGING_ERR_SC", product.temporal_rms_adu, "adu"),
@@ -220,7 +226,7 @@ def read_dark(path: Path) -> Dark:
         return Dark(
             mean_adu=products.read_image(hdus, "IMAGING_DATA_SC"),
             temporal_rms_adu=products.read_image(hdus, "IMAGING_ERR_SC"),
-            n_frames=hdus[0].header["NFRAMES"],
+            n_frames=NFRAMES.get(hdus[0].header),
             setup=read_setup(hdus[0].header),
         )
 

@@ -17,6 +17,7 @@ from scipy.signal import find_peaks, medfilt
 from planetes_pipe import log, products
 from planetes_pipe.dark import Bad, Dark, read_bad, read_dark
 from planetes_pipe.instrument import DetectorSetup, check_setup, layout
+from planetes_pipe.keywords import Keyword
 from planetes_pipe.raw import Raw, check_calibrations, read_raws, read_setup
 
 
@@ -500,12 +501,15 @@ def fit_gaussian(x, y, p0, max_iter=6):
 
 
 
-def qc(product: Flat) -> dict:
-    """Mean-frame total flux per telescope in ADU/DIT, T4,T3,T2,T1."""
+QC_FLUX = Keyword("QC.FLATFLUX.SC{0}", "Total flux per DIT, T{1}", "adu")
+
+
+def qc(product: Flat) -> dict[Keyword, float]:
+    """Total flux of each dark-subtracted mean flat per DIT, in T4,T3,T2,T1 order."""
     if product.telescope_flux_adu is None:
         return {}
-    return {f"ESO QC FLATFLUX SC{i}": (float(flux), f"[ADU/DIT] Mean-frame total flux, T{t}")
-            for i, (t, flux) in enumerate(zip(layout.telescopes, product.telescope_flux_adu), 1)}
+    fluxes = zip(layout.telescopes, product.telescope_flux_adu)
+    return {QC_FLUX.at(i, telescope): float(flux) for i, (telescope, flux) in enumerate(fluxes, 1)}
 
 
 def to_fits_pixels(values):

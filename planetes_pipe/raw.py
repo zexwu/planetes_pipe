@@ -9,7 +9,7 @@ the bench when it writes raw files.
 """
 
 from collections.abc import Iterator
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +17,20 @@ from astropy.io import fits as afits
 from numpy.typing import NDArray
 
 from planetes_pipe.instrument import DetectorSetup, check_setup, shutter_identity
+from planetes_pipe.keywords import (
+    DET_ID,
+    DIT,
+    DPR_TYPE,
+    PRO_CATG,
+    SHUTTER,
+    UIT,
+    WIN_BINX,
+    WIN_BINY,
+    WIN_NX,
+    WIN_NY,
+    WIN_STRX,
+    WIN_STRY,
+)
 
 # Raw SOF tag -> ESO DPR TYPE of the raw file.
 RAW_TYPES = {
@@ -82,7 +96,7 @@ def read_raw(path: Path, category: str, *, hdu: int | str = "IMAGING_DATA_SC") -
     with afits.open(path, memmap=True) as hdus:
         header = hdus[0].header
         cube = hdus[hdu].data
-    setup = replace(read_setup(header) or DetectorSetup(), height=cube.shape[1], width=cube.shape[2])
+    setup = replace(read_setup(header), height=cube.shape[1], width=cube.shape[2])
     return Raw(cube, category, read_shutters(header), setup, Path(path))
 
 
@@ -104,10 +118,13 @@ def read_raws(paths, category: str, identities: tuple[str, ...], *,
 
 
 def find_raw(directory: Path, category: str) -> list[Path]:
-    """Raw files of one category in a directory, by ESO DPR TYPE (not filename)."""
-    return [path for path in sorted(Path(directory).glob("*.fits"))
-            if (header := afits.getheader(path)).get("ESO DPR TYPE") == RAW_TYPES[category]
-            and "ESO PRO CATG" not in header]
+    """Raw files of one category in a directory, by DPR.TYPE (never by filename)."""
+    found = []
+    for path in sorted(Path(directory).glob("*.fits")):
+        header = afits.getheader(path)
+        if DPR_TYPE.get(header) == RAW_TYPES[category] and PRO_CATG.get(header) is None:
+            found.append(path)
+    return found
 
 
 def check_calibrations(raw: Raw, *, dark=None, flat=None) -> None:
@@ -118,52 +135,51 @@ def check_calibrations(raw: Raw, *, dark=None, flat=None) -> None:
         check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
 
 
-def read_setup(hdr) -> DetectorSetup | None:
-    """Decode detector setup; FITS origins are one-based, Python origins zero-based."""
-    x, y = hdr.get("ESO DET WIN1 STRX"), hdr.get("ESO DET WIN1 STRY")
-    setup = DetectorSetup(
-        origin_x=None if x is None else x - 1,
-        origin_y=None if y is None else y - 1,
-        width=hdr.get("ESO DET WIN1 NX"),
-        height=hdr.get("ESO DET WIN1 NY"),
-        binning_x=hdr.get("ESO DET WIN1 BINX"),
-        binning_y=hdr.get("ESO DET WIN1 BINY"),
-        exposure_s=hdr.get("ESO DET WIN1 DIT1", hdr.get("ESO DET WIN1 UIT1")),
-        detector=hdr.get("ESO DET ID"),
+def read_setup(header) -> DetectorSetup:
+    """Detector setup from the DET keywords; unknown fields stay None.
+
+    FITS window origins are one-based, Python origins zero-based.
+    """
+    x, y = WIN_STRX.get(header), WIN_STRY.get(header)
+    return DetectorSetup(
+        origin_x=x - 1 if x is not None else None,
+        origin_y=y - 1 if y is not None else None,
+        width=WIN_NX.get(header),
+        height=WIN_NY.get(header),
+        binning_x=WIN_BINX.get(header),
+        binning_y=WIN_BINY.get(header),
+        exposure_s=DIT.get(header, UIT.get(header)),
+        detector=DET_ID.get(header),
     )
-    return setup if any(getattr(setup, f.name) is not None for f in fields(setup)) else None
 
 
 def write_setup(header, setup: DetectorSetup) -> None:
-    """Write the known detector settings; ROI origins become one-based."""
-    origin_x = setup.origin_x + 1 if setup.origin_x is not None else None
-    origin_y = setup.origin_y + 1 if setup.origin_y is not None else None
-    cards = {
-        "ESO DET WIN1 STRX": origin_x,
-        "ESO DET WIN1 STRY": origin_y,
-        "ESO DET WIN1 NX": setup.width,
-        "ESO DET WIN1 NY": setup.height,
-        "ESO DET WIN1 BINX": setup.binning_x,
-        "ESO DET WIN1 BINY": setup.binning_y,
-        "ESO DET ID": setup.detector,
+    """Write the known detector settings; window origins become one-based."""
+    values = {
+        WIN_STRX: setup.origin_x + 1 if setup.origin_x is not None else None,
+        WIN_STRY: setup.origin_y + 1 if setup.origin_y is not None else None,
+        WIN_NX: setup.width,
+        WIN_NY: setup.height,
+        WIN_BINX: setup.binning_x,
+        WIN_BINY: setup.binning_y,
+        DET_ID: setup.detector,
+        DIT: setup.exposure_s,
     }
-    for key, value in cards.items():
+    for keyword, value in values.items():
         if value is not None:
-            header["HIERARCH " + key] = value
-    if setup.exposure_s is not None:
-        header["HIERARCH ESO DET WIN1 DIT1"] = (setup.exposure_s, "[s] Integration time")
+            keyword.set(header, value)
 
 
-def read_shutters(header):
-    """Shutter states in physical T1..T4 order.
+def read_shutters(header) -> tuple:
+    """Shutter states in physical T1..T4 order; None where not recorded.
 
-    Files written before 2026-11 use the non-ESO 'PLANETES INS SHUTn ST' names.
+    Files written before 2026-11 use the non-ESO names 'PLANETES INS SHUTn ST'.
     """
-    return tuple(header.get(f"ESO INS SHUT{n} ST", header.get(f"PLANETES INS SHUT{n} ST"))
+    return tuple(SHUTTER.at(n).get(header, header.get(f"PLANETES INS SHUT{n} ST"))
                  for n in range(1, 5))
 
 
 def write_shutters(header, shutters) -> None:
     """Write shutter states in physical T1..T4 order."""
     for n, state in enumerate(shutters, 1):
-        header[f"HIERARCH ESO INS SHUT{n} ST"] = state
+        SHUTTER.at(n).set(header, state)

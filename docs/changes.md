@@ -1,3 +1,15 @@
+# PLANETES 0.18.0：keyword 按 ESO 字典方式定义
+
+- 新增 `keywords.py`：每个 keyword 是一个 `Keyword`（ESO 简写名、注释、单位，对应
+  DICD §7.3 的字典条目），读写都通过它：`DIT.get(header)`、`DIT.set(header, value)`、
+  `SHUTTER.at(4)`。代码中不再拼写 `"HIERARCH ESO ..."` 字符串；同一个 keyword 的读写
+  不再分两处维护。QC keyword 定义在各步骤的 `qc()` 旁，`qc()` 返回 `{Keyword: value}`。
+- 删除 `set_card`、`write_qc`；`products.save_product` 写全部 DICD §4.7.1 PRO keyword，
+  `provenance` 只写继承卡片与 PRO.REC1 记录。
+- 按 DICD 调整：`DATE` 带毫秒（§4.5）；卡片按类别排序（§3.1.1.3）；扩展头写
+  `INHERIT = T`；DET 卡片都带单位注释；QC 单位改为 `adu`、`m`。
+- 数据与 QC 数值与 0.17.0 完全相同；只有 header 注释、顺序与上述卡片变化。
+
 # PLANETES 0.17.0：产品按 float64 原样存储
 
 - 产品不再降为 float32 存储：删除 `_storage_array` 与 `STORAGE_RTOL`，波长覆盖按精确值检查；

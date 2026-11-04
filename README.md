@@ -43,6 +43,7 @@ planetes_pipe/
   extraction.py     algorithms shared by WAVE, P2VM and science: spectral
                     extraction and resampling, group delay
   instrument.py     channel order, DetectorSetup, shutter identity
+  keywords.py       every FITS keyword, defined once with unit and comment (ESO dictionary style)
   raw.py            raw data: the Raw cube, reading raw files, DET/shutter headers
   products.py       product FITS: write/read, extensions, QC cards, provenance header
   plots.py          diagnostic PDF reports
@@ -88,8 +89,10 @@ not final calibrated OIFITS.
 
 ## Adding to the pipeline
 
-- **A QC keyword**: return it from the product's `qc()` as `(value, comment)`;
-  `tests/test_headers.py` checks that every product header is valid FITS.
+- **A keyword**: define it once as a `Keyword` (ESO short name, comment, unit) and
+  read or write it only through that object: `DIT.get(header)`, `DIT.set(header, 1.0)`.
+  QC keywords sit beside the step's `qc()`, which returns `{Keyword: value}`;
+  others go in `keywords.py`. `tests/test_headers.py` checks every product header.
 - **A product or step**: a new module following `dark.py`, a `tests/test_<module>.py`,
   and a recipe class in `eso/recipes.py`.
 - **A shared algorithm**: keep it in its step module until a second step needs it,

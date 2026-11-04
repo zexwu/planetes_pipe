@@ -14,7 +14,15 @@ from fixtures import (
 )
 
 from planetes_pipe import raw as raw_module
-from planetes_pipe.dark import Dark, detect_bad_pixels, measure_dark, qc, write_dark
+from planetes_pipe.dark import (
+    QC_DARK_MEDIAN,
+    QC_DARK_RMS,
+    Dark,
+    detect_bad_pixels,
+    measure_dark,
+    qc,
+    write_dark,
+)
 from planetes_pipe.instrument import DetectorSetup
 from planetes_pipe.raw import find_raw, read_raw
 
@@ -76,8 +84,8 @@ class RawTests(unittest.TestCase):
                 self.assertEqual(dark.n_frames, count)
                 self.assertIsNone(dark.temporal_rms_adu)
                 quality = qc(dark)
-                self.assertEqual(quality["ESO QC MEDIANDARK SC"][0], np.median(cube[0]))
-                self.assertIsNone(quality["ESO QC DARKRMS SC"][0])
+                self.assertEqual(quality[QC_DARK_MEDIAN], np.median(cube[0]))
+                self.assertIsNone(quality[QC_DARK_RMS])
                 with self.assertRaisesRegex(ValueError, "temporal RMS"):
                     detect_bad_pixels(dark)
                 with self.assertRaisesRegex(ValueError, "Saved DARK"):
