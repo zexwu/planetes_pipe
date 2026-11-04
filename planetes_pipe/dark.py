@@ -16,6 +16,7 @@ from numpy.typing import NDArray
 from planetes_pipe import files
 from planetes_pipe.instrument import DetectorSetup, Raw
 
+
 @dataclass(slots=True)
 class Dark:
     """Dark image in ADU; temporal statistics are None when not measured."""
@@ -182,14 +183,16 @@ def qc(product: Dark | Bad) -> dict:
     if isinstance(product, Dark):
         rms = product.temporal_rms_adu
         return {
-            "ESO QC MEDIANDARK SC": float(np.median(product.mean_adu)),
-            "ESO QC DARKRMS SC": None if rms is None else float(np.median(rms)),
+            "ESO QC MEDIANDARK SC": (float(np.median(product.mean_adu)),
+                                     "[ADU] Spatial median of temporal mean"),
+            "ESO QC DARKRMS SC": (None if rms is None else float(np.median(rms)),
+                                  "[ADU] Spatial median of temporal population RMS"),
         }
     flags = product.bad_pixel_flags
     return {
-        "ESO QC BADPIX SC": int(np.count_nonzero(flags)),
-        "ESO QC BADPIX_DARK SC": int(np.count_nonzero(flags & 3)),
-        "ESO QC BADPIX_RMS SC": int(np.count_nonzero(flags & 4)),
+        "ESO QC BADPIX SC": (int(np.count_nonzero(flags)), "Number of flagged pixels"),
+        "ESO QC BADPIX_DARK SC": (int(np.count_nonzero(flags & 3)), "Number hot or dead"),
+        "ESO QC BADPIX_RMS SC": (int(np.count_nonzero(flags & 4)), "Number noisy"),
     }
 
 

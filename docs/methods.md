@@ -90,7 +90,7 @@ The resulting P2VMSpectra stays in memory, without a preprocessing file.
 The main dark applies to telescope and baseline cubes. A phase reference has
 its independently selected dark, or uses the main dark when none is supplied.
 
-## P2VM (`p2vm/`: step in `__init__.py`, matrix fit in `fit.py`)
+## P2VM (`p2vm.py`)
 
 
 `fit_p2vm` reads as five stages: scan response fitting, photometric transmission,
@@ -162,7 +162,7 @@ a failure policy for other data: an all-zero scan still returns zero phase/radiu
 through the old fallbacks. Deciding which channels to reject is a separate
 scientific change requiring an explicit criterion.
 
-## Instrumental science and live frames (`reduce.py`)
+## Instrumental science and live frames (`science.py`)
 
 Apply P2VM to extracted spectra to obtain four photometric channels and six
 complex coherent channels. Use the retained visibility normalization and

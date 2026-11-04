@@ -3,7 +3,7 @@ from pathlib import Path
 
 from astropy.io import fits
 
-from planetes_pipe import reduce
+from planetes_pipe import science
 from planetes_pipe.files import read_raw
 
 SCIENCE = Path("/path/to/science.fits")
@@ -24,7 +24,7 @@ def main():
     if exposure is None:
         raise ValueError("Select a dark explicitly when science exposure is unknown")
     # The step also checks detector/ROI compatibility before subtracting the dark.
-    reduced = reduce.run(
+    reduced = science.run(
         SCIENCE,
         product("DARK", **{"ESO DET WIN1 DIT1": exposure}),
         product("FLAT"),

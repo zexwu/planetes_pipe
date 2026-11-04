@@ -1,4 +1,4 @@
-"""reduce.py: visibility normalization and P2VMRED storage precision."""
+"""science.py: visibility normalization and P2VMRED storage precision."""
 
 
 import tempfile
@@ -11,7 +11,7 @@ from fixtures import calibration_arrays, calibration_spectra
 
 from planetes_pipe.flat import Flat, read_flat
 from planetes_pipe.p2vm import P2VM, fit_p2vm, read_p2vm
-from planetes_pipe.reduce import (
+from planetes_pipe.science import (
     normalize_coherent_flux,
     read_reduced,
     reduce_spectra,

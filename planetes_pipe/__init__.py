@@ -1,4 +1,4 @@
-"""PLANETES reduction: one module per step (dark, flat, wave, p2vm, reduce).
+"""PLANETES reduction: one module per step (dark, flat, wave, p2vm, science).
 
 Each step module holds its product, algorithm, QC, FITS layout and run()
 entry point; the optional PyEsoRex recipes in eso/ call those run() functions.

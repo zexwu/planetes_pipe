@@ -1,11 +1,11 @@
-"""extraction.py / kernels.py: sparse spectral extraction."""
+"""extraction.py and flat.extract_sparse_spectra: sparse spectral extraction."""
 
 
 import unittest
 
 import numpy as np
 
-from planetes_pipe.kernels import extract_sparse_spectra
+from planetes_pipe.flat import extract_sparse_spectra
 
 
 class ExtractionTests(unittest.TestCase):

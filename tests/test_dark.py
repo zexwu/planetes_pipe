@@ -71,7 +71,7 @@ class DarkTests(unittest.TestCase):
             self.assertEqual(header["ESO PRO REC1 RAW1 NAME"], source.name)
             self.assertEqual(header["ESO PRO REC1 RAW1 CATG"], "DARK_RAW")
             self.assertEqual(header["ESO PRO DATANCOM"], 1)
-            self.assertEqual(header["ESO PRO REC1 PARAM1 NAME"], "bad-dark-threshold")
+            self.assertEqual(header["ESO PRO REC1 PARAM1 NAME"], "bad-pixel-threshold")
             self.assertEqual(header["ESO PRO REC1 PARAM1 VALUE"], "4")
             self.assertEqual(header["PIPEFILE"], written["DARK"].name)
             self.assertNotIn("ESO DPR TYPE", header)

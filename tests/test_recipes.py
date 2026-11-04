@@ -17,7 +17,7 @@ from planetes_pipe.dark import read_bad, read_dark, write_dark
 from planetes_pipe.files import read_raw
 from planetes_pipe.flat import read_flat
 from planetes_pipe.p2vm import read_p2vm
-from planetes_pipe.reduce import read_reduced, reduce_science
+from planetes_pipe.science import read_reduced, reduce_science
 from planetes_pipe.wave import read_wave
 
 

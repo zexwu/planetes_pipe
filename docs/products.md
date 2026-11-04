@@ -17,8 +17,8 @@ References: [GRAVITY product codes](https://www.eso.org/observing/dfo/quality/GR
 | `dark.py` | `Bad` | BAD | `IMAGING_DATA_SC` bit flags: hot 1, dead 2, noisy 4 |
 | `flat.py` | `Flat` | FLAT | `IMAGING_DETECTOR_SC`, `PLANETES_FLAT_IMAGE`, `PROFILE_PARAMS`, `PLANETES_PROFILE`, optional `PLANETES_FLAT_FLUX` |
 | `wave.py` | `Wave` | WAVE | `WAVE_DATA_SC` wavelength per output and x [m]; optional `PLANETES_WAVE_FIT` |
-| `p2vm/` | `P2VM` | P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC`, `PLANETES_P2VM_INVERSE`; optional scan diagnostics |
-| `reduce.py` | `P2VMRed` | SINGLE_SCI_P2VMRED | `PLANETES_FLUX`, `PLANETES_VIS`: per-frame flux, coherent flux, VISAMP, flags, GD [m], differential phase [deg] |
+| `p2vm.py` | `P2VM` | P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC`, `PLANETES_P2VM_INVERSE`; optional scan diagnostics |
+| `science.py` | `P2VMRed` | SINGLE_SCI_P2VMRED | `PLANETES_FLUX`, `PLANETES_VIS`: per-frame flux, coherent flux, VISAMP, flags, GD [m], differential phase [deg] |
 
 `P2VMSpectra` (P2VM fit input) and `FrameReducer` (live reduction state) are
 in-memory only. A `P2VMRed` from the live preview has no GD/phase and cannot be saved.
@@ -39,7 +39,7 @@ in-memory only. A `P2VMRed` from the live preview has no GD/phase and cannot be 
 `files.read_raw(path, category, hdu="IMAGING_DATA_SC")` returns `Raw`: the
 memory-mapped cube as stored, the four shutter states and the `DetectorSetup`
 (DIT, ROI, binning, detector id). Missing header fields stay `None`. Raw tags
-map to `ESO DPR TYPE` in `keywords.RAW_TYPES`. Shutters are `ESO INS SHUTn ST`;
+map to `ESO DPR TYPE` in `files.RAW_TYPES`. Shutters are `ESO INS SHUTn ST`;
 files written before 2026-11 use `PLANETES INS SHUTn ST`, which is still read.
 FLAT and P2VM raw lists may be in any order: physical identity comes from shutters.
 
@@ -63,8 +63,8 @@ PyEsoRex additionally signs each product (`DATAMD5`). Every HDU has CHECKSUM/DAT
 
 ## QC
 
-QC keywords are declared with unit and description in `keywords.QC`; each module's
-`qc(product)` returns `{keyword: value}` and `write_<product>()` writes it.
+Each module's `qc(product)` returns `{keyword: (value, comment)}` and
+`write_<product>()` writes it.
 Values that could not be measured are omitted. QC is descriptive: it never
 changes masks, weights or fits. Definitions follow GRAVITY 1.9.6
 (`gravi_calib.c`, `gravi_wave.c`, `gravi_p2vm.c`); they are not yet agreed with ESO.
@@ -82,10 +82,13 @@ P2VMRED has no QC yet.
 
 ## Recipe options
 
+The CPL parameter is the Python keyword with dashes, under `planetes.calib` or
+`planetes.reduce`. Help texts are in `eso/recipes.py`.
+
 | Python keyword | CPL parameter | Default |
 | --- | --- | --- |
-| `bad_pixel_threshold` | planetes.calib.bad-dark-threshold | 5.0 |
-| `aperture_width_pixels` | planetes.calib.profile-width | 10.0 (full aperture, pixels) |
+| `bad_pixel_threshold` | planetes.calib.bad-pixel-threshold | 5.0 |
+| `aperture_width_pixels` | planetes.calib.aperture-width-pixels | 10.0 (full aperture, pixels) |
 | `metrology_trace` | planetes.calib.metrology-trace | false |
 | `keep_diagnostics` | planetes.calib.keep-diagnostics | false |
 | `gd_search_min_m` / `max_m` (P2VM) | planetes.calib.gd-search-min-m / -max-m | −30e-6 / 30e-6 m |
@@ -101,7 +104,6 @@ Only mistakes a user or the data can make are checked:
 
 - a calibration whose known DIT, ROI, binning or detector differs from the raw;
 - missing or duplicate shutter configurations in FLAT/P2VM inputs;
-- ambiguous calibration selection in `association.py`;
 - detector-shape mismatches between raw, DARK, BAD, FLAT and WAVE;
 - wavelength coverage and sparse pixel bounds before the numba kernels;
 - rank-deficient P2VM matrices and failed wavelength fits;

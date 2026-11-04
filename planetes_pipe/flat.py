@@ -8,15 +8,22 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
+from numba import njit, prange
 from numpy.typing import NDArray
 from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, medfilt
 
 from planetes_pipe import files, log
 from planetes_pipe.dark import Bad, Dark, read_bad, read_dark
-from planetes_pipe.instrument import (DetectorSetup, Raw, check_setup, layout, order_raws,
-                                      shutter_identity)
-from planetes_pipe.kernels import fit_gaussian
+from planetes_pipe.instrument import (
+    DetectorSetup,
+    Raw,
+    check_setup,
+    layout,
+    order_raws,
+    shutter_identity,
+)
+
 
 @dataclass(slots=True)
 class Flat:
@@ -332,13 +339,176 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
 
     return y_centers, y_errs, widths
 
+@njit(parallel=True, fastmath=True, cache=True)
+def extract_sparse_spectra(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
+    """Sum selected detector pixels into one spectrum per output and frame.
+
+    Parameters
+    ----------
+    cube : ndarray, shape (frame, y, x)
+        Detector samples in ADU, normally already dark-subtracted.
+    ys, xs : ndarray of int, shape (output, sample)
+        Zero-based spatial and dispersion pixel indices. Paired (-1, -1)
+        entries are skipped; all other indices must lie within the detector.
+
+    Returns
+    -------
+    spectra : ndarray, shape (output, frame, x)
+        Pixel sums in ADU. Columns without selected pixels contain zero.
+
+    Notes
+    -----
+    This Numba kernel does not check bounds. prepare_extraction checks geometry
+    for science/P2VM extraction; direct callers must provide valid pixel indices.
+    No weighting, flat correction or wavelength interpolation occurs here.
+    """
+    n_frame, _, nx = cube.shape
+    n_reg = len(ys)
+    output = np.zeros((n_reg, n_frame, nx))
+
+    for o in prange(n_reg):
+        y_idx = ys[o]
+        x_idx = xs[o]
+        for f in range(n_frame):
+            for i in range(len(y_idx)):
+                x = x_idx[i]
+                y = y_idx[i]
+                if x < 0 or y < 0:
+                    continue
+                output[o, f, x] += cube[f, y, x]
+    return output
+
+
+@njit(fastmath=True, cache=True)
+def gaussian(x, a, x0, sigma, c):
+    """Evaluate a Gaussian spatial profile plus a constant background.
+
+    Parameters
+    ----------
+    x : ndarray
+        Pixel coordinates at which to evaluate the profile.
+    a : float
+        Peak height above the background, in ADU.
+    x0, sigma : float
+        Center and Gaussian standard deviation, in pixels.
+    c : float
+        Constant background in ADU.
+
+    Returns
+    -------
+    profile : ndarray
+        ADU values at x, with the same shape as x.
+    """
+    return a * np.exp(-0.5 * ((x - x0) / sigma) ** 2) + c
+
+
+@njit(fastmath=True, cache=True)
+def gaussian_jacobian(x, a, x0, sigma):
+    """Evaluate profile derivatives in the fit's parameter order.
+
+    Parameters
+    ----------
+    x : ndarray
+        Spatial pixel coordinates.
+    a : float
+        Gaussian peak height above background, in ADU.
+    x0, sigma : float
+        Center and standard deviation in pixels.
+
+    Returns
+    -------
+    da, dx0, dsigma, dc : ndarray
+        Derivatives of the ADU model with respect to (a, x0, sigma, c).
+        Each array has the same shape as x.
+    """
+    dx = x - x0
+    inv_s2 = 1.0 / (sigma * sigma)
+    e = np.exp(-0.5 * dx * dx * inv_s2)
+
+    da = e
+    dx0 = a * e * dx * inv_s2
+    ds = a * e * dx * dx / sigma**3
+    dc = np.ones_like(x)
+
+    return da, dx0, ds, dc
+
+
+@njit(fastmath=True, cache=True)
+def fit_gaussian(x, y, p0, max_iter=6):
+    """Fit an unweighted Gaussian plus background to one spatial cross-section.
+
+    Parameters
+    ----------
+    x, y : ndarray, shape (sample,)
+        Pixel coordinates and corresponding ADU values, after bad-pixel removal.
+    p0 : ndarray, shape (4,)
+        Initial (amplitude_adu, center_pixel, sigma_pixel, background_adu).
+    max_iter : int, optional
+        Number of damped Gauss-Newton updates; default 6, with no convergence exit.
+
+    Returns
+    -------
+    parameters : ndarray, shape (4,)
+        Fitted values in the same order as p0; sigma is bounded below by 0.3 pixel.
+    center_error : float
+        Formal center error in pixels from residual-scaled normal equations.
+        A singular/nonfinite system returns p0 and an error sentinel of 1e8.
+
+    Notes
+    -----
+    The diagonal damping is fixed at 1e-3. The error estimate is a local fit
+    heuristic, not a propagated detector-noise uncertainty.
+    """
+
+    a, x0, sigma, c = p0
+    for _ in range(max_iter):
+        model = gaussian(x, a, x0, sigma, c)
+        r = y - model
+
+        da, dx0, ds, dc = gaussian_jacobian(x, a, x0, sigma)
+
+        # Normal equations J^T J dp = J^T r
+        JtJ = np.zeros((4, 4))
+        Jtr = np.zeros(4)
+
+        for i in range(x.size):
+            Ji = np.array([da[i], dx0[i], ds[i], dc[i]])
+            JtJ += np.outer(Ji, Ji)
+            Jtr += Ji * r[i]
+
+        # Damping for stability
+        for i in range(4):
+            JtJ[i, i] += 1e-3
+
+        det = np.linalg.det(JtJ)
+        if det == 0.0 or not np.isfinite(det):
+            return p0, 1e8
+        dp = np.linalg.solve(JtJ, Jtr)
+
+        a += dp[0]
+        x0 += dp[1]
+        sigma += dp[2]
+        c += dp[3]
+
+        # Hard constraints
+        if sigma < 0.3:
+            sigma = 0.3
+        # ---- Error estimate ----
+        dof = max(1, x.size - 4)
+        resid_var = np.sum(r * r) / dof
+        cov = np.linalg.inv(JtJ) * resid_var
+        x0_err = np.sqrt(cov[1, 1])
+
+    return np.array([a, x0, sigma, c]), x0_err
+
+
 
 def qc(product: Flat) -> dict:
     """Mean-frame total flux per telescope in ADU/DIT, T4,T3,T2,T1."""
     if product.telescope_flux_adu is None:
         return {}
-    return {f"ESO QC FLATFLUX SC{i}": float(flux)
-            for i, flux in enumerate(product.telescope_flux_adu, 1)}
+    return {f"ESO QC FLATFLUX SC{i}": (float(flux), f"[ADU/DIT] Mean-frame total flux, T{t}")
+            for i, (t, flux) in enumerate(zip(layout.telescopes, product.telescope_flux_adu), 1)}
 
 
 def write_flat(path: Path, product: Flat, *, header=None) -> None:

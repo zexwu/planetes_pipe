@@ -1,8 +1,7 @@
-"""File input and output shared by all products: raw cubes, headers, QC, provenance.
+"""FITS files: raw cubes, product read/write, QC cards and provenance.
 
-Each product module (dark, flat, wave, p2vm, reduce) only describes its own
-extensions; reading, checksums, QC cards, provenance and never-overwrite
-publication are done here. No CPL is used.
+Each product module (dark, flat, wave, p2vm, science) only describes its own
+extensions; everything else about files is here. No CPL is used.
 """
 
 from contextlib import contextmanager
@@ -16,7 +15,21 @@ from astropy.io import fits as afits
 
 from planetes_pipe import __version__
 from planetes_pipe.instrument import DetectorSetup, Raw, layout
-from planetes_pipe.keywords import PARAMETERS, QC, RAW_TYPES, is_raw
+
+# Raw SOF tag -> ESO DPR TYPE of the raw file.
+RAW_TYPES = {
+    "DARK_RAW": "DARK",
+    "FLAT_RAW": "FLAT",
+    "P2VM_RAW": "P2VM",
+    "WAVELAMP_RAW": "WAVE,LAMP",
+    "SINGLE_SCI_RAW": "OBJECT,SINGLE",
+}
+
+
+def is_raw(tag: str) -> bool:
+    """RAW (not calibration) input in the DICD and CPL frame-group sense."""
+    return tag.endswith("_RAW") or tag == "PHASE_REFERENCE"
+
 
 # Relative round-to-nearest error bound for the on-disk real component.
 STORAGE_RTOL = np.finfo(np.float32).eps / 2
@@ -242,12 +255,10 @@ def zero_based_pixels(values):
 
 
 def write_qc(header, values: dict | None) -> None:
-    """Write measured QC values; every keyword must be declared in keywords.QC."""
-    for key, number in (values or {}).items():
-        if number is None or not np.isfinite(number):
-            continue
-        unit, description = QC[key]
-        set_card(header, key, number, f"[{unit}] {description}" if unit else description)
+    """Write {keyword: (value, comment)} from a product's qc(); unmeasured values are omitted."""
+    for key, (number, comment) in (values or {}).items():
+        if number is not None and np.isfinite(number):
+            set_card(header, key, number, comment)
 
 
 def save_product(path: Path, category: str, extensions: list, *, header=None,
@@ -328,8 +339,8 @@ def provenance(recipe: str, reference, inputs: dict, **options) -> afits.Header:
         SOF tag -> list of paths actually used. Raw and calibration files are
         numbered separately (PRO REC1 RAWi / CALi), reference raw first.
     **options
-        Recipe options by Python keyword (see keywords.PARAMETERS), recorded as
-        PRO REC1 PARAMi.
+        Recipe options by Python keyword, recorded as PRO REC1 PARAMi with the
+        command-line name (underscores become dashes).
 
     Notes
     -----
@@ -368,8 +379,7 @@ def provenance(recipe: str, reference, inputs: dict, **options) -> afits.Header:
         pro += [(f"REC1 CAL{n} NAME", path.name, "File name of calibration frame"),
                 (f"REC1 CAL{n} CATG", tag, "Category of calibration frame")]
     for n, (name, value) in enumerate(options.items(), 1):
-        option, description = PARAMETERS[name]
-        pro += [(f"REC1 PARAM{n} NAME", option, description),
+        pro += [(f"REC1 PARAM{n} NAME", name.replace("_", "-"), ""),
                 (f"REC1 PARAM{n} VALUE", _format(value), "")]
     for key, value, comment in pro:
         set_card(header, f"ESO PRO {key}", value, comment)

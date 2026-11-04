@@ -1,7 +1,7 @@
 """SINGLE_SCI_P2VMRED: per-frame instrumental fluxes, visibility, group delay and phase.
 
-    from planetes_pipe import reduce
-    out = reduce.run(science_raw, dark, flat, wave, p2vm, output_dir="science")
+    from planetes_pipe import science
+    out = science.run(science_raw, dark, flat, wave, p2vm, output_dir="science")
 """
 
 from dataclasses import dataclass, field
@@ -12,13 +12,18 @@ from numpy.typing import NDArray
 
 from planetes_pipe import files, log
 from planetes_pipe.dark import Dark, read_dark
-from planetes_pipe.extraction import (SpectralExtractor, estimate_group_delay, extract_spectra,
-                                      prepare_extraction)
+from planetes_pipe.extraction import (
+    SpectralExtractor,
+    estimate_group_delay,
+    extract_spectra,
+    prepare_extraction,
+)
 from planetes_pipe.files import as_compute_array
 from planetes_pipe.flat import Flat, read_flat
 from planetes_pipe.instrument import Raw, check_setup, layout
 from planetes_pipe.p2vm import P2VM, read_p2vm
 from planetes_pipe.wave import Wave, read_wave
+
 
 @dataclass(slots=True)
 class P2VMRed:

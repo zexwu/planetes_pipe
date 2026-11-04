@@ -142,8 +142,8 @@ class RawTests(unittest.TestCase):
                 self.assertEqual(dark.n_frames, count)
                 self.assertIsNone(dark.temporal_rms_adu)
                 quality = qc(dark)
-                self.assertEqual(quality["ESO QC MEDIANDARK SC"], np.median(cube[0]))
-                self.assertIsNone(quality["ESO QC DARKRMS SC"])
+                self.assertEqual(quality["ESO QC MEDIANDARK SC"][0], np.median(cube[0]))
+                self.assertIsNone(quality["ESO QC DARKRMS SC"][0])
                 with self.assertRaisesRegex(ValueError, "temporal RMS"):
                     detect_bad_pixels(dark)
                 with self.assertRaisesRegex(ValueError, "Saved DARK"):

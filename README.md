@@ -10,13 +10,13 @@ returning `{product category: path}`. It is the same code the PyEsoRex recipe
 `planetes_<step>` runs, and products carry the same DICD `PRO` provenance.
 
 ```python
-from planetes_pipe import dark, flat, wave, p2vm, reduce
+from planetes_pipe import dark, flat, wave, p2vm, science
 
 cal = dark.run("dark.fits", output_dir="cal")                  # {"DARK": ..., "BAD": ...}
 ff = flat.run(cal["DARK"], cal["BAD"], flat_raws, output_dir="cal")
 wl = wave.run("lamp.fits", lamp_dark, ff["FLAT"], output_dir="cal")
 pm = p2vm.run(cal["DARK"], ff["FLAT"], wl["WAVE"], flat_raws, scans, output_dir="cal")
-reduce.run("science.fits", sci_dark, ff["FLAT"], wl["WAVE"], pm["P2VM"], output_dir="sci")
+science.run("science.fits", sci_dark, ff["FLAT"], wl["WAVE"], pm["P2VM"], output_dir="sci")
 
 flat_product = flat.read_flat(ff["FLAT"])   # products in memory
 ```
@@ -28,33 +28,36 @@ uv run --locked python planetes_pipe/examples/reduce_calibrations.py
 uv run --locked python planetes_pipe/examples/reduce_science.py
 ```
 
-Calibration inputs are selected by FITS type, shutter state and exposure, not
-filename tags. Raw files are read only; existing products are never overwritten.
+FLAT and P2VM raw files may be given in any order: telescope and baseline identity
+come from the recorded shutters. Raw files are read only; existing products are
+never overwritten.
 The optional PyEsoRex route is described in [docs/eso](docs/eso/README.md).
 
 ## What is where
 
 ```
-planetes_pipe/            the package
-  dark.py flat.py wave.py reduce.py
-                          one per product, top to bottom: data class, algorithm,
-                          qc(), read_<x>/write_<x>, run()
-  p2vm/                   the same for P2VM; __init__.py is the step, fit.py the
-                          matrix fit (response, inverse, ellipse phases)
-  instrument.py           telescope/baseline/output order, DetectorSetup, Raw
-  keywords.py             every FITS keyword, raw tag, QC keyword and recipe option
-  files.py                raw reading (memory-mapped), product I/O, provenance header
-  extraction.py           spectral extraction and group delay shared by steps
-  kernels.py              all numba-compiled code
-  association.py          pick calibration files from a directory by header
-  plots/                  diagnostic PDF reports
-  eso/recipes.py          PyEsoRex recipes; the only file that imports CPL
-examples/                 two complete reduction scripts
-tests/                    test_<module>.py per package module; fixtures.py builds
-                          synthetic raw files; test_recipes.py runs PyEsoRex
-docs/                     methods.md (algorithms), products.md (FITS, QC, options),
-                          code_style.md, changes.md, architecture.svg, eso/ (SOF usage)
+planetes_pipe/
+  dark.py flat.py wave.py p2vm.py science.py
+                    the five steps; each, top to bottom: data class, algorithm
+                    (with its numba kernels), qc(), read_<x>/write_<x>, run()
+  extraction.py     algorithms shared by WAVE, P2VM and science: spectral
+                    extraction and resampling, group delay
+  instrument.py     data format: channel order, DetectorSetup, Raw cube
+  files.py          FITS: raw tags and raw reading, product read/write, QC cards,
+                    provenance header
+  plots.py          diagnostic PDF reports
+  eso/recipes.py    PyEsoRex recipes; the only file that imports CPL
+examples/           two complete reduction scripts
+tests/              test_<module>.py per module; fixtures.py builds synthetic raw files;
+                    test_headers.py checks product headers; test_recipes.py runs PyEsoRex
+docs/               methods.md, products.md (FITS, QC, options), code_style.md,
+                    changes.md, architecture.svg, eso/ (SOF usage)
 ```
+
+Choosing which raw files and calibrations belong together is not part of the
+pipeline: scripts name their inputs (as in `examples/`), and the bench script
+selects them from a capture directory. The steps check that what they are given
+is consistent (DIT, ROI, detector, shutters).
 
 ### Three levels per step
 
@@ -62,9 +65,9 @@ Each step can be used at the level that fits the task:
 
 | Level | Input → output | DARK | FLAT | WAVE | P2VM | Science |
 | --- | --- | --- | --- | --- | --- | --- |
-| files | paths → product files | `dark.run` | `flat.run` | `wave.run` | `p2vm.run` | `reduce.run` |
+| files | paths → product files | `dark.run` | `flat.run` | `wave.run` | `p2vm.run` | `science.run` |
 | raw | `Raw` cubes + products → product | `make_dark_products` | `make_flat` | `make_wave` | `make_p2vm` | `reduce_science` |
-| arrays | arrays → product | `measure_dark`, `detect_bad_pixels` | `build_flat` | `fit_wavelength_solution` | `p2vm.fit.fit_p2vm` | `reduce_spectra` |
+| arrays | arrays → product | `measure_dark`, `detect_bad_pixels` | `build_flat` | `fit_wavelength_solution` | `fit_p2vm` | `reduce_spectra` |
 
 `run()` reads the files, calls the raw level, computes QC and writes the products.
 The raw level checks that calibrations match the raw detector setup. The array
@@ -83,13 +86,12 @@ not final calibrated OIFITS.
 
 ## Adding to the pipeline
 
-- **A keyword**: declare it in `keywords.py` first; `tests/test_keywords.py` rejects
-  undeclared QC, DET and INS keywords and cards that do not fit 80 columns.
+- **A QC keyword**: return it from the product's `qc()` as `(value, comment)`;
+  `tests/test_headers.py` checks that every product header is valid FITS.
 - **A product or step**: a new module following `dark.py`, a `tests/test_<module>.py`,
   and a recipe class in `eso/recipes.py`.
 - **A shared algorithm**: keep it in its step module until a second step needs it,
-  then move it to a shared module such as `extraction.py`. Numba code goes in
-  `kernels.py`.
+  then move it to `extraction.py`. Numba kernels stay next to the code that calls them.
 
 [Methods](docs/methods.md) · [Products and QC](docs/products.md) · [Code style](docs/code_style.md) ·
 [Changes](docs/changes.md)

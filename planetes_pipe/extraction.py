@@ -3,14 +3,60 @@
 from dataclasses import dataclass
 
 import numpy as np
+from numba import njit, prange
 from numpy.typing import NDArray
 
 from planetes_pipe.dark import Dark
 from planetes_pipe.files import STORAGE_RTOL
-from planetes_pipe.flat import Flat
+from planetes_pipe.flat import Flat, extract_sparse_spectra
 from planetes_pipe.instrument import DetectorSetup, Raw
-from planetes_pipe.kernels import extract_sparse_spectra, resample_spectra
 from planetes_pipe.wave import Wave
+
+
+@njit(parallel=True, cache=True)
+def resample_spectra(spec: NDArray, wave_map: NDArray, wl_grid: NDArray) -> NDArray:
+    """Interpolate detector spectra linearly in wavenumber onto a wavelength grid.
+
+    Parameters
+    ----------
+    spec : ndarray, shape (output, frame, detector x)
+        Spectral values to interpolate; the operation preserves their units.
+    wave_map : ndarray, shape (output, detector x)
+        Increasing wavelengths in metres along each detector spectrum.
+    wl_grid : ndarray, shape (wavelength,)
+        Increasing target wavelengths in metres, covered by every output.
+        Uniform wavelength spacing is usual but is not required by this kernel.
+
+    Returns
+    -------
+    aligned : ndarray, shape (output, frame, wavelength)
+        Values linearly interpolated as a function of 1 / wavelength.
+
+    Notes
+    -----
+    This is point interpolation, not flux-conserving integration over bins.
+    Coverage is checked by prepare_extraction before calling this kernel;
+    np.interp itself returns endpoint values outside the input interval.
+    """
+    n_reg, n_frame, _ = spec.shape
+    n_wave = len(wl_grid)
+
+    wn_map = 1.0 / wave_map
+    wn_grid = 1.0 / wl_grid
+
+    out = np.zeros((n_reg, n_frame, n_wave))
+
+    for r in prange(n_reg):
+        # We reverse (::-1) because np.interp expects increasing X values
+        # and wavenumber usually decreases as pixel index increases.
+        x_in = wn_map[r, ::-1]
+
+        for f in range(n_frame):
+            y_in = spec[r, f, ::-1]
+            out[r, f, :] = np.interp(wn_grid, x_in, y_in)
+
+    return out
+
 
 
 def _readonly_copy(values):

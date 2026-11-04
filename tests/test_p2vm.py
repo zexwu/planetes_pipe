@@ -14,9 +14,16 @@ from planetes_pipe.extraction import extract_spectra, prepare_extraction
 from planetes_pipe.files import read_raw, write_shutters
 from planetes_pipe.flat import read_flat, write_flat
 from planetes_pipe.instrument import layout
-from planetes_pipe.p2vm import make_p2vm, read_scan_opd, wavelength_grid
-from planetes_pipe.p2vm.fit import build_v2pm, fit_abcd_ellipse, fit_p2vm, unwrap_scan_phase
-from planetes_pipe.reduce import reduce_spectra
+from planetes_pipe.p2vm import (
+    build_v2pm,
+    fit_abcd_ellipse,
+    fit_p2vm,
+    make_p2vm,
+    read_scan_opd,
+    unwrap_scan_phase,
+    wavelength_grid,
+)
+from planetes_pipe.science import reduce_spectra
 from planetes_pipe.wave import read_wave
 
 

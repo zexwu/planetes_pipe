@@ -13,8 +13,7 @@ from pathlib import Path
 from cpl import ui
 from cpl.core import Msg
 
-from planetes_pipe import __version__, dark, flat, log, p2vm, reduce, wave
-from planetes_pipe.keywords import PARAMETERS
+from planetes_pipe import __version__, dark, flat, log, p2vm, science, wave
 
 AUTHOR = "PLANETES contributors"
 TABLE_CATEGORIES = ("WAVE", "P2VM", "SINGLE_SCI_P2VMRED")
@@ -31,13 +30,27 @@ def _parameter(name, description, default):
     return parameter
 
 
+# run() option -> help text. The CPL parameter is planetes.<context>.<option with dashes>
+# and its default is the run() signature default.
+HELP = {
+    "bad_pixel_threshold": "Positive multiplier in the retained dark bad-pixel tests",
+    "aperture_width_pixels": "Full extraction aperture in detector pixels",
+    "metrology_trace": "Detect 25 traces and omit the middle metrology trace",
+    "keep_diagnostics": "Retain P2VM scan and fit diagnostics in the calibration product",
+    "gd_search_min_m": "Coarse GD lower initialization [m]; Newton remains unconstrained",
+    "gd_search_max_m": "Coarse GD upper initialization [m]; Newton remains unconstrained",
+    "dl_gain": "Delay-line mm to OPD m gain per baseline, e.g. "
+               "43:-1,42:-1,41:-1,32:1,31:-1,21:-1; empty disables the DL_SCAN OPD guide",
+}
+
+
 def make_parameters(run, context: str):
     """CPL parameters for run()'s options, with defaults from its signature."""
     return ui.ParameterList([
-        _parameter(f"planetes.{context}.{PARAMETERS[name][0]}", PARAMETERS[name][1],
+        _parameter(f"planetes.{context}.{name.replace('_', '-')}", HELP[name],
                    "" if item.default is None else item.default)
         for name, item in signature(run).parameters.items()
-        if name in PARAMETERS
+        if name in HELP
     ])
 
 
@@ -52,8 +65,8 @@ def read_parameters(recipe, settings) -> dict:
 
 def run_options(run, values: dict) -> dict:
     """Keyword arguments for run() from {option name: value}."""
-    return {name: values[PARAMETERS[name][0]]
-            for name in signature(run).parameters if name in PARAMETERS}
+    return {name: values[name.replace("_", "-")]
+            for name in signature(run).parameters if name in HELP}
 
 
 def _gain(text: str) -> dict[str, float] | None:
@@ -230,12 +243,12 @@ class PlanetesReduce(ui.PyRecipe):
 
     def __init__(self):
         super().__init__()
-        self.parameters = make_parameters(reduce.run, "reduce")
+        self.parameters = make_parameters(science.run, "reduce")
 
     @recipe_logging()
     def run(self, frameset, settings):
         values = read_parameters(self, settings)
         sof = read_sof(frameset, {"SINGLE_SCI_RAW": 1, "DARK": 1, "FLAT": 1, "WAVE": 1, "P2VM": 1})
-        return publish(reduce.run(sof["SINGLE_SCI_RAW"][0], sof["DARK"][0], sof["FLAT"][0],
+        return publish(science.run(sof["SINGLE_SCI_RAW"][0], sof["DARK"][0], sof["FLAT"][0],
                                   sof["WAVE"][0], sof["P2VM"][0], output_dir=".",
-                                  **run_options(reduce.run, values)))
+                                  **run_options(science.run, values)))

@@ -24,6 +24,13 @@
 - 自查后的修正：`fits.py` 改名 `files.py`（避免与 `astropy.io.fits` 混淆）；`p2vm.py`
   拆为 `p2vm/__init__.py`（步骤）与 `p2vm/fit.py`（矩阵拟合）；帧平均改为
   `Raw.mean()`，去掉 extraction 的循环 import 绕行；更新过时的 docstring。
+- 精简结构：`p2vm` 恢复为单个文件；numba kernel 回到调用它的模块，删除
+  `kernels.py`；删除 `keywords.py`（QC 注释写在 `qc()`，raw tag 在 `files.py`，
+  recipe 帮助文本在 `eso/recipes.py`）；`plots/` 合并为 `plots.py`；`reduce` 改名
+  `science`。recipe 选项名改为 Python 参数名加连字符（`bad-pixel-threshold`、
+  `aperture-width-pixels`）。
+- 选择输入文件（原 `association.py`）移出 pipeline，放入 bench 的
+  `scripts/reduce_calibrations.py`；示例脚本改为明确写出输入。
 - 数值算法、阈值和产品 FITS 布局不变。
 
 # PLANETES 0.15.0：让I/O直接表达读了什么、写了什么

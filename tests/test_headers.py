@@ -1,4 +1,4 @@
-"""keywords.py: product headers, QC values and recipe options follow the dictionary."""
+"""Product headers are valid FITS with complete provenance; QC values are measured as defined."""
 
 
 import tempfile
@@ -11,11 +11,10 @@ import numpy as np
 from astropy.io import fits
 from fixtures import write_recipe_inputs
 
-from planetes_pipe import dark, flat, p2vm, reduce, wave
 from planetes_pipe import dark as dark_step
+from planetes_pipe import p2vm, science
 from planetes_pipe import wave as wave_step
 from planetes_pipe.dark import Bad, Dark
-from planetes_pipe.keywords import PARAMETERS, QC, RAW
 from planetes_pipe.wave import Wave
 
 REQUIRED_PRO = ("ESO PRO CATG", "ESO PRO TYPE", "ESO PRO TECH", "ESO PRO DID",
@@ -34,10 +33,6 @@ class HeaderTests(unittest.TestCase):
                     if isinstance(card.value, str):
                         self.assertLessEqual(len(card.value), 68, card.keyword)
                     key = card.keyword
-                    if key.startswith("ESO QC "):
-                        self.assertIn(key, QC, f"{path.name}: undeclared {key}")
-                    if key.startswith(("ESO DET ", "ESO INS ")):
-                        self.assertIn(key, RAW, f"{path.name}: undeclared {key}")
                     self.assertFalse(key.startswith("ESO DPR "), key)
                 for key in REQUIRED_PRO:
                     self.assertIn(key, header, f"{path.name}: missing {key}")
@@ -52,9 +47,9 @@ class HeaderTests(unittest.TestCase):
                                    phase_reference=inputs["PHASE_REFERENCE"],
                                    phase_dark=inputs["PHASE_DARK_CALIB"],
                                    keep_diagnostics=True)
-            science = reduce.run(inputs["PHASE_REFERENCE"], inputs["DARK"], inputs["FLAT"],
+            reduced = science.run(inputs["PHASE_REFERENCE"], inputs["DARK"], inputs["FLAT"],
                                  inputs["WAVE"], calibration["P2VM"], output_dir=root / "out")
-            for path in (*calibration.values(), *science.values()):
+            for path in (*calibration.values(), *reduced.values()):
                 with self.subTest(path=path.name):
                     self.check(path)
             self.assertIn("ESO QC P2VM_COHERENCE_SC43", fits.getheader(calibration["P2VM"]))
@@ -63,30 +58,25 @@ class HeaderTests(unittest.TestCase):
 class QCTests(unittest.TestCase):
     def test_qc_definitions_and_step_statistics_preserve_units_and_missing_values(self):
         dark = Dark(np.array([[1., 3.]]))
-        self.assertEqual(dark_step.qc(dark), {"ESO QC MEDIANDARK SC": 2.,
-                                              "ESO QC DARKRMS SC": None})
+        values = {key: value for key, (value, _) in dark_step.qc(dark).items()}
+        self.assertEqual(values, {"ESO QC MEDIANDARK SC": 2., "ESO QC DARKRMS SC": None})
         bad = Bad(np.array([[0, 1, 2, 4, 7]], dtype=np.int16))
-        self.assertEqual(dark_step.qc(bad), {"ESO QC BADPIX SC": 4,
-                                             "ESO QC BADPIX_DARK SC": 3,
-                                             "ESO QC BADPIX_RMS SC": 2})
+        values = {key: value for key, (value, _) in dark_step.qc(bad).items()}
+        self.assertEqual(values, {"ESO QC BADPIX SC": 4, "ESO QC BADPIX_DARK SC": 3,
+                                  "ESO QC BADPIX_RMS SC": 2})
         wave = Wave(np.array([[1., 2., 3.], [1.5, 2., 2.5]]) * 1e-6,
                     fit_residual_m=np.array([-1., 1.]) * 1e-9)
-        quality = wave_step.qc(wave)
+        quality = {key: value for key, (value, _) in wave_step.qc(wave).items()}
         self.assertEqual(quality["ESO QC MINWAVE SC"], 1.5e-6)
         np.testing.assert_allclose(quality["ESO QC MAXWAVE SC"], 2.5e-6, rtol=1e-15, atol=0)
         self.assertAlmostEqual(quality["ESO QC RMSWAVE SC"], np.sqrt(2) * 1e-9)
         self.assertEqual(quality["ESO QC NWAVE SC"], 2)
 
     def test_run_defaults_match_the_scientific_functions(self):
-        for module, function in [(p2vm, p2vm.make_p2vm), (reduce, reduce.reduce_science)]:
+        for module, function in [(p2vm, p2vm.make_p2vm), (science, science.reduce_science)]:
             for name in ("gd_search_min_m", "gd_search_max_m"):
                 self.assertEqual(signature(module.run).parameters[name].default,
                                  signature(function).parameters[name].default)
-        for module in (dark, flat, wave, p2vm, reduce):
-            options = [name for name, item in signature(module.run).parameters.items()
-                       if item.kind is item.KEYWORD_ONLY and name != "output_dir"
-                       and not name.startswith("phase_")]
-            self.assertTrue(set(options) <= PARAMETERS.keys(), module.__name__)
 
 
 if __name__ == "__main__":
