@@ -6,9 +6,9 @@ digraph Architecture {
   recipes [label="eso/recipes.py（PyEsoRex）\n读 SOF / CPL 参数 → 调用同一个 run()\n签名 DATAMD5 · 登记 PRODUCT\n唯一 import CPL 的文件"];
   steps [label="steps/: dark · flat · wave · p2vm · science\n\n每个模块从上到下：\n数据类 → 算法（含其 numba kernel）→ qc() → read_/write_ → run()\n波长 / OPD / GD 使用 m；计算 float64", style="rounded,filled", fillcolor="#eff6ff"];
   shared [label="steps/extraction.py\n共用光谱提取 / 重采样 / group delay"];
-  files [label="io/: keywords · raw · products\nraw：memmap 读取，快门确定身份\n产品：float64 原样存储 · 不覆盖\nQC 卡片 · PRO 溯源 header"];
+  files [label="io/: keywords · raw · products\nraw：探测器设置即 DET 卡片，原样使用\nraw：memmap 读取，快门确定身份\n产品：float64 原样存储 · 不覆盖\nQC 卡片 · PRO 溯源 header"];
   base [label="instrument.py
-通道顺序 · DetectorSetup · 快门身份"];
+通道顺序（望远镜 · 基线 · ABCD）"];
   {rank=same; python; recipes;}
   python -> steps;
   recipes -> steps [label="同一个 run()"];

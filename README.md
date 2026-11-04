@@ -47,7 +47,7 @@ planetes_pipe/
     keywords.py     every FITS keyword, defined once with unit and comment (ESO dictionary style)
     raw.py          raw data: the Raw cube, reading raw files, DET/shutter headers
     products.py     product FITS: write/read, extensions, provenance header
-  instrument.py     channel order, DetectorSetup, shutter identity
+  instrument.py     channel order: telescopes, baselines, ABCD outputs
   plots.py          diagnostic PDF reports
   eso/recipes.py    PyEsoRex recipes; the only file that imports CPL
 examples/           two complete reduction scripts
@@ -74,7 +74,7 @@ Each step can be used at the level that fits the task:
 
 `run()` reads the files, calls the raw level, computes QC and writes the products;
 its arguments are file paths (`dark_file`, `flat_files`, ...). The raw level checks
-that calibrations match the raw detector setup; FLAT and P2VM take their raws keyed
+that calibrations match the raw detector window and DIT (its DET cards); FLAT and P2VM take their raws keyed
 by physical identity, as returned by `io.raw.read_raws`. The array level is pure
 arithmetic, used by the live viewer and the tests.
 

@@ -7,13 +7,8 @@ from unittest.mock import patch
 
 import numpy as np
 from astropy.io import fits
-from fixtures import (
-    RawMetadata,
-    metadata,
-    write_raw,
-)
+from fixtures import RawMetadata, cards, metadata, write_raw
 
-from planetes_pipe.instrument import DetectorSetup
 from planetes_pipe.io import raw as raw_module
 from planetes_pipe.io.raw import find_raw, read_raw
 from planetes_pipe.steps.dark import (
@@ -42,8 +37,8 @@ class RawTests(unittest.TestCase):
                 original = path.read_bytes()
                 raw = read_raw(path, "DARK_RAW", hdu=0 if primary else 1)
                 self.assertEqual(raw.shutters, (None,) * 4)
-                self.assertIsNone(raw.setup.exposure_s)
-                self.assertEqual((raw.setup.height, raw.setup.width), (3, 5))
+                self.assertEqual(len(raw.detector), 0)
+                self.assertEqual(raw.cube.shape[1:], (3, 5))
                 self.assertNotIn("ESO DET WIN1 DIT1", fits.getheader(path))
                 chunks = list(raw.chunks())
                 self.assertEqual([len(chunk) for chunk in chunks], [16, 1])
@@ -55,7 +50,8 @@ class RawTests(unittest.TestCase):
             physical = metadata("DARK_RAW", n_wave=5, height=3)
             write_raw(path, cube, physical)
             raw = read_raw(path, "DARK_RAW")
-            self.assertEqual(RawMetadata(raw.category, raw.shutters, raw.setup), physical)
+            self.assertEqual(raw.shutters, physical.shutters)
+            self.assertEqual(dict(raw.detector), dict(physical.detector))
             with fits.open(path) as hdus:
                 self.assertEqual(
                     [hdu.name for hdu in hdus], ["PRIMARY", "IMAGING_DATA_SC"]
@@ -92,8 +88,7 @@ class RawTests(unittest.TestCase):
                     write_dark(Path(tmp) / "product.fits", dark)
 
     def test_find_raw_selects_by_header_type(self):
-        metadata = RawMetadata("FLAT_RAW", (False, False, False, True),
-                               DetectorSetup(width=3, height=2))
+        metadata = RawMetadata("FLAT_RAW", (False, False, False, True), cards(WIN_NX=3, WIN_NY=2))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for name in ("arbitrary-a.fits", "arbitrary-b.fits"):
@@ -102,7 +97,7 @@ class RawTests(unittest.TestCase):
             self.assertEqual(find_raw(root, "P2VM_RAW"), [])
 
     def test_read_raw_closes_file_and_keeps_cube_readable(self):
-        metadata = RawMetadata("DARK_RAW", (False,) * 4, DetectorSetup(width=2, height=2))
+        metadata = RawMetadata("DARK_RAW", (False,) * 4, cards(WIN_NX=2, WIN_NY=2))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "raw.fits"
             write_raw(path, np.arange(140.).reshape(35, 2, 2), metadata)

@@ -15,7 +15,7 @@ import numpy as np
 from astropy.io import fits as afits
 
 from planetes_pipe import __version__
-from planetes_pipe.instrument import DetectorSetup, layout
+from planetes_pipe.instrument import layout
 from planetes_pipe.io.keywords import (
     DATE,
     DPR_TECH,
@@ -39,15 +39,15 @@ from planetes_pipe.io.keywords import (
     PRO_TYPE,
     sorted_by_category,
 )
-from planetes_pipe.io.raw import write_setup
 
 
 def save_product(path: Path, category: str, extensions: list, *, header=None,
-                 qc: dict | None = None, setup: DetectorSetup | None = None) -> None:
+                 qc: dict | None = None, detector: afits.Header | None = None) -> None:
     """Write a product file; an existing file raises OSError.
 
     header is a provenance() header, or None for a product made outside a recipe.
     qc maps QC Keywords to measured values; None and non-finite values are omitted.
+    detector is the DET cards of the raw data the product was made from.
     """
     primary = afits.Header() if header is None else header.copy()
     INSTRUME.set(primary, "PLANETES")
@@ -56,8 +56,8 @@ def save_product(path: Path, category: str, extensions: list, *, header=None,
     PRO_TYPE.set(primary, "REDUCED")
     PRO_SCIENCE.set(primary, category == "SINGLE_SCI_P2VMRED")
     PRO_DID.set(primary, "PRO-1.17")
-    if setup is not None:
-        write_setup(primary, setup)
+    if detector is not None:
+        primary.extend(detector.cards, update=True)
     for keyword, value in (qc or {}).items():
         if value is not None and np.isfinite(value):
             keyword.set(primary, value)

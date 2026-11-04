@@ -9,7 +9,7 @@ import numpy as np
 from astropy.io import fits
 from fixtures import calibration_arrays, calibration_spectra, write_recipe_inputs
 
-from planetes_pipe.instrument import DetectorSetup, layout
+from planetes_pipe.instrument import layout
 from planetes_pipe.io.raw import Raw, read_raw, read_raws, write_shutters
 from planetes_pipe.steps.dark import Dark, read_dark
 from planetes_pipe.steps.extraction import extract_spectra, prepare_extraction
@@ -104,7 +104,7 @@ class P2VMTests(unittest.TestCase):
             flat, wave = (read_flat(inputs["FLAT"]), read_wave(inputs["WAVE"]))
             main = read_dark(inputs["DARK"])
             phase = Dark(
-                np.full(main.mean_adu.shape, 7, dtype=np.float32), setup=main.setup
+                np.full(main.mean_adu.shape, 7, dtype=np.float32), detector=main.detector
             )
             raw = np.array(fits.getdata(reference), dtype=np.float32)
             corrected = raw - 7
@@ -185,7 +185,7 @@ class P2VMTests(unittest.TestCase):
                 write_shutters(header, tuple(str(t) in baseline for t in range(1, 5)))
                 fits.HDUList([fits.PrimaryHDU(header=header), table]).writeto(path)
                 paths[baseline] = path
-            scans = {b: Raw(np.zeros((1, 1, 1)), "P2VM_RAW", (None,) * 4, DetectorSetup(), path)
+            scans = {b: Raw(np.zeros((1, 1, 1)), "P2VM_RAW", fits.Header(), path)
                      for b, path in paths.items()}
             actual = read_scan_opd(scans, gains)
             expected = np.array([gains[b] * np.array([0., 30e-6, 30e-6, -30e-6])

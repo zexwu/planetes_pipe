@@ -9,16 +9,23 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits as afits
+from astropy.io.fits import Header
 from numba import njit, prange
 from numpy.typing import NDArray
 from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, medfilt
 
 from planetes_pipe import log
-from planetes_pipe.instrument import DetectorSetup, check_setup, layout
+from planetes_pipe.instrument import layout
 from planetes_pipe.io import products
-from planetes_pipe.io.keywords import Keyword
-from planetes_pipe.io.raw import Raw, check_calibrations, read_raws, read_setup
+from planetes_pipe.io.keywords import WINDOW, Keyword
+from planetes_pipe.io.raw import (
+    Raw,
+    check_calibrations,
+    check_match,
+    detector_cards,
+    read_raws,
+)
 from planetes_pipe.steps.dark import Bad, Dark, read_bad, read_dark
 
 
@@ -32,7 +39,7 @@ class Flat:
     trace_y_pixels: NDArray  # (output, x)
     profile_sigma_pixels: NDArray | None = None  # (output, x)
     telescope_flux_adu: NDArray | None = None  # (telescope,)
-    setup: DetectorSetup | None = None
+    detector: Header | None = None  # DET cards of the raw flats
     trace_x_range: NDArray | None = None  # (output, 2), inclusive fitted limits, zero-based
 
 
@@ -90,7 +97,7 @@ def make_flat(
     dark : Dark
         Selected mean dark in ADU on exactly the raw detector grid. Known DIT,
         ROI and detector settings must match; dimensions are checked even when
-        setup is unknown. No dark scaling or broadcasting is allowed.
+        DET cards are unknown. No dark scaling or broadcasting is allowed.
     bad : Bad
         Detector bit mask shaped (y, x); every nonzero pixel is excluded from
         the sparse extraction aperture.
@@ -106,7 +113,7 @@ def make_flat(
     -------
     flat : Flat
         Mean response in ADU, zero-based traces and sparse pixel indices,
-        Gaussian sigmas, per-telescope total fluxes and detector setup.
+        Gaussian sigmas, per-telescope total fluxes and the flats' DET cards.
         Not written to disk; run() does that.
 
     Notes
@@ -116,13 +123,11 @@ def make_flat(
     """
 
     maps = []
-    setup = None
+    first = flats[layout.telescopes[0]]
     for telescope in layout.telescopes:
         raw = flats[telescope]
         check_calibrations(raw, dark=dark)
-        if setup is None:
-            setup = raw.setup
-        check_setup(raw.setup, setup, exposure=False, role="flat sequence")
+        check_match(raw.header, first.detector, WINDOW, "flat sequence")
         image = raw.mean()
         if image.shape != dark.mean_adu.shape:
             raise ValueError(
@@ -139,7 +144,7 @@ def make_flat(
                          trace_y_pixels=result.trace_y_pixels[keep],
                          profile_sigma_pixels=result.profile_sigma_pixels[keep],
                          trace_x_range=result.trace_x_range[keep])
-    return replace(result, setup=setup)
+    return replace(result, detector=first.detector)
 
 
 def build_flat(
@@ -168,7 +173,7 @@ def build_flat(
     flat : Flat
         Averaged response, cubic-smoothed trace centers, fitted Gaussian sigmas
         and sparse apertures. Pixel coordinates are zero-based. Paired (-1, -1)
-        entries mark bad pixels or padding. Detector setup is left unset.
+        entries mark bad pixels or padding. DET cards are left unset.
 
     Notes
     -----
@@ -547,7 +552,7 @@ def write_flat(path: Path, product: Flat, *, header=None) -> None:
     if product.telescope_flux_adu is not None:
         extensions.append(products.image_hdu("PLANETES_FLAT_FLUX", product.telescope_flux_adu, "adu"))
     products.save_product(path, "FLAT", extensions, header=header, qc=qc(product),
-                      setup=product.setup)
+                      detector=product.detector)
 
 
 def read_flat(path: Path) -> Flat:
@@ -561,7 +566,7 @@ def read_flat(path: Path) -> Flat:
                 products.read_column(hdus, "PLANETES_PROFILE", "PIXEL_X")),
             profile_y_pixels=from_fits_pixels(
                 products.read_column(hdus, "PLANETES_PROFILE", "PIXEL_Y")),
-            setup=read_setup(hdus[0].header),
+            detector=detector_cards(hdus[0].header),
         )
         profile = hdus["PROFILE_PARAMS"].columns.names
         if "XRANGE" in profile:

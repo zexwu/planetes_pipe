@@ -6,7 +6,6 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from planetes_pipe.instrument import DetectorSetup
 from planetes_pipe.io.raw import Raw
 from planetes_pipe.steps.dark import Dark
 from planetes_pipe.steps.flat import Flat, extract_sparse_spectra
@@ -72,7 +71,6 @@ class SpectralExtractor:
     profile_x_pixels: NDArray
     profile_y_pixels: NDArray
     detector_shape: tuple[int, int]
-    setup: DetectorSetup | None
     wavelength_map_m: NDArray
     wavelength_m: NDArray
     detector_flat_spectra: NDArray
@@ -184,7 +182,6 @@ def prepare_extraction(
         xs,
         ys,
         flat.flat_map_adu.shape,
-        flat.setup,
         wave_map_m,
         grid_m,
         _readonly_copy(detector_flat),

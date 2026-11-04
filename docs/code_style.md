@@ -48,6 +48,8 @@
 
 - 文件入口明确给出raw类别；标准HDU作为默认值，非标准数据显式指定hdu。
   不自动搜索图像或从缺失信息推测身份。
+- 探测器设置就是 raw 的 DET 卡片（DICD §4.4.2.7），bench 直接写，pipeline 原样保存和比较；
+  不另设一套字段名或转换。
 - FITS keyword 只通过 `Keyword` 对象读写（`DIT.get(header)`、`DIT.set(header, v)`），
   名称、单位和注释只定义一次；代码里不出现 `"HIERARCH ESO ..."` 字符串。QC keyword
   定义在产品模块的 `qc()` 旁，`qc()` 返回 `{Keyword: value}`，`write_<x>()` 写出时调用。每个输出独立完成写出，不为成组文件增加事务、回滚或状态管理。

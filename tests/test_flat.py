@@ -7,9 +7,9 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
-from fixtures import RawMetadata, write_raw
+from fixtures import RawMetadata, cards, write_raw
 
-from planetes_pipe.instrument import DetectorSetup, layout
+from planetes_pipe.instrument import layout
 from planetes_pipe.io.raw import read_raws, write_shutters
 from planetes_pipe.steps.dark import Bad, Dark
 from planetes_pipe.steps.flat import build_flat, make_flat
@@ -40,7 +40,7 @@ class FlatTests(unittest.TestCase):
                 rtol=0, atol=0.03,
             )
 
-    def test_flat_rejects_dark_shape_without_setup(self):
+    def test_flat_rejects_dark_shape_without_det_cards(self):
         with tempfile.TemporaryDirectory() as directory:
             paths = {}
             for telescope in layout.telescopes:
@@ -58,10 +58,9 @@ class FlatTests(unittest.TestCase):
     def test_metrology_selection_follows_trace_order_after_translation(self):
         height, width = 1200, 64
         y, x = np.indices((height, width))
-        setup = DetectorSetup(exposure_s=0.1, width=width, height=height,
-                              origin_x=0, origin_y=0, binning_x=1, binning_y=1,
-                              detector="synthetic")
-        dark = Dark(np.zeros((height, width)), setup=setup)
+        detector = cards(DIT=0.1, WIN_NX=width, WIN_NY=height, WIN_STRX=1, WIN_STRY=1,
+                         WIN_BINX=1, WIN_BINY=1, DET_ID="synthetic")
+        dark = Dark(np.zeros((height, width)), detector=detector)
         bad = Bad(np.zeros((height, width), dtype=np.int16))
         for shift in (0, 7):
             centers = 40 + 44 * np.arange(25) + shift
@@ -71,7 +70,7 @@ class FlatTests(unittest.TestCase):
                 paths = {}
                 for telescope in layout.telescopes:
                     paths[telescope] = Path(directory) / f"{telescope}.fits"
-                    physical = RawMetadata("FLAT_RAW", tuple(str(t) == telescope for t in range(1, 5)), setup)
+                    physical = RawMetadata("FLAT_RAW", tuple(str(t) == telescope for t in range(1, 5)), detector)
                     write_raw(paths[telescope], image[None], physical)
                 flats = read_raws(paths.values(), "FLAT_RAW", layout.telescopes)
                 flat = make_flat(flats, dark, bad, metrology_trace=True)

@@ -90,7 +90,7 @@ def extract_p2vm_spectra(flats: dict[str, Raw], scans: dict[str, Raw],
     extractor : SpectralExtractor
         Extraction geometry and target wavelength grid (prepare_extraction).
     dark, flat : Dark, Flat
-        The main DARK and the FLAT; their known setup must match every raw.
+        The main DARK and the FLAT; their recorded DET cards must match every raw.
 
     Returns
     -------

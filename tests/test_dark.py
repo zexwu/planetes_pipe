@@ -7,9 +7,8 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
-from fixtures import RawMetadata, metadata, write_raw
+from fixtures import RawMetadata, cards, metadata, write_raw
 
-from planetes_pipe.instrument import DetectorSetup
 from planetes_pipe.io.raw import read_raw
 from planetes_pipe.steps import dark
 from planetes_pipe.steps.dark import (
@@ -24,9 +23,9 @@ from planetes_pipe.steps.dark import (
 class DarkTests(unittest.TestCase):
     def test_chunks_statistics_roundtrip_and_raw_immutability(self):
         cube = 1e6 + np.random.default_rng(22).normal(size=(35, 4, 5))
-        metadata = RawMetadata("DARK_RAW", (False,) * 4, DetectorSetup(
-            exposure_s=.1, width=5, height=4, detector="test",
-            origin_x=0, origin_y=0, binning_x=1, binning_y=1))
+        metadata = RawMetadata("DARK_RAW", (False,) * 4, cards(
+            DIT=.1, WIN_NX=5, WIN_NY=4, DET_ID="test",
+            WIN_STRX=1, WIN_STRY=1, WIN_BINX=1, WIN_BINY=1))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "raw.fits"
             write_raw(path, cube, metadata)
@@ -39,7 +38,7 @@ class DarkTests(unittest.TestCase):
             np.testing.assert_allclose(result.mean_adu, cube.mean(axis=0), rtol=0, atol=5e-10)
             np.testing.assert_allclose(result.temporal_rms_adu, cube.std(axis=0), rtol=0, atol=5e-10)
             self.assertEqual(result.n_frames, 35)
-            self.assertEqual(result.setup, metadata.setup)
+            self.assertEqual(dict(result.detector), dict(metadata.detector))
             for write, read, product, field in (
                 (write_dark, read_dark, result, "mean_adu"),
                 (write_bad, read_bad, flags, "bad_pixel_flags"),

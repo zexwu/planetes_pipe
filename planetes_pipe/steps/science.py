@@ -62,7 +62,7 @@ def reduce_science(
     raw : Raw
         Raw SINGLE_SCI_RAW ADU cube, shaped (frame, y, x).
     dark : Dark
-        Mean dark in ADU selected for this science exposure and detector setup.
+        Mean dark in ADU with the science exposure's detector window and DIT.
     flat : Flat
         Detector response and extraction geometry on the science detector grid.
     wave : Wave

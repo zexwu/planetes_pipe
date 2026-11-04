@@ -1,36 +1,23 @@
-"""Raw data: the detector cube, its header (shutters, detector setup) and how to read it.
+"""Raw data: the detector cube, its recorded header, and how to read it.
 
     from planetes_pipe.io.raw import read_raw, read_raws
     lamp = read_raw("lamp.fits", "WAVELAMP_RAW")
     flats = read_raws(flat_files, "FLAT_RAW", layout.telescopes)   # {"4": Raw, ...}
 
-The DET and shutter header encoding here is also used for product headers and by
-the bench when it writes raw files.
+The detector setup of a raw file is its DET cards (DICD §4.4.2.7), used as
+recorded: a calibration carries the DET cards of the raw it was made from, and
+check_calibrations compares those cards directly. The bench writes the same cards.
 """
 
 from collections.abc import Iterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from planetes_pipe.instrument import DetectorSetup, check_setup, shutter_identity
-from planetes_pipe.io.keywords import (
-    DET_ID,
-    DIT,
-    DPR_TYPE,
-    PRO_CATG,
-    SHUTTER,
-    UIT,
-    WIN_BINX,
-    WIN_BINY,
-    WIN_NX,
-    WIN_NY,
-    WIN_STRX,
-    WIN_STRY,
-)
+from planetes_pipe.io.keywords import DIT, DPR_TYPE, PRO_CATG, SHUTTER, WINDOW
 
 # Raw SOF tag -> ESO DPR TYPE of the raw file.
 RAW_TYPES = {
@@ -44,18 +31,26 @@ RAW_TYPES = {
 
 @dataclass(frozen=True, slots=True)
 class Raw:
-    """One raw detector cube and its recorded metadata.
+    """One raw detector cube with its primary header.
 
-    cube is the (frame, y, x) ADU image HDU as stored, memory-mapped by
-    read_raw, so large files are not loaded at once. Shutters are in
-    physical T1,T2,T3,T4 order; unknown metadata stays None.
+    cube is the (frame, y, x) ADU image as stored, memory-mapped by read_raw so
+    that large files are not loaded at once.
     """
 
     cube: NDArray
     category: str
-    shutters: tuple[bool | None, bool | None, bool | None, bool | None]
-    setup: DetectorSetup
+    header: afits.Header
     path: Path | None = None
+
+    @property
+    def shutters(self) -> tuple:
+        """Recorded shutter states, physical T1..T4 order; None where not recorded."""
+        return read_shutters(self.header)
+
+    @property
+    def detector(self) -> afits.Header:
+        """The DET cards of this raw file."""
+        return detector_cards(self.header)
 
     def chunks(self, size: int = 16) -> Iterator[NDArray]:
         """Frames in order, as float64 blocks of up to `size` frames."""
@@ -77,27 +72,13 @@ class Raw:
 
 
 def read_raw(path: Path, category: str, *, hdu: int | str = "IMAGING_DATA_SC") -> Raw:
-    """Open a raw cube (memory-mapped) with its shutters and detector setup.
+    """Open a raw cube (memory-mapped) with its primary header.
 
-    Parameters
-    ----------
-    path : Path
-        Raw FITS file containing a (frame, y, x) detector cube in ADU.
-    category : str
-        Input role chosen by the caller, e.g. DARK_RAW or FLAT_RAW.
-    hdu : int or str, optional
-        Image HDU; default IMAGING_DATA_SC, 0 for primary-HDU data. No search.
-
-    Notes
-    -----
-    Width/height come from the cube; FITS one-based ROI origins become zero-based.
-    The file is read only. Frames are read from disk as they are used.
+    category is the input role chosen by the caller (e.g. DARK_RAW). hdu is the
+    image HDU; default IMAGING_DATA_SC, 0 for primary-HDU data. The file is read only.
     """
     with afits.open(path, memmap=True) as hdus:
-        header = hdus[0].header
-        cube = hdus[hdu].data
-    setup = replace(read_setup(header), height=cube.shape[1], width=cube.shape[2])
-    return Raw(cube, category, read_shutters(header), setup, Path(path))
+        return Raw(hdus[hdu].data, category, hdus[0].header.copy(), Path(path))
 
 
 def read_raws(paths, category: str, identities: tuple[str, ...], *,
@@ -127,50 +108,34 @@ def find_raw(directory: Path, category: str) -> list[Path]:
     return found
 
 
-def check_calibrations(raw: Raw, *, dark=None, flat=None) -> None:
-    """Reject a DARK whose known DIT/ROI/detector, or a FLAT whose ROI/detector, differs from raw."""
-    if dark is not None:
-        check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
-    if flat is not None:
-        check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
+def detector_cards(header: afits.Header) -> afits.Header:
+    """The DET cards of a header, as recorded."""
+    return afits.Header([card for card in header.cards if card.keyword.startswith("ESO DET ")])
 
 
-def read_setup(header) -> DetectorSetup:
-    """Detector setup from the DET keywords; unknown fields stay None.
+def check_match(header: afits.Header, calibration: afits.Header | None, keywords, role: str) -> None:
+    """Raise if a calibration was recorded with a different value of any of `keywords`.
 
-    FITS window origins are one-based, Python origins zero-based.
+    calibration holds the calibration's DET cards, or None when they are unknown.
+    A keyword recorded on only one side is not compared.
     """
-    x, y = WIN_STRX.get(header), WIN_STRY.get(header)
-    return DetectorSetup(
-        origin_x=x - 1 if x is not None else None,
-        origin_y=y - 1 if y is not None else None,
-        width=WIN_NX.get(header),
-        height=WIN_NY.get(header),
-        binning_x=WIN_BINX.get(header),
-        binning_y=WIN_BINY.get(header),
-        exposure_s=DIT.get(header, UIT.get(header)),
-        detector=DET_ID.get(header),
-    )
+    if calibration is None:
+        return
+    for keyword in keywords:
+        actual, expected = keyword.get(header), keyword.get(calibration)
+        if actual is not None and expected is not None and actual != expected:
+            raise ValueError(f"{role} has {keyword.name} = {expected!r}, the raw data {actual!r}")
 
 
-def write_setup(header, setup: DetectorSetup) -> None:
-    """Write the known detector settings; window origins become one-based."""
-    values = {
-        WIN_STRX: setup.origin_x + 1 if setup.origin_x is not None else None,
-        WIN_STRY: setup.origin_y + 1 if setup.origin_y is not None else None,
-        WIN_NX: setup.width,
-        WIN_NY: setup.height,
-        WIN_BINX: setup.binning_x,
-        WIN_BINY: setup.binning_y,
-        DET_ID: setup.detector,
-        DIT: setup.exposure_s,
-    }
-    for keyword, value in values.items():
-        if value is not None:
-            keyword.set(header, value)
+def check_calibrations(raw: Raw, *, dark=None, flat=None) -> None:
+    """A DARK must share the raw's detector window and DIT; a FLAT its window."""
+    if dark is not None:
+        check_match(raw.header, dark.detector, (*WINDOW, DIT), "DARK")
+    if flat is not None:
+        check_match(raw.header, flat.detector, WINDOW, "FLAT")
 
 
-def read_shutters(header) -> tuple:
+def read_shutters(header: afits.Header) -> tuple:
     """Shutter states in physical T1..T4 order; None where not recorded.
 
     Files written before 2026-11 use the non-ESO names 'PLANETES INS SHUTn ST'.
@@ -179,7 +144,14 @@ def read_shutters(header) -> tuple:
                  for n in range(1, 5))
 
 
-def write_shutters(header, shutters) -> None:
+def write_shutters(header: afits.Header, shutters) -> None:
     """Write shutter states in physical T1..T4 order."""
     for n, state in enumerate(shutters, 1):
         SHUTTER.at(n).set(header, state)
+
+
+def shutter_identity(shutters: tuple) -> str:
+    """Open shutter numbers in descending physical order, e.g. '4' or '43'."""
+    if None in shutters:
+        raise ValueError("Missing shutter states; cannot identify calibration input")
+    return "".join(str(n) for n in range(4, 0, -1) if shutters[n - 1])

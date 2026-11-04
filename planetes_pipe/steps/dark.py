@@ -13,10 +13,9 @@ import numpy as np
 from astropy.io.fits import Header
 from numpy.typing import NDArray
 
-from planetes_pipe.instrument import DetectorSetup
 from planetes_pipe.io import products
 from planetes_pipe.io.keywords import NFRAMES, Keyword
-from planetes_pipe.io.raw import Raw, read_raw, read_setup
+from planetes_pipe.io.raw import Raw, detector_cards, read_raw
 
 
 @dataclass(slots=True)
@@ -26,7 +25,7 @@ class Dark:
     mean_adu: NDArray  # (y, x)
     temporal_rms_adu: NDArray | None = None  # (y, x)
     n_frames: int | None = None
-    setup: DetectorSetup | None = None
+    detector: Header | None = None  # DET cards of the raw dark
 
 
 @dataclass(slots=True)
@@ -49,7 +48,7 @@ def make_dark_products(
     Parameters
     ----------
     raw : Raw
-        Raw dark cube and its recorded setup, from products.read_raw.
+        Raw dark cube and its header, from io.raw.read_raw.
     bad_pixel_threshold : float, optional
         Multiplier of the spatial median temporal RMS for BAD classification.
         Default is 5; this is not an independently measured read-noise threshold.
@@ -57,7 +56,7 @@ def make_dark_products(
     Returns
     -------
     dark : Dark
-        Temporal mean and population RMS in ADU, frame count and detector setup.
+        Temporal mean and population RMS in ADU, frame count and DET cards.
     bad : Bad
         Detector bit mask: hot=1, dead=2, noisy=4. Bits can be combined.
 
@@ -69,7 +68,7 @@ def make_dark_products(
     """
 
     dark = measure_dark(raw.chunks())
-    dark = replace(dark, setup=raw.setup)
+    dark = replace(dark, detector=raw.detector)
     return dark, detect_bad_pixels(dark, threshold=bad_pixel_threshold)
 
 
@@ -174,7 +173,7 @@ def measure_dark(chunks: Iterable[NDArray]) -> Dark:
     dark : Dark
         Temporal mean in ADU and measured frame count. temporal_rms_adu is the
         population RMS for two or more frames, and None for a single frame.
-        make_dark_products adds the detector setup of the raw cube.
+        make_dark_products adds the DET cards of the raw cube.
     """
     mean, rms, count = frame_statistics(chunks)
     return Dark(mean, rms if count >= 2 else None, count)
@@ -217,7 +216,7 @@ def write_dark(path: Path, product: Dark, *, header=None) -> None:
     products.save_product(path, "DARK", [
         products.image_hdu("IMAGING_DATA_SC", product.mean_adu, "adu"),
         products.image_hdu("IMAGING_ERR_SC", product.temporal_rms_adu, "adu"),
-    ], header=header, qc=qc(product), setup=product.setup)
+    ], header=header, qc=qc(product), detector=product.detector)
 
 
 def read_dark(path: Path) -> Dark:
@@ -227,7 +226,7 @@ def read_dark(path: Path) -> Dark:
             mean_adu=products.read_image(hdus, "IMAGING_DATA_SC"),
             temporal_rms_adu=products.read_image(hdus, "IMAGING_ERR_SC"),
             n_frames=NFRAMES.get(hdus[0].header),
-            setup=read_setup(hdus[0].header),
+            detector=detector_cards(hdus[0].header),
         )
 
 

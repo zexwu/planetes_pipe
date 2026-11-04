@@ -74,8 +74,10 @@ WIN_NY = Keyword("DET.WIN1.NY", "Window height", "pixel")
 WIN_BINX = Keyword("DET.WIN1.BINX", "Binning factor in x")
 WIN_BINY = Keyword("DET.WIN1.BINY", "Binning factor in y")
 DIT = Keyword("DET.WIN1.DIT1", "Integration time", "s")
-UIT = Keyword("DET.WIN1.UIT1", "User defined integration time", "s")
 NDIT = Keyword("DET.WIN1.NDIT", "Number of frames")
+
+# Detector window (DICD §4.4.2.7) a calibration must share with the raw data it corrects.
+WINDOW = (DET_ID, WIN_STRX, WIN_STRY, WIN_NX, WIN_NY, WIN_BINX, WIN_BINY)
 
 # Instrument.
 SHUTTER = Keyword("INS.SHUT{}.ST", "Shutter T{} open")

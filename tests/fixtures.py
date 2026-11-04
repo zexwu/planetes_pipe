@@ -6,9 +6,20 @@ from typing import NamedTuple
 import numpy as np
 from astropy.io import fits
 
-from planetes_pipe.instrument import DetectorSetup, layout
-from planetes_pipe.io.keywords import DPR_TYPE, INSTRUME
-from planetes_pipe.io.raw import RAW_TYPES, write_setup, write_shutters
+from planetes_pipe.instrument import layout
+from planetes_pipe.io.keywords import (
+    DET_ID,
+    DIT,
+    DPR_TYPE,
+    INSTRUME,
+    WIN_BINX,
+    WIN_BINY,
+    WIN_NX,
+    WIN_NY,
+    WIN_STRX,
+    WIN_STRY,
+)
+from planetes_pipe.io.raw import RAW_TYPES, write_shutters
 from planetes_pipe.steps.dark import Bad, Dark, write_bad, write_dark
 from planetes_pipe.steps.flat import Flat, write_flat
 from planetes_pipe.steps.p2vm import P2VM, P2VMSpectra, write_p2vm
@@ -24,7 +35,7 @@ class RawMetadata(NamedTuple):
 
     category: str
     shutters: tuple
-    setup: DetectorSetup
+    detector: fits.Header
 
 
 def write_product(path: Path, product) -> None:
@@ -67,7 +78,7 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
         profile_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1),
         flat_map_adu=np.ones((24, n_wave)),
         trace_y_pixels=np.repeat(np.arange(24)[:, None], n_wave, axis=1).astype(float),
-        setup=setup(n_wave),
+        detector=detector_cards(n_wave),
         trace_x_range=np.tile([0, n_wave - 1], (24, 1)),
     )
     wave = Wave(wavelength_map_m=np.tile(wavelength, (24, 1)))
@@ -83,22 +94,26 @@ def calibration_arrays(n_wave: int = 151, n_frame: int = 32):
     )
 
 
-def setup(n_wave=151, height=24):
-    return DetectorSetup(
-        exposure_s=0.01,
-        origin_x=0,
-        origin_y=0,
-        width=n_wave,
-        height=height,
-        binning_x=1,
-        binning_y=1,
-        detector="synthetic",
-    )
+def cards(**values) -> fits.Header:
+    """DET cards from Keyword=value pairs, e.g. cards(DIT=0.1, WIN_NX=5); None is left out."""
+    keywords = {"DET_ID": DET_ID, "DIT": DIT, "WIN_STRX": WIN_STRX, "WIN_STRY": WIN_STRY,
+                "WIN_NX": WIN_NX, "WIN_NY": WIN_NY, "WIN_BINX": WIN_BINX, "WIN_BINY": WIN_BINY}
+    header = fits.Header()
+    for name, value in values.items():
+        if value is not None:
+            keywords[name].set(header, value)
+    return header
+
+
+def detector_cards(n_wave=151, height=24) -> fits.Header:
+    """The synthetic detector: full window, DIT 0.01 s."""
+    return cards(DET_ID="synthetic", WIN_STRX=1, WIN_STRY=1, WIN_NX=n_wave, WIN_NY=height,
+                 WIN_BINX=1, WIN_BINY=1, DIT=0.01)
 
 
 def metadata(category, active=(), n_wave=151, height=24):
     return RawMetadata(
-        category, tuple(str(n) in active for n in range(1, 5)), setup(n_wave, height)
+        category, tuple(str(n) in active for n in range(1, 5)), detector_cards(n_wave, height)
     )
 
 
@@ -107,7 +122,7 @@ def write_raw(path: Path, cube, physical: RawMetadata):
     header = fits.Header()
     INSTRUME.set(header, "PLANETES")
     DPR_TYPE.set(header, RAW_TYPES[physical.category])
-    write_setup(header, physical.setup)
+    header.extend(physical.detector.cards)
     write_shutters(header, physical.shutters)
     image = fits.ImageHDU(cube, name="IMAGING_DATA_SC")
     image.header["BUNIT"] = "adu"
@@ -135,7 +150,7 @@ def write_recipe_inputs(directory: Path):
         np.zeros((24, 151), dtype=np.float32),
         np.zeros((24, 151), dtype=np.float32),
         32,
-        setup=setup(),
+        detector=detector_cards(),
     )
     for tag in ("DARK", "PHASE_DARK_CALIB"):
         path = directory / f"{tag.lower()}.fits"

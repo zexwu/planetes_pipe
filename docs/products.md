@@ -37,8 +37,11 @@ in-memory only. A `P2VMRed` from the live preview has no GD/phase and cannot be 
 ## Raw input
 
 `raw.read_raw(path, category, hdu="IMAGING_DATA_SC")` returns `Raw`: the
-memory-mapped cube as stored, the four shutter states and the `DetectorSetup`
-(DIT, ROI, binning, detector id). Missing header fields stay `None`. Raw tags
+memory-mapped cube as stored and its primary header. The detector setup is the
+raw's DET cards as recorded (DICD §4.4.2.7): `DET.ID`, `DET.WIN1.STRX/STRY/NX/NY/
+BINX/BINY` (the window, `keywords.WINDOW`) and `DET.WIN1.DIT1`. The bench writes
+these cards directly; DARK and FLAT products carry the DET cards of their raws.
+Raw tags
 map to `ESO DPR TYPE` in `raw.RAW_TYPES`. Shutters are `ESO INS SHUTn ST`;
 files written before 2026-11 use `PLANETES INS SHUTn ST`, which is still read.
 FLAT and P2VM raw lists may be in any order: physical identity comes from shutters.
@@ -60,7 +63,7 @@ one 80-column card. The primary header (`products.provenance`, `save_product`) h
 - the DICD §4.7.1 keywords: `PIPEFILE`, `PRO.CATG/TYPE/TECH/SCIENCE/DID`,
   `PRO.REC1.ID/DRS.ID/PIPE.ID`, `PRO.REC1.RAWi.NAME/CATG`, `CALi.NAME/CATG`,
   `PARAMi.NAME/VALUE`, `PRO.DATANCOM`; `DATE` as `YYYY-MM-DDThh:mm:ss.sss` (§4.5);
-- the detector setup (`DET...`) for DARK and FLAT;
+- the DET cards of the raw data, for DARK and FLAT;
 - QC (below).
 
 Cards are ordered primary first, then by category DPR, OBS, TPL, GEN, TEL, ADA,
@@ -108,7 +111,9 @@ and the main DARK otherwise.
 
 Only mistakes a user or the data can make are checked:
 
-- a calibration whose known DIT, ROI, binning or detector differs from the raw;
+- a DARK whose window or `DET.WIN1.DIT1`, or a FLAT whose window, was recorded with a
+  different value than the raw data (`raw.check_calibrations`; unrecorded cards are
+  not compared);
 - missing or duplicate shutter configurations in FLAT/P2VM inputs;
 - detector-shape mismatches between raw, DARK, BAD, FLAT and WAVE;
 - wavelength coverage and sparse pixel bounds before the numba kernels;

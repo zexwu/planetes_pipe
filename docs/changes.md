@@ -1,3 +1,16 @@
+# PLANETES 0.20.0：探测器设置直接使用 ESO DET 卡片
+
+- 删除 `DetectorSetup`、`check_setup`、`read_setup`/`write_setup` 与 `UIT1` 回退。探测器
+  设置就是 raw header 的 DET 卡片（DICD §4.4.2.7：`DET.ID`、`DET.WIN1.STRX/STRY/NX/NY/
+  BINX/BINY`、`DET.WIN1.DIT1`），bench 的 `camera_cards()` 直接写这些卡片。
+- `Raw` 保存 primary header（`Raw.header`、`Raw.detector`、`Raw.shutters`）；DARK/FLAT
+  产品的 `setup` 字段改为 `detector`（原样的 DET 卡片）。
+- 兼容性检查只剩一条规则 `raw.check_match`：两边都记录且值不同即报错，报错写出 ESO
+  keyword 名；DARK 比较窗口与 DIT，FLAT 比较窗口（`keywords.WINDOW`）。DIT 精确比较。
+- `instrument.py` 只保留通道顺序；`shutter_identity` 移入 `io/raw.py`。
+- bench 采集脚本的 `SETUP = DetectorSetup()` 改为 `DETECTOR = {}`（ESO keyword → 值）。
+- 数值结果不变。
+
 # PLANETES 0.19.0：目录分为 steps/ 与 io/
 
 - 五个步骤及共用的 `extraction` 移入 `steps/`，`keywords`、`raw`、`products` 移入 `io/`；
