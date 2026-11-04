@@ -9,16 +9,16 @@ import numpy as np
 from astropy.io import fits
 from fixtures import RawMetadata, metadata, write_raw
 
-from planetes_pipe import dark
-from planetes_pipe.dark import (
+from planetes_pipe.instrument import DetectorSetup
+from planetes_pipe.io.raw import read_raw
+from planetes_pipe.steps import dark
+from planetes_pipe.steps.dark import (
     make_dark_products,
     read_bad,
     read_dark,
     write_bad,
     write_dark,
 )
-from planetes_pipe.instrument import DetectorSetup
-from planetes_pipe.raw import read_raw
 
 
 class DarkTests(unittest.TestCase):

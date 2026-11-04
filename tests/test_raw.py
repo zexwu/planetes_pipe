@@ -13,8 +13,10 @@ from fixtures import (
     write_raw,
 )
 
-from planetes_pipe import raw as raw_module
-from planetes_pipe.dark import (
+from planetes_pipe.instrument import DetectorSetup
+from planetes_pipe.io import raw as raw_module
+from planetes_pipe.io.raw import find_raw, read_raw
+from planetes_pipe.steps.dark import (
     QC_DARK_MEDIAN,
     QC_DARK_RMS,
     Dark,
@@ -23,8 +25,6 @@ from planetes_pipe.dark import (
     qc,
     write_dark,
 )
-from planetes_pipe.instrument import DetectorSetup
-from planetes_pipe.raw import find_raw, read_raw
 
 
 class RawTests(unittest.TestCase):

@@ -3,8 +3,8 @@ from pathlib import Path
 
 from astropy.io import fits
 
-from planetes_pipe import science
-from planetes_pipe.raw import read_raw
+from planetes_pipe.io.raw import read_raw
+from planetes_pipe.steps import science
 
 SCIENCE = Path("/path/to/science.fits")
 CALIBRATIONS = Path("/path/to/reduced/calibration")

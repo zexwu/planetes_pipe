@@ -1,6 +1,6 @@
 """Raw data: the detector cube, its header (shutters, detector setup) and how to read it.
 
-    from planetes_pipe.raw import read_raw, read_raws
+    from planetes_pipe.io.raw import read_raw, read_raws
     lamp = read_raw("lamp.fits", "WAVELAMP_RAW")
     flats = read_raws(flat_files, "FLAT_RAW", layout.telescopes)   # {"4": Raw, ...}
 
@@ -17,7 +17,7 @@ from astropy.io import fits as afits
 from numpy.typing import NDArray
 
 from planetes_pipe.instrument import DetectorSetup, check_setup, shutter_identity
-from planetes_pipe.keywords import (
+from planetes_pipe.io.keywords import (
     DET_ID,
     DIT,
     DPR_TYPE,

@@ -9,11 +9,12 @@ import numpy as np
 from astropy.io import fits
 from fixtures import calibration_arrays, calibration_spectra, write_recipe_inputs
 
-from planetes_pipe.dark import Dark, read_dark
-from planetes_pipe.extraction import extract_spectra, prepare_extraction
-from planetes_pipe.flat import read_flat, write_flat
 from planetes_pipe.instrument import DetectorSetup, layout
-from planetes_pipe.p2vm import (
+from planetes_pipe.io.raw import Raw, read_raw, read_raws, write_shutters
+from planetes_pipe.steps.dark import Dark, read_dark
+from planetes_pipe.steps.extraction import extract_spectra, prepare_extraction
+from planetes_pipe.steps.flat import read_flat, write_flat
+from planetes_pipe.steps.p2vm import (
     build_v2pm,
     extract_p2vm_spectra,
     fit_abcd_ellipse,
@@ -22,9 +23,8 @@ from planetes_pipe.p2vm import (
     unwrap_scan_phase,
     wavelength_grid,
 )
-from planetes_pipe.raw import Raw, read_raw, read_raws, write_shutters
-from planetes_pipe.science import reduce_spectra
-from planetes_pipe.wave import read_wave
+from planetes_pipe.steps.science import reduce_spectra
+from planetes_pipe.steps.wave import read_wave
 
 
 class WavelengthGridTests(unittest.TestCase):

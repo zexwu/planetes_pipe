@@ -5,7 +5,7 @@ import unittest
 
 import numpy as np
 
-from planetes_pipe.flat import extract_sparse_spectra
+from planetes_pipe.steps.flat import extract_sparse_spectra
 
 
 class ExtractionTests(unittest.TestCase):

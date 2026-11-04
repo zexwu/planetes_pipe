@@ -16,7 +16,7 @@ from astropy.io import fits as afits
 
 from planetes_pipe import __version__
 from planetes_pipe.instrument import DetectorSetup, layout
-from planetes_pipe.keywords import (
+from planetes_pipe.io.keywords import (
     DATE,
     DPR_TECH,
     INHERIT,
@@ -39,7 +39,7 @@ from planetes_pipe.keywords import (
     PRO_TYPE,
     sorted_by_category,
 )
-from planetes_pipe.raw import write_setup
+from planetes_pipe.io.raw import write_setup
 
 
 def save_product(path: Path, category: str, extensions: list, *, header=None,

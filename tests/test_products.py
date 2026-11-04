@@ -13,10 +13,10 @@ from fixtures import (
     write_product,
 )
 
-from planetes_pipe.flat import Flat, read_flat
-from planetes_pipe.p2vm import P2VM, fit_p2vm, read_p2vm
-from planetes_pipe.products import product_path
-from planetes_pipe.wave import Wave, read_wave, write_wave
+from planetes_pipe.io.products import product_path
+from planetes_pipe.steps.flat import Flat, read_flat
+from planetes_pipe.steps.p2vm import P2VM, fit_p2vm, read_p2vm
+from planetes_pipe.steps.wave import Wave, read_wave, write_wave
 
 READERS = {Flat: read_flat, Wave: read_wave, P2VM: read_p2vm}
 

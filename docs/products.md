@@ -13,12 +13,12 @@ References: [GRAVITY product codes](https://www.eso.org/observing/dfo/quality/GR
 
 | Module | Python class | PRO CATG | FITS extensions |
 | --- | --- | --- | --- |
-| `dark.py` | `Dark` | DARK | `IMAGING_DATA_SC` mean [ADU], `IMAGING_ERR_SC` temporal RMS [ADU]; `NFRAMES` |
-| `dark.py` | `Bad` | BAD | `IMAGING_DATA_SC` bit flags: hot 1, dead 2, noisy 4 |
-| `flat.py` | `Flat` | FLAT | `IMAGING_DETECTOR_SC`, `PLANETES_FLAT_IMAGE`, `PROFILE_PARAMS`, `PLANETES_PROFILE`, optional `PLANETES_FLAT_FLUX` |
-| `wave.py` | `Wave` | WAVE | `WAVE_DATA_SC` wavelength per output and x [m]; optional `PLANETES_WAVE_FIT` |
-| `p2vm.py` | `P2VM` | P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC`, `PLANETES_P2VM_INVERSE`; optional scan diagnostics |
-| `science.py` | `P2VMRed` | SINGLE_SCI_P2VMRED | `PLANETES_FLUX`, `PLANETES_VIS`: per-frame flux, coherent flux, VISAMP, flags, GD [m], differential phase [deg] |
+| `steps/dark.py` | `Dark` | DARK | `IMAGING_DATA_SC` mean [ADU], `IMAGING_ERR_SC` temporal RMS [ADU]; `NFRAMES` |
+| `steps/dark.py` | `Bad` | BAD | `IMAGING_DATA_SC` bit flags: hot 1, dead 2, noisy 4 |
+| `steps/flat.py` | `Flat` | FLAT | `IMAGING_DETECTOR_SC`, `PLANETES_FLAT_IMAGE`, `PROFILE_PARAMS`, `PLANETES_PROFILE`, optional `PLANETES_FLAT_FLUX` |
+| `steps/wave.py` | `Wave` | WAVE | `WAVE_DATA_SC` wavelength per output and x [m]; optional `PLANETES_WAVE_FIT` |
+| `steps/p2vm.py` | `P2VM` | P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC`, `PLANETES_P2VM_INVERSE`; optional scan diagnostics |
+| `steps/science.py` | `P2VMRed` | SINGLE_SCI_P2VMRED | `PLANETES_FLUX`, `PLANETES_VIS`: per-frame flux, coherent flux, VISAMP, flags, GD [m], differential phase [deg] |
 
 `P2VMSpectra` (P2VM fit input) and `FrameReducer` (live reduction state) are
 in-memory only. A `P2VMRed` from the live preview has no GD/phase and cannot be saved.

@@ -1,12 +1,13 @@
-"""PLANETES reduction: one module per step (dark, flat, wave, p2vm, science).
+"""PLANETES reduction pipeline.
 
-Each step module holds its product, algorithm, QC, FITS layout and run()
-entry point; the optional PyEsoRex recipes in eso/ call those run() functions.
+    steps/   dark, flat, wave, p2vm, science: product, algorithm, QC, FITS, run()
+    io/      the file format: keywords, raw files, product files
+    eso/     optional PyEsoRex recipes, which call the steps' run() functions
 """
 
 import logging
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 log = logging.getLogger("planetes_pipe")
 
 

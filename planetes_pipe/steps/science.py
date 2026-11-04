@@ -1,6 +1,6 @@
 """SINGLE_SCI_P2VMRED: per-frame instrumental fluxes, visibility, group delay and phase.
 
-    from planetes_pipe import science
+    from planetes_pipe.steps import science
     out = science.run(science_raw, dark, flat, wave, p2vm, output_dir="science")
 """
 
@@ -11,19 +11,20 @@ import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from planetes_pipe import log, products
-from planetes_pipe.dark import Dark, read_dark
-from planetes_pipe.extraction import (
+from planetes_pipe import log
+from planetes_pipe.instrument import layout
+from planetes_pipe.io import products
+from planetes_pipe.io.raw import Raw, check_calibrations, read_raw
+from planetes_pipe.steps.dark import Dark, read_dark
+from planetes_pipe.steps.extraction import (
     SpectralExtractor,
     estimate_group_delay,
     extract_spectra,
     prepare_extraction,
 )
-from planetes_pipe.flat import Flat, read_flat
-from planetes_pipe.instrument import layout
-from planetes_pipe.p2vm import P2VM, read_p2vm
-from planetes_pipe.raw import Raw, check_calibrations, read_raw
-from planetes_pipe.wave import Wave, read_wave
+from planetes_pipe.steps.flat import Flat, read_flat
+from planetes_pipe.steps.p2vm import P2VM, read_p2vm
+from planetes_pipe.steps.wave import Wave, read_wave
 
 
 @dataclass(slots=True)

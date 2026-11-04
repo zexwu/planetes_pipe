@@ -4,8 +4,14 @@ import warnings
 
 from astropy.io import fits
 
-from planetes_pipe.flat import QC_FLUX
-from planetes_pipe.keywords import DIT, INSTRUME, SHUTTER, Keyword, sorted_by_category
+from planetes_pipe.io.keywords import (
+    DIT,
+    INSTRUME,
+    SHUTTER,
+    Keyword,
+    sorted_by_category,
+)
+from planetes_pipe.steps.flat import QC_FLUX
 
 
 class KeywordTests(unittest.TestCase):

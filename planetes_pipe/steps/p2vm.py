@@ -1,6 +1,6 @@
 """P2VM: instrumental pixel-to-visibility response from telescope flats and baseline scans.
 
-    from planetes_pipe import p2vm
+    from planetes_pipe.steps import p2vm
     out = p2vm.run(dark, flat, wave, flat_raws, scan_raws, output_dir="calibration")
 
 Order: data classes; wavelength grid and spectra; response fit and inverse;
@@ -15,19 +15,20 @@ import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from planetes_pipe import log, products
-from planetes_pipe.dark import Dark, read_dark
-from planetes_pipe.extraction import (
+from planetes_pipe import log
+from planetes_pipe.instrument import layout
+from planetes_pipe.io import products
+from planetes_pipe.io.keywords import Keyword
+from planetes_pipe.io.raw import Raw, check_calibrations, read_raw, read_raws
+from planetes_pipe.steps.dark import Dark, read_dark
+from planetes_pipe.steps.extraction import (
     SpectralExtractor,
     estimate_group_delay,
     extract_spectra,
     prepare_extraction,
 )
-from planetes_pipe.flat import Flat, read_flat
-from planetes_pipe.instrument import layout
-from planetes_pipe.keywords import Keyword
-from planetes_pipe.raw import Raw, check_calibrations, read_raw, read_raws
-from planetes_pipe.wave import Wave, read_wave
+from planetes_pipe.steps.flat import Flat, read_flat
+from planetes_pipe.steps.wave import Wave, read_wave
 
 
 @dataclass(slots=True)

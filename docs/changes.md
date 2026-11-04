@@ -1,3 +1,10 @@
+# PLANETES 0.19.0：目录分为 steps/ 与 io/
+
+- 五个步骤及共用的 `extraction` 移入 `steps/`，`keywords`、`raw`、`products` 移入 `io/`；
+  顶层只保留 `instrument.py`、`plots.py` 和 `eso/`。导入改为
+  `from planetes_pipe.steps import dark, flat, ...` 与 `from planetes_pipe.io.raw import read_raw`。
+- 代码内容不变。
+
 # PLANETES 0.18.0：keyword 按 ESO 字典方式定义
 
 - 新增 `keywords.py`：每个 keyword 是一个 `Keyword`（ESO 简写名、注释、单位，对应

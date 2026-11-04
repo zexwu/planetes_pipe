@@ -13,7 +13,8 @@ from pathlib import Path
 from cpl import ui
 from cpl.core import Msg
 
-from planetes_pipe import __version__, dark, flat, log, p2vm, science, wave
+from planetes_pipe import __version__, log
+from planetes_pipe.steps import dark, flat, p2vm, science, wave
 
 AUTHOR = "PLANETES contributors"
 TABLE_CATEGORIES = ("WAVE", "P2VM", "SINGLE_SCI_P2VMRED")

@@ -1,6 +1,6 @@
 """WAVE: detector wavelength solution from a lamp exposure and laboratory lines.
 
-    from planetes_pipe import wave
+    from planetes_pipe.steps import wave
     out = wave.run(lamp_raw, lamp_dark_path, flat_path, output_dir="calibration")  # {"WAVE": path}
 """
 
@@ -15,12 +15,13 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
-from planetes_pipe import log, products
-from planetes_pipe.dark import Dark, read_dark
-from planetes_pipe.flat import Flat, extract_sparse_spectra, read_flat
+from planetes_pipe import log
 from planetes_pipe.instrument import layout
-from planetes_pipe.keywords import Keyword
-from planetes_pipe.raw import Raw, check_calibrations, read_raw
+from planetes_pipe.io import products
+from planetes_pipe.io.keywords import Keyword
+from planetes_pipe.io.raw import Raw, check_calibrations, read_raw
+from planetes_pipe.steps.dark import Dark, read_dark
+from planetes_pipe.steps.flat import Flat, extract_sparse_spectra, read_flat
 
 
 @dataclass(slots=True)

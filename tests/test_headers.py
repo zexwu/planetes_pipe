@@ -11,11 +11,11 @@ import numpy as np
 from astropy.io import fits
 from fixtures import write_recipe_inputs
 
-from planetes_pipe import dark as dark_step
-from planetes_pipe import p2vm, science
-from planetes_pipe import wave as wave_step
-from planetes_pipe.dark import Bad, Dark
-from planetes_pipe.wave import Wave
+from planetes_pipe.steps import dark as dark_step
+from planetes_pipe.steps import p2vm, science
+from planetes_pipe.steps import wave as wave_step
+from planetes_pipe.steps.dark import Bad, Dark
+from planetes_pipe.steps.wave import Wave
 
 REQUIRED_PRO = ("ESO PRO CATG", "ESO PRO TYPE", "ESO PRO TECH", "ESO PRO DID",
                 "ESO PRO REC1 ID", "ESO PRO REC1 PIPE ID", "ESO PRO DATANCOM", "PIPEFILE")

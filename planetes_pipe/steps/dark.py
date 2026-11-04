@@ -1,6 +1,6 @@
 """DARK and BAD: detector dark statistics and bad pixels from one DARK_RAW stack.
 
-    from planetes_pipe import dark
+    from planetes_pipe.steps import dark
     out = dark.run("dark.fits", output_dir="calibration")  # {"DARK": path, "BAD": path}
     master = dark.read_dark(out["DARK"])
 """
@@ -13,10 +13,10 @@ import numpy as np
 from astropy.io.fits import Header
 from numpy.typing import NDArray
 
-from planetes_pipe import products
 from planetes_pipe.instrument import DetectorSetup
-from planetes_pipe.keywords import NFRAMES, Keyword
-from planetes_pipe.raw import Raw, read_raw, read_setup
+from planetes_pipe.io import products
+from planetes_pipe.io.keywords import NFRAMES, Keyword
+from planetes_pipe.io.raw import Raw, read_raw, read_setup
 
 
 @dataclass(slots=True)

@@ -21,7 +21,7 @@
 <g id="node3" class="node">
 <title>steps</title>
 <path fill="#eff6ff" stroke="#64748b" d="M650.66,-367.09C650.66,-367.09 192.62,-367.09 192.62,-367.09 186.63,-367.09 180.62,-361.09 180.62,-355.09 180.62,-355.09 180.62,-264.81 180.62,-264.81 180.62,-258.81 186.62,-252.81 192.62,-252.81 192.62,-252.81 650.66,-252.81 650.66,-252.81 656.66,-252.81 662.66,-258.81 662.66,-264.81 662.66,-264.81 662.66,-355.09 662.66,-355.09 662.66,-361.09 656.66,-367.09 650.66,-367.09"/>
-<text xml:space="preserve" text-anchor="middle" x="421.64" y="-345.15" font-family="PingFang SC" font-size="14.00">dark.py · flat.py · wave.py · p2vm.py · science.py</text>
+<text xml:space="preserve" text-anchor="middle" x="421.64" y="-345.15" font-family="PingFang SC" font-size="14.00">steps/: dark · flat · wave · p2vm · science</text>
 <text xml:space="preserve" text-anchor="middle" x="421.64" y="-308.9" font-family="PingFang SC" font-size="14.00">每个模块从上到下：</text>
 <text xml:space="preserve" text-anchor="middle" x="421.64" y="-288.65" font-family="PingFang SC" font-size="14.00">数据类 → 算法（含其 numba kernel）→ qc() → read_/write_ → run()</text>
 <text xml:space="preserve" text-anchor="middle" x="421.64" y="-268.4" font-family="PingFang SC" font-size="14.00">波长 / OPD / GD 使用 m；计算 float64</text>
@@ -52,7 +52,7 @@
 <g id="node4" class="node">
 <title>shared</title>
 <path fill="none" stroke="#64748b" d="M253.29,-176.81C253.29,-176.81 12,-176.81 12,-176.81 6,-176.81 0,-170.81 0,-164.81 0,-164.81 0,-131.03 0,-131.03 0,-125.03 6,-119.03 12,-119.03 12,-119.03 253.29,-119.03 253.29,-119.03 259.29,-119.03 265.29,-125.03 265.29,-131.03 265.29,-131.03 265.29,-164.81 265.29,-164.81 265.29,-170.81 259.29,-176.81 253.29,-176.81"/>
-<text xml:space="preserve" text-anchor="middle" x="132.64" y="-154.87" font-family="PingFang SC" font-size="14.00">extraction.py</text>
+<text xml:space="preserve" text-anchor="middle" x="132.64" y="-154.87" font-family="PingFang SC" font-size="14.00">steps/extraction.py</text>
 <text xml:space="preserve" text-anchor="middle" x="132.64" y="-134.62" font-family="PingFang SC" font-size="14.00">共用光谱提取 / 重采样 / group delay</text>
 </g>
 <!-- steps&#45;&gt;shared -->
@@ -65,7 +65,7 @@
 <g id="node5" class="node">
 <title>files</title>
 <path fill="none" stroke="#64748b" d="M537.41,-197.06C537.41,-197.06 305.88,-197.06 305.88,-197.06 299.88,-197.06 293.88,-191.06 293.88,-185.06 293.88,-185.06 293.88,-110.78 293.88,-110.78 293.88,-104.78 299.88,-98.78 305.88,-98.78 305.88,-98.78 537.41,-98.78 537.41,-98.78 543.41,-98.78 549.41,-104.78 549.41,-110.78 549.41,-110.78 549.41,-185.06 549.41,-185.06 549.41,-191.06 543.41,-197.06 537.41,-197.06"/>
-<text xml:space="preserve" text-anchor="middle" x="421.64" y="-175.12" font-family="PingFang SC" font-size="14.00">raw.py · products.py</text>
+<text xml:space="preserve" text-anchor="middle" x="421.64" y="-175.12" font-family="PingFang SC" font-size="14.00">io/: keywords · raw · products</text>
 <text xml:space="preserve" text-anchor="middle" x="421.64" y="-154.87" font-family="PingFang SC" font-size="14.00">raw：memmap 读取，快门确定身份</text>
 <text xml:space="preserve" text-anchor="middle" x="421.64" y="-134.62" font-family="PingFang SC" font-size="14.00">产品：float64 原样存储 · 不覆盖</text>
 <text xml:space="preserve" text-anchor="middle" x="421.64" y="-114.37" font-family="PingFang SC" font-size="14.00">QC 卡片 · PRO 溯源 header</text>
@@ -80,9 +80,9 @@
 <!-- base -->
 <g id="node6" class="node">
 <title>base</title>
-<path fill="none" stroke="#64748b" d="M617.04,-57.78C617.04,-57.78 398.25,-57.78 398.25,-57.78 392.25,-57.78 386.25,-51.78 386.25,-45.78 386.25,-45.78 386.25,-12 386.25,-12 386.25,-6 392.25,0 398.25,0 398.25,0 617.04,0 617.04,0 623.04,0 629.04,-6 629.04,-12 629.04,-12 629.04,-45.78 629.04,-45.78 629.04,-51.78 623.04,-57.78 617.04,-57.78"/>
+<path fill="none" stroke="#64748b" d="M631.29,-57.78C631.29,-57.78 384,-57.78 384,-57.78 378,-57.78 372,-51.78 372,-45.78 372,-45.78 372,-12 372,-12 372,-6 378,0 384,0 384,0 631.29,0 631.29,0 637.29,0 643.29,-6 643.29,-12 643.29,-12 643.29,-45.78 643.29,-45.78 643.29,-51.78 637.29,-57.78 631.29,-57.78"/>
 <text xml:space="preserve" text-anchor="middle" x="507.64" y="-35.84" font-family="PingFang SC" font-size="14.00">instrument.py</text>
-<text xml:space="preserve" text-anchor="middle" x="507.64" y="-15.59" font-family="PingFang SC" font-size="14.00">通道顺序 · DetectorSetup · Raw</text>
+<text xml:space="preserve" text-anchor="middle" x="507.64" y="-15.59" font-family="PingFang SC" font-size="14.00">通道顺序 · DetectorSetup · 快门身份</text>
 </g>
 <!-- steps&#45;&gt;base -->
 <g id="edge6" class="edge">

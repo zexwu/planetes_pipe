@@ -6,11 +6,11 @@ import numpy as np
 from numba import njit, prange
 from numpy.typing import NDArray
 
-from planetes_pipe.dark import Dark
-from planetes_pipe.flat import Flat, extract_sparse_spectra
 from planetes_pipe.instrument import DetectorSetup
-from planetes_pipe.raw import Raw
-from planetes_pipe.wave import Wave
+from planetes_pipe.io.raw import Raw
+from planetes_pipe.steps.dark import Dark
+from planetes_pipe.steps.flat import Flat, extract_sparse_spectra
+from planetes_pipe.steps.wave import Wave
 
 
 @njit(parallel=True, cache=True)

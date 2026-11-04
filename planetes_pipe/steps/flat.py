@@ -1,6 +1,6 @@
 """FLAT: spectral trace positions, extraction apertures and detector response.
 
-    from planetes_pipe import flat
+    from planetes_pipe.steps import flat
     out = flat.run(dark_path, bad_path, flat_raws, output_dir="calibration")  # {"FLAT": path}
 """
 
@@ -14,11 +14,12 @@ from numpy.typing import NDArray
 from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, medfilt
 
-from planetes_pipe import log, products
-from planetes_pipe.dark import Bad, Dark, read_bad, read_dark
+from planetes_pipe import log
 from planetes_pipe.instrument import DetectorSetup, check_setup, layout
-from planetes_pipe.keywords import Keyword
-from planetes_pipe.raw import Raw, check_calibrations, read_raws, read_setup
+from planetes_pipe.io import products
+from planetes_pipe.io.keywords import Keyword
+from planetes_pipe.io.raw import Raw, check_calibrations, read_raws, read_setup
+from planetes_pipe.steps.dark import Bad, Dark, read_bad, read_dark
 
 
 @dataclass(slots=True)

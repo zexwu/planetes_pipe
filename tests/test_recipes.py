@@ -13,13 +13,13 @@ from astropy.io import fits
 from fixtures import input_rows, metadata, write_raw, write_recipe_inputs
 
 import planetes_pipe
-from planetes_pipe.dark import read_bad, read_dark, write_dark
-from planetes_pipe.flat import read_flat
-from planetes_pipe.keywords import DPR_TECH
-from planetes_pipe.p2vm import read_p2vm
-from planetes_pipe.raw import read_raw
-from planetes_pipe.science import read_reduced, reduce_science
-from planetes_pipe.wave import read_wave
+from planetes_pipe.io.keywords import DPR_TECH
+from planetes_pipe.io.raw import read_raw
+from planetes_pipe.steps.dark import read_bad, read_dark, write_dark
+from planetes_pipe.steps.flat import read_flat
+from planetes_pipe.steps.p2vm import read_p2vm
+from planetes_pipe.steps.science import read_reduced, reduce_science
+from planetes_pipe.steps.wave import read_wave
 
 
 @unittest.skipUnless(

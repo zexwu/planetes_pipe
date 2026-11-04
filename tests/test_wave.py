@@ -9,11 +9,11 @@ from unittest.mock import patch
 import numpy as np
 from astropy.io import fits
 
-from planetes_pipe.dark import make_dark_products
-from planetes_pipe.flat import make_flat, read_flat, write_flat
 from planetes_pipe.instrument import layout
-from planetes_pipe.raw import read_raw, read_raws, write_shutters
-from planetes_pipe.wave import make_wave, match_peaks_grid, read_wave, write_wave
+from planetes_pipe.io.raw import read_raw, read_raws, write_shutters
+from planetes_pipe.steps.dark import make_dark_products
+from planetes_pipe.steps.flat import make_flat, read_flat, write_flat
+from planetes_pipe.steps.wave import make_wave, match_peaks_grid, read_wave, write_wave
 
 
 class WaveTests(unittest.TestCase):
@@ -75,7 +75,7 @@ class WaveTests(unittest.TestCase):
             flat = read_flat(root / "flat.fits")
             frame = lamp_image + lamp_dark_image
             fits.PrimaryHDU(np.stack([frame, frame])).writeto(root / "lamp.fits")
-            with patch("planetes_pipe.wave.REFERENCE_WAVELENGTH_M", reference):
+            with patch("planetes_pipe.steps.wave.REFERENCE_WAVELENGTH_M", reference):
                 wave = make_wave(read_raw(root / "lamp.fits", "WAVELAMP_RAW", hdu=0),
                                  lamp_dark, flat)
             truth_m = 1.05e-6 + (np.arange(width)[None] - shifts[:, None]) * 1e-9

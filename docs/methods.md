@@ -5,7 +5,7 @@ FITS encoding, QC and parameters are defined in [products.md](products.md).
 Each step file contains its file entry point, parameters and array calculations.
 Python and PyEsoRex call the same functions; CPL imports stay in eso/.
 
-## Dark statistics (`dark.py`)
+## Dark statistics (`steps/dark.py`)
 
 Read the complete raw stack in 16-frame float64 chunks. For each chunk compute
 its mean and centered sum of squares M2; merge chunks using the difference
@@ -23,7 +23,7 @@ A single frame returns Dark with n_frames=1 and temporal_rms_adu=None; a
 loaded 2-D image has unknown frame count. Unknown RMS is never replaced by zero.
 Subtraction only consumes mean_adu; BAD detection requires measured temporal RMS.
 
-## Flat and traces (`flat.py`)
+## Flat and traces (`steps/flat.py`)
 
 Subtract the explicitly selected dark mean from each telescope's mean flat and average
 those four maps. Collapse along dispersion, select the strongest 24 spatial
@@ -43,7 +43,7 @@ pixels and padding when different outputs have different sample counts. The
 flat product contains response, geometry and retained Gaussian fit sigmas;
 DARK statistics and BAD flags are separate products. Fit sigmas remain available for inspection; the extraction aperture remains aperture_width_pixels.
 
-## Wavelength solution (`wave.py`)
+## Wavelength solution (`steps/wave.py`)
 
 Subtract the selected lamp dark from the complete mean lamp image and extract
 using flat's geometry. Use the mean of the last four outputs as the reference
@@ -63,7 +63,7 @@ iterative residual clipping. Evaluate at each traced output. The result is a
 24 × detector-x wavelength map in metres. Smooth mapping and preserved line order
 are assumptions; coverage alone is not a wavelength-accuracy measurement.
 
-## Extraction and interpolation (`extraction.py`)
+## Extraction and interpolation (`steps/extraction.py`)
 
 Prepare sparse geometry and flat response once. Subtract the explicitly selected
 dark once, accumulate selected pixels, divide the extracted spectrum by the
@@ -89,7 +89,7 @@ The resulting P2VMSpectra stays in memory, without a preprocessing file.
 The main dark applies to telescope and baseline cubes. A phase reference has
 its independently selected dark, or uses the main dark when none is supplied.
 
-## P2VM (`p2vm.py`)
+## P2VM (`steps/p2vm.py`)
 
 
 `fit_p2vm` reads as five stages: scan response fitting, photometric transmission,
@@ -160,7 +160,7 @@ a failure policy for other data: an all-zero scan still returns zero phase/radiu
 through the old fallbacks. Deciding which channels to reject is a separate
 scientific change requiring an explicit criterion.
 
-## Instrumental science and live frames (`science.py`)
+## Instrumental science and live frames (`steps/science.py`)
 
 Apply P2VM to extracted spectra to obtain four photometric channels and six
 complex coherent channels. Use the retained visibility normalization and

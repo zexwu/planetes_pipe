@@ -9,15 +9,15 @@ from pathlib import Path
 import numpy as np
 from fixtures import calibration_arrays, calibration_spectra
 
-from planetes_pipe.flat import Flat, read_flat
-from planetes_pipe.p2vm import P2VM, fit_p2vm, read_p2vm
-from planetes_pipe.science import (
+from planetes_pipe.steps.flat import Flat, read_flat
+from planetes_pipe.steps.p2vm import P2VM, fit_p2vm, read_p2vm
+from planetes_pipe.steps.science import (
     normalize_coherent_flux,
     read_reduced,
     reduce_spectra,
     write_reduced,
 )
-from planetes_pipe.wave import Wave, read_wave
+from planetes_pipe.steps.wave import Wave, read_wave
 
 READERS = {Flat: read_flat, Wave: read_wave, P2VM: read_p2vm}
 
