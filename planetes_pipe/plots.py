@@ -23,7 +23,8 @@ def save_calibration_plots(
 ) -> None:
     """Write product maps, fitted traces, wavelength and instrumental P2VM diagnostics.
 
-    P2VM pages: transmission, normalized coherence and phase per baseline and output.
+    P2VM pages: transmission, relative transmission and a per-baseline percentage
+    table (as gravi_visual), normalized coherence and phase per baseline and output.
 
     Trace plots cover each output's P2VM wavelength interval only. Optional
     residual and OPD pages are included when saved in the P2VM product.
@@ -78,6 +79,38 @@ def save_calibration_plots(
         axes[0, 0].legend(fontsize=7, ncol=2)
         _save(pdf, fig, 'P2VM transmission — share of each telescope in each output; for every '
                         'telescope and wavelength the mean over the 24 outputs is 1', top=0.95)
+
+        # As gravi_visual's RELATIVE page: share of each telescope in an output's flux.
+        share = p2vm.transmission / p2vm.transmission.sum(axis=1, keepdims=True)
+        fig, axes = plt.subplots(2, 3)
+        for b, (ax, pair) in enumerate(zip(axes.flat, layout.baselines)):
+            t1, t2 = layout.baseline_pairs[b]
+            for o, label, color in zip(p2vm.baseline_outputs[b], layout.abcd_order, ABCD_COLORS):
+                ax.plot(wavelength, share[o, t1], color=color, label=f'{label} T{pair[0]}')
+                ax.plot(wavelength, share[o, t2], color=color, ls='--', label=f'{label} T{pair[1]}')
+            ax.axhline(0.5, color='gray', lw=.7)
+            ax.set(title=f'S{pair[0]}–S{pair[1]}: T{pair[0]} solid, T{pair[1]} dashed', ylim=(0, 1),
+                   xlabel='Wavelength [nm]', ylabel='Share of output flux')
+        axes[0, 0].legend(fontsize=7, ncol=2)
+        _save(pdf, fig, 'P2VM relative transmission — each telescope / all four telescopes '
+                        'in the output (balanced = 0.5)', top=0.95)
+
+        # As gravi_visual's table: wavelength-averaged share per baseline, in percent.
+        fig, ax = plt.subplots(figsize=(11.7, 4))
+        ax.axis('off')
+        rows = []
+        for b in range(len(layout.baselines)):
+            flux = p2vm.transmission[p2vm.baseline_outputs[b]].sum(axis=(0, 2))  # per telescope
+            rows.append([f'{100 * f / flux.sum():.1f}' for f in flux])
+        table = ax.table(cellText=rows, colLabels=[f'T{t}' for t in layout.telescopes],
+                         rowLabels=[f'S{p[0]}–S{p[1]}' for p in layout.baselines], loc='center')
+        table.scale(1, 1.6)
+        for b, (t1, t2) in enumerate(layout.baseline_pairs):
+            for t in (t1, t2):
+                table[b + 1, t].set_facecolor('lavender')
+        _save(pdf, fig, 'Wavelength-averaged photometric transmission per baseline (%) — '
+                        'share of each telescope in the four outputs; its two telescopes shaded',
+              top=0.9)
 
         for quantity in ('coherence', 'phase'):
             fig, axes = plt.subplots(2, 3)
