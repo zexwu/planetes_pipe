@@ -3,6 +3,7 @@ from pathlib import Path
 
 from astropy.io import fits
 
+from planetes_pipe.io.keywords import DIT, PRO_CATG
 from planetes_pipe.io.raw import read_raw
 from planetes_pipe.steps import science
 
@@ -12,26 +13,20 @@ OUTPUT = CALIBRATIONS.parent / "science"
 
 
 def main():
-    headers = {path: fits.getheader(path) for path in CALIBRATIONS.glob("*.fits")}
+    raw = read_raw(SCIENCE, "SINGLE_SCI_RAW")
+    headers = {path: fits.getheader(path) for path in sorted(CALIBRATIONS.glob("*.fits"))}
 
-    def product(category, **keywords):
-        """The single calibration of this category matching the given header values."""
-        (path,) = (p for p, h in headers.items() if h.get("ESO PRO CATG") == category
-                   and all(h.get(k) == v for k, v in keywords.items()))
+    def product(category, *same):
+        """The single product of this category; `same` keywords must equal the science's."""
+        (path,) = (p for p, h in headers.items() if PRO_CATG.get(h) == category
+                   and all(k.get(h) == k.get(raw.header) for k in same))
         return path
 
-    exposure = read_raw(SCIENCE, "SINGLE_SCI_RAW").setup.exposure_s
-    if exposure is None:
-        raise ValueError("Select a dark explicitly when science exposure is unknown")
-    # The step also checks detector/ROI compatibility before subtracting the dark.
-    reduced = science.run(
-        SCIENCE,
-        product("DARK", **{"ESO DET WIN1 DIT1": exposure}),
-        product("FLAT"),
-        product("WAVE"),
-        product("P2VM"),
-        output_dir=OUTPUT,
-    )
+    if DIT.get(raw.header) is None:
+        raise ValueError("Select a dark explicitly when the science DIT is not recorded")
+    # The step also checks the detector window before subtracting the dark.
+    reduced = science.run(SCIENCE, product("DARK", DIT), product("FLAT"), product("WAVE"),
+                          product("P2VM"), output_dir=OUTPUT)
     print(reduced["SINGLE_SCI_P2VMRED"])
 
 
