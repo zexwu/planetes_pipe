@@ -66,12 +66,14 @@ Each step can be used at the level that fits the task:
 | Level | Input → output | DARK | FLAT | WAVE | P2VM | Science |
 | --- | --- | --- | --- | --- | --- | --- |
 | files | paths → product files | `dark.run` | `flat.run` | `wave.run` | `p2vm.run` | `science.run` |
-| raw | `Raw` cubes + products → product | `make_dark_products` | `make_flat` | `make_wave` | `make_p2vm` | `reduce_science` |
+| raw | `Raw` cubes + products → product | `make_dark_products` | `make_flat` | `make_wave` | `extract_p2vm_spectra` | `reduce_science` |
 | arrays | arrays → product | `measure_dark`, `detect_bad_pixels` | `build_flat` | `fit_wavelength_solution` | `fit_p2vm` | `reduce_spectra` |
 
-`run()` reads the files, calls the raw level, computes QC and writes the products.
-The raw level checks that calibrations match the raw detector setup. The array
-level is pure arithmetic, used by the live viewer and the tests.
+`run()` reads the files, calls the raw level, computes QC and writes the products;
+its arguments are file paths (`dark_file`, `flat_files`, ...). The raw level checks
+that calibrations match the raw detector setup; FLAT and P2VM take their raws keyed
+by physical identity, as returned by `files.read_raws`. The array level is pure
+arithmetic, used by the live viewer and the tests.
 
 ```python
 from planetes_pipe.dark import make_dark_products

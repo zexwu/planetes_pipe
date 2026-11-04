@@ -218,7 +218,7 @@ def extract_spectra(raw: Raw, extractor: SpectralExtractor, dark: Dark) -> NDArr
     Read and extract 16 frames at a time, then concatenate all extracted chunks.
     The returned spectra therefore still scale in memory with the total frame count.
     This helper does not select calibrations or check exposure/shutter metadata;
-    those checks belong to the calling step (make_p2vm, reduce_science, ...).
+    those checks belong to the calling step (extract_p2vm_spectra, reduce_science).
     """
 
     return np.concatenate(

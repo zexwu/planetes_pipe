@@ -3,7 +3,7 @@
     from planetes_pipe import p2vm
     out = p2vm.run(dark, flat, wave, flat_raws, scan_raws, output_dir="calibration")
 
-Order: data classes; spectra and wavelength grid; response fit and inverse;
+Order: data classes; wavelength grid and spectra; response fit and inverse;
 QC; FITS; run().
 """
 
@@ -17,19 +17,10 @@ from numpy.typing import NDArray
 
 from planetes_pipe import files, log
 from planetes_pipe.dark import Dark, read_dark
-from planetes_pipe.extraction import (
-    estimate_group_delay,
-    extract_spectra,
-    prepare_extraction,
-)
+from planetes_pipe.extraction import (SpectralExtractor, estimate_group_delay, extract_spectra,
+                                      prepare_extraction)
 from planetes_pipe.flat import Flat, read_flat
-from planetes_pipe.instrument import (
-    Raw,
-    check_setup,
-    layout,
-    order_raws,
-    shutter_identity,
-)
+from planetes_pipe.instrument import Raw, check_calibrations, layout
 from planetes_pipe.wave import Wave, read_wave
 
 
@@ -80,162 +71,35 @@ def wavelength_grid(flat: Flat, wave: Wave) -> NDArray:
     return grid
 
 
-def extract_phase_reference(raw: Raw, dark: Dark, flat: Flat, wave: Wave) -> NDArray:
-    """Extract an instrumental phase-reference exposure onto the P2VM target grid.
+def extract_p2vm_spectra(flats: dict[str, Raw], scans: dict[str, Raw],
+                         extractor: SpectralExtractor, dark: Dark, flat: Flat) -> P2VMSpectra:
+    """Extract the calibration spectra and identify which outputs belong to each baseline.
 
     Parameters
     ----------
-    raw : Raw
-        Phase-reference ADU cube with all shutters open.
-    dark : Dark
-        Mean dark in ADU selected for this exposure; its own DARK when the
-        exposure differs from the calibration scans.
-    flat, wave : Flat, Wave
-        The same calibrations later passed to make_p2vm.
-
-    Returns
-    -------
-    spectra : ndarray, shape (24 outputs, frame, wavelength)
-        Dark-subtracted ADU spectra, ready for make_p2vm(phase_reference=...).
-    """
-    check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
-    check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
-    extractor = prepare_extraction(flat, wave, wavelength_grid(flat, wave))
-    return extract_spectra(raw, extractor, dark)
-
-
-def make_p2vm(
-    flat: Flat,
-    wave: Wave,
-    main_dark: Dark,
-    *,
-    telescope_flats: list[Raw],
-    baseline_cubes: list[Raw],
-    phase_reference: NDArray | None = None,
-    scan_opd_m: NDArray | None = None,
-    keep_diagnostics: bool = False,
-    gd_search_min_m: float = -30e-6,
-    gd_search_max_m: float = 30e-6,
-) -> P2VM:
-    """Fit an instrumental P2VM on the common illuminated native wavelength grid.
-
-    Parameters
-    ----------
-    flat : Flat
-        Detector response and sparse extraction geometry.
-    wave : Wave
-        Wavelength map in metres on the FLAT detector grid.
-    main_dark : Dark
-        Mean dark in ADU used for both telescope-flat and baseline-scan sequences.
-        Known exposure and detector settings must match each input.
-    telescope_flats : list of Raw
-        Four raw ADU cubes in any order, identified by recorded shutters.
-    baseline_cubes : list of Raw
-        Six raw ADU scan cubes in any order, identified by recorded shutters.
-    phase_reference : ndarray or None, optional
-        Extracted ADU spectra (24 outputs, frame, wavelength) on the exact target
-        grid, from extract_phase_reference() with its own DARK. None skips the
-        correction.
-    scan_opd_m : ndarray or None, optional
-        Recorded OPD guide [m], shaped (baseline, frame), in BASELINES order.
-        The caller explicitly converts delay-line positions and chooses signs.
-    keep_diagnostics : bool, optional
-        Retain scan diagnostics in the returned product; default False.
-    gd_search_min_m, gd_search_max_m : float, optional
-        Coarse GD initialization interval [m]; defaults -30e-6, +30e-6.
-        Subsequent Newton refinement is unconstrained.
-
-    Returns
-    -------
-    p2vm : P2VM
-        Response terms and inverse on the target grid. Not written to disk.
-
-    Notes
-    -----
-    Frame counts must agree within the four telescope files and, separately,
-    within the six baseline files. The two groups may have different frame counts.
-    """
-
-    grid = wavelength_grid(flat, wave)
-    spectra = extract_p2vm_spectra(
-        flat,
-        wave,
-        main_dark,
-        telescope_flats=telescope_flats,
-        baseline_cubes=baseline_cubes,
-        wavelength_m=grid,
-    )
-    return fit_p2vm(
-        spectra,
-        scan_opd_m=scan_opd_m,
-        phase_reference=phase_reference,
-        keep_diagnostics=keep_diagnostics,
-        gd_search_min_m=gd_search_min_m,
-        gd_search_max_m=gd_search_max_m,
-    )
-
-
-def extract_p2vm_spectra(
-    flat: Flat,
-    wave: Wave,
-    main_dark: Dark,
-    *,
-    telescope_flats: list[Raw],
-    baseline_cubes: list[Raw],
-    wavelength_m: NDArray,
-) -> P2VMSpectra:
-    """Extract calibration spectra and identify the outputs belonging to each baseline.
-
-    Parameters
-    ----------
-    flat : Flat
-        Detector response and sparse extraction geometry.
-    wave : Wave
-        Wavelength map [m] on the same detector grid.
-    main_dark : Dark
-        Mean image [ADU] selected for every telescope and baseline input.
-    telescope_flats : list of Raw
-        Four raw cubes in any order, identified by recorded shutters.
-    baseline_cubes : list of Raw
-        Six raw scan cubes in any order, identified by recorded shutters.
-    wavelength_m : ndarray, shape (wavelength,)
-        Increasing target wavelengths [m], covered by all detector outputs.
+    flats, scans : dict of str to Raw
+        Four telescope flats ('4', ...) and six baseline scans ('43', ...), from
+        files.read_raws. Frame counts must agree within each group.
+    extractor : SpectralExtractor
+        Extraction geometry and target wavelength grid (prepare_extraction).
+    dark, flat : Dark, Flat
+        The main DARK and the FLAT; their known setup must match every raw.
 
     Returns
     -------
     spectra : P2VMSpectra
         Telescope spectra (4, 24, frame, wavelength) and baseline spectra
-        (6, 24, frame, wavelength) in ADU, plus the grid and output mapping.
-        Frame counts must agree within each group of files.
-
-    Notes
-    -----
-    Recorded shutters determine the physical input identities. Known detector
-    metadata must match the calibrations. Output identification requires agreement
-    between telescope illumination and baseline modulation; it does not infer identity from names.
+        (6, 24, frame, wavelength) in ADU, the output mapping and the grid. The
+        mapping requires telescope illumination and baseline modulation to agree.
     """
-
-    extractor = prepare_extraction(flat, wave, wavelength_m)
-
-    baseline_spectra = []
-    for raw in order_raws(baseline_cubes, layout.baselines):
-        check_setup(raw.setup, main_dark.setup, exposure=True, role="DARK")
-        check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
-        baseline_spectra.append(extract_spectra(raw, extractor, main_dark))
-    baseline_spectra = np.asarray(baseline_spectra)
-
-    telescope_spectra = []
-    for raw in order_raws(telescope_flats, layout.telescopes):
-        check_setup(raw.setup, main_dark.setup, exposure=True, role="DARK")
-        check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
-        telescope_spectra.append(extract_spectra(raw, extractor, main_dark))
-    telescope_spectra = np.asarray(telescope_spectra)
-    return P2VMSpectra(
-        telescope_spectra,
-        baseline_spectra,
-        _identify_output_mapping(telescope_spectra, baseline_spectra),
-        extractor.wavelength_m,
-    )
+    for raw in [*flats.values(), *scans.values()]:
+        check_calibrations(raw, dark=dark, flat=flat)
+    telescope_spectra = np.asarray(
+        [extract_spectra(flats[telescope], extractor, dark) for telescope in layout.telescopes])
+    baseline_spectra = np.asarray(
+        [extract_spectra(scans[baseline], extractor, dark) for baseline in layout.baselines])
+    outputs = _identify_output_mapping(telescope_spectra, baseline_spectra)
+    return P2VMSpectra(telescope_spectra, baseline_spectra, outputs, extractor.wavelength_m)
 
 
 def _identify_output_mapping(
@@ -960,10 +824,11 @@ def write_p2vm(path: Path, product: P2VM, *, header=None) -> None:
     ]
     if product.dc_term_adu is not None:
         columns.append(files.column("C_MATRIX", product.dc_term_adu, "adu"))
+    wavelength = [files.column("WAVELENGTH", product.wavelength_m, "m")]
     extensions = [
         detector,
-        files.table("PLANETES_WAVELENGTH", [files.column("WAVELENGTH", product.wavelength_m, "m")]),
-        files.table("P2VM_SC", columns),
+        afits.BinTableHDU.from_columns(wavelength, name="PLANETES_WAVELENGTH"),
+        afits.BinTableHDU.from_columns(columns, name="P2VM_SC"),
     ]
     extensions += [files.image_hdu(ext, getattr(product, name), unit)
                    for name, ext, unit in _IMAGES if getattr(product, name) is not None]
@@ -989,17 +854,17 @@ def read_p2vm(path: Path) -> P2VM:
         return P2VM(**values)
 
 
-def read_scan_opd(
-    baseline_cubes: list[Path], dl_gain: Mapping[str, float]
-) -> NDArray:
-    """Read per-frame DL_SCAN positions and explicitly convert mechanical mm to OPD m."""
+def read_scan_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float]) -> NDArray:
+    """Per-frame scan OPD [m], (baseline, frame), from each scan's DL_SCAN table.
+
+    dl_gain converts the moving delay line's mechanical position [mm] to OPD for
+    each baseline ('43', ...), including its sign.
+    """
     if set(dl_gain) != set(layout.baselines):
         raise ValueError("dl_gain requires all six physical baselines")
-    paths = {shutter_identity(files.read_shutters(afits.getheader(path))): path
-             for path in baseline_cubes}
     positions = []
     for baseline in layout.baselines:
-        table, header = afits.getdata(paths[baseline], "DL_SCAN", header=True)
+        table, header = afits.getdata(scans[baseline].path, "DL_SCAN", header=True)
         if header["MOVINGDL"] != int(baseline[1]):
             raise ValueError(f"DL gain assumes the second arm moves: {baseline}")
         counts = table["NFRAMES"]
@@ -1010,42 +875,46 @@ def read_scan_opd(
     return np.asarray(positions)
 
 
-def run(dark, flat, wave, flat_raws, p2vm_raws, *, output_dir,
-        phase_reference=None, phase_dark=None, keep_diagnostics=False,
-        gd_search_min_m=-30e-6, gd_search_max_m=30e-6, dl_gain=None) -> dict[str, Path]:
-    """Recipe planetes_p2vm: 4 FLAT_RAW + 6 P2VM_RAW scans + DARK, FLAT, WAVE -> P2VM.
+def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
+        phase_file=None, phase_dark_file=None, dl_gain=None,
+        keep_diagnostics=False, gd_search_min_m=-30e-6, gd_search_max_m=30e-6) -> dict[str, Path]:
+    """planetes_p2vm: four flats + six baseline scans + DARK, FLAT, WAVE -> P2VM.
 
-    phase_reference is an optional all-shutters-open raw exposure; phase_dark is
-    its DARK when its exposure differs from the scans. dl_gain maps each baseline
-    ('43', ...) to its delay-line mm -> OPD m gain; None ignores DL_SCAN.
+    phase_file is an optional all-shutters-open exposure used as instrumental phase
+    reference, with phase_dark_file if its DIT differs from the scans. dl_gain
+    ({'43': gain, ...}, mm -> OPD m) guides phase unwrapping with the DL_SCAN tables.
     """
-    dark_product, flat_product, wave_product = read_dark(dark), read_flat(flat), read_wave(wave)
-    inputs = {"FLAT_RAW": flat_raws, "P2VM_RAW": p2vm_raws,
-              "DARK": [dark], "FLAT": [flat], "WAVE": [wave]}
-    reference_spectra = None
-    if phase_reference is not None:
-        selected = dark_product if phase_dark is None else read_dark(phase_dark)
-        reference_spectra = extract_phase_reference(
-            files.read_raw(phase_reference, "SINGLE_SCI_RAW"), selected, flat_product,
-            wave_product)
-        inputs["PHASE_REFERENCE"] = [phase_reference]
-        if phase_dark is not None:
-            inputs["PHASE_DARK_CALIB"] = [phase_dark]
-    scans = [files.read_raw(path, "P2VM_RAW") for path in p2vm_raws]
-    product = make_p2vm(
-        flat_product, wave_product, dark_product,
-        telescope_flats=[files.read_raw(path, "FLAT_RAW") for path in flat_raws],
-        baseline_cubes=scans,
-        phase_reference=reference_spectra,
-        scan_opd_m=None if dl_gain is None else read_scan_opd(p2vm_raws, dl_gain),
-        keep_diagnostics=keep_diagnostics,
-        gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m,
-    )
-    # Name and inherit the header from the 43 scan, independent of input order.
-    reference = next(p for p, raw in zip(p2vm_raws, scans) if shutter_identity(raw.shutters) == "43")
-    header = files.provenance("planetes_p2vm", reference, inputs,
-                             keep_diagnostics=keep_diagnostics, gd_search_min_m=gd_search_min_m,
-                             gd_search_max_m=gd_search_max_m, dl_gain=dl_gain)
-    out = files.output_paths(output_dir, reference, "P2VM")
-    write_p2vm(out["P2VM"], product, header=header)
-    return out
+    dark, flat, wave = read_dark(dark_file), read_flat(flat_file), read_wave(wave_file)
+    flats = files.read_raws(flat_files, "FLAT_RAW", layout.telescopes)
+    scans = files.read_raws(scan_files, "P2VM_RAW", layout.baselines)
+
+    # Extract every input on the common illuminated wavelength grid.
+    extractor = prepare_extraction(flat, wave, wavelength_grid(flat, wave))
+    spectra = extract_p2vm_spectra(flats, scans, extractor, dark, flat)
+
+    phase_spectra = None
+    if phase_file is not None:
+        phase_raw = files.read_raw(phase_file, "SINGLE_SCI_RAW")
+        phase_dark = read_dark(phase_dark_file) if phase_dark_file is not None else dark
+        check_calibrations(phase_raw, dark=phase_dark, flat=flat)
+        phase_spectra = extract_spectra(phase_raw, extractor, phase_dark)
+
+    scan_opd_m = None
+    if dl_gain is not None:
+        scan_opd_m = read_scan_opd(scans, dl_gain)
+
+    options = dict(keep_diagnostics=keep_diagnostics,
+                   gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m)
+    product = fit_p2vm(spectra, phase_reference=phase_spectra, scan_opd_m=scan_opd_m, **options)
+
+    reference = scans["43"].path  # Names the product and supplies its observation header.
+    inputs = {"FLAT_RAW": flat_files, "P2VM_RAW": scan_files,
+              "DARK": [dark_file], "FLAT": [flat_file], "WAVE": [wave_file]}
+    if phase_file is not None:
+        inputs["PHASE_REFERENCE"] = [phase_file]
+    if phase_dark_file is not None:
+        inputs["PHASE_DARK_CALIB"] = [phase_dark_file]
+    header = files.provenance("planetes_p2vm", reference, inputs, dl_gain=dl_gain, **options)
+    path = files.product_path(output_dir, reference, "P2VM")
+    write_p2vm(path, product, header=header)
+    return {"P2VM": path}

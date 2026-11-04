@@ -20,7 +20,7 @@ from fixtures import (
 
 from planetes_pipe import files
 from planetes_pipe.dark import Dark, detect_bad_pixels, measure_dark, qc, write_dark
-from planetes_pipe.files import as_compute_array, find_raw, product_filename, read_raw
+from planetes_pipe.files import find_raw, product_path, read_raw
 from planetes_pipe.flat import Flat, read_flat
 from planetes_pipe.instrument import DetectorSetup
 from planetes_pipe.p2vm import P2VM, fit_p2vm, read_p2vm
@@ -136,7 +136,7 @@ class RawTests(unittest.TestCase):
             self.assertEqual(measured.mean_adu.item(), 1e12)
             self.assertEqual(measured.temporal_rms_adu.item(), 1.0)
             self.assertEqual(measured.mean_adu.dtype, np.float64)
-        for dark, count in ((Dark(as_compute_array(cube[0])), None), (single, 1)):
+        for dark, count in ((Dark(np.asarray(cube[0], dtype=float)), None), (single, 1)):
             with tempfile.TemporaryDirectory() as tmp:
                 np.testing.assert_array_equal(dark.mean_adu, cube[0])
                 self.assertEqual(dark.n_frames, count)
@@ -186,7 +186,7 @@ class RawTests(unittest.TestCase):
             self.assertEqual([len(c) for c in chunks], [16, 16, 3])
             np.testing.assert_array_equal(np.concatenate(chunks), cube)
 
-    def test_product_filename_preserves_reference_identity(self):
+    def test_product_path_preserves_reference_identity(self):
         for stem in (
             "PLANETES.2026-02-05T210609",
             "PLANETES.2026-02-05T21:06:09.123",
@@ -195,11 +195,11 @@ class RawTests(unittest.TestCase):
             with self.subTest(stem=stem):
                 reference = Path("/unread/raw") / f"{stem}.fits"
                 self.assertEqual(
-                    product_filename(reference, "SINGLE_SCI_P2VMRED"),
+                    product_path("out", reference, "SINGLE_SCI_P2VMRED").name,
                     f"{stem}_singlescip2vmred.fits",
                 )
                 self.assertEqual(
-                    product_filename(reference, "DARK"),
+                    product_path("out", reference, "DARK").name,
                     f"{stem}_dark.fits",
                 )
 

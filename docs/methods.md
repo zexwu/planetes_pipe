@@ -96,8 +96,7 @@ its independently selected dark, or uses the main dark when none is supplied.
 `fit_p2vm` reads as five stages: scan response fitting, photometric transmission,
 response normalization, V2PM inversion, and optional instrumental phase reference.
 Array shape/identity checks sit at the array entry boundary. File reading and
-output identification remain in `make_p2vm` / `extract_p2vm_spectra`, below the
-scientific functions. All use the fixed pairs in `instrument.BASELINE_PAIRS`.
+output identification are in `p2vm.run` / `extract_p2vm_spectra`, before the fit. All use the fixed pairs in `instrument.BASELINE_PAIRS`.
 
 The scan routine explicitly follows ellipse -> OPD/GD -> response fitting for each
 baseline. Its optional diagnostic dictionary supplies the six existing product
@@ -151,7 +150,7 @@ The optional phase reference is applied in four explicit stages:
 
 The fitting function receives reference spectra explicitly, or None to skip this
 stage. The script or recipe selects the reference file and its DARK and performs
-extraction first (`p2vm.extract_phase_reference`). A supplied PHASE_REFERENCE is
+extraction first, with the same extractor as the scans (`p2vm.run`). A supplied PHASE_REFERENCE is
 always applied; the main DARK is used when no PHASE_DARK_CALIB is supplied. An
 absent reference is not read and is not recorded as an input.
 

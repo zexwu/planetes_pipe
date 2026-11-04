@@ -236,13 +236,15 @@ def read_bad(path: Path) -> Bad:
         return Bad(files.read_image(hdus, "IMAGING_DATA_SC"))
 
 
-def run(dark_raw, *, output_dir, bad_pixel_threshold=BAD_PIXEL_THRESHOLD) -> dict[str, Path]:
-    """Recipe planetes_dark: DARK_RAW -> DARK and BAD files in output_dir."""
-    dark, bad = make_dark_products(files.read_raw(dark_raw, "DARK_RAW"),
-                                   bad_pixel_threshold=bad_pixel_threshold)
-    header = files.provenance("planetes_dark", dark_raw, {"DARK_RAW": [dark_raw]},
-                             bad_pixel_threshold=bad_pixel_threshold)
-    out = files.output_paths(output_dir, dark_raw, "DARK", "BAD")
-    write_dark(out["DARK"], dark, header=header)
-    write_bad(out["BAD"], bad, header=header)
-    return out
+def run(dark_file, *, output_dir, bad_pixel_threshold=BAD_PIXEL_THRESHOLD) -> dict[str, Path]:
+    """planetes_dark: one DARK_RAW -> DARK and BAD."""
+    raw = files.read_raw(dark_file, "DARK_RAW")
+    dark, bad = make_dark_products(raw, bad_pixel_threshold=bad_pixel_threshold)
+
+    header = files.provenance("planetes_dark", dark_file, {"DARK_RAW": [dark_file]},
+                              bad_pixel_threshold=bad_pixel_threshold)
+    dark_path = files.product_path(output_dir, dark_file, "DARK")
+    bad_path = files.product_path(output_dir, dark_file, "BAD")
+    write_dark(dark_path, dark, header=header)
+    write_bad(bad_path, bad, header=header)
+    return {"DARK": dark_path, "BAD": bad_path}

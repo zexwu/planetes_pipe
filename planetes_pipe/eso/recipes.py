@@ -169,8 +169,8 @@ class PlanetesDark(ui.PyRecipe):
     def run(self, frameset, settings):
         values = read_parameters(self, settings)
         sof = read_sof(frameset, {"DARK_RAW": 1})
-        return publish(dark.run(sof["DARK_RAW"][0], output_dir=".",
-                                **run_options(dark.run, values)))
+        options = run_options(dark.run, values)
+        return publish(dark.run(sof["DARK_RAW"][0], output_dir=".", **options))
 
 
 class PlanetesFlat(ui.PyRecipe):
@@ -187,8 +187,10 @@ class PlanetesFlat(ui.PyRecipe):
     def run(self, frameset, settings):
         values = read_parameters(self, settings)
         sof = read_sof(frameset, {"DARK": 1, "BAD": 1, "FLAT_RAW": 4})
-        return publish(flat.run(sof["DARK"][0], sof["BAD"][0], sof["FLAT_RAW"], output_dir=".",
-                                **run_options(flat.run, values)))
+        options = run_options(flat.run, values)
+        written = flat.run(sof["DARK"][0], sof["BAD"][0], sof["FLAT_RAW"], output_dir=".",
+                           **options)
+        return publish(written)
 
 
 class PlanetesWave(ui.PyRecipe):
@@ -204,8 +206,8 @@ class PlanetesWave(ui.PyRecipe):
     @recipe_logging()
     def run(self, frameset, settings):
         sof = read_sof(frameset, {"WAVELAMP_RAW": 1, "DARK": 1, "FLAT": 1})
-        return publish(wave.run(sof["WAVELAMP_RAW"][0], sof["DARK"][0], sof["FLAT"][0],
-                                output_dir="."))
+        written = wave.run(sof["WAVELAMP_RAW"][0], sof["DARK"][0], sof["FLAT"][0], output_dir=".")
+        return publish(written)
 
 
 class PlanetesP2VM(ui.PyRecipe):
@@ -224,13 +226,14 @@ class PlanetesP2VM(ui.PyRecipe):
         values = read_parameters(self, settings)
         sof = read_sof(frameset, {"DARK": 1, "FLAT": 1, "WAVE": 1, "FLAT_RAW": 4, "P2VM_RAW": 6},
                        optional=("PHASE_REFERENCE", "PHASE_DARK_CALIB"))
-        written = p2vm.run(
-            sof["DARK"][0], sof["FLAT"][0], sof["WAVE"][0], sof["FLAT_RAW"], sof["P2VM_RAW"],
-            output_dir=".",
-            phase_reference=sof.get("PHASE_REFERENCE", [None])[0],
-            phase_dark=sof.get("PHASE_DARK_CALIB", [None])[0],
-            **run_options(p2vm.run, values) | {"dl_gain": _gain(values["dl-gain"])},
-        )
+        options = run_options(p2vm.run, values)
+        options["dl_gain"] = _gain(values["dl-gain"])
+        if "PHASE_REFERENCE" in sof:
+            options["phase_file"] = sof["PHASE_REFERENCE"][0]
+        if "PHASE_DARK_CALIB" in sof:
+            options["phase_dark_file"] = sof["PHASE_DARK_CALIB"][0]
+        written = p2vm.run(sof["DARK"][0], sof["FLAT"][0], sof["WAVE"][0], sof["FLAT_RAW"],
+                           sof["P2VM_RAW"], output_dir=".", **options)
         return publish(written)
 
 
@@ -249,6 +252,7 @@ class PlanetesReduce(ui.PyRecipe):
     def run(self, frameset, settings):
         values = read_parameters(self, settings)
         sof = read_sof(frameset, {"SINGLE_SCI_RAW": 1, "DARK": 1, "FLAT": 1, "WAVE": 1, "P2VM": 1})
-        return publish(science.run(sof["SINGLE_SCI_RAW"][0], sof["DARK"][0], sof["FLAT"][0],
-                                  sof["WAVE"][0], sof["P2VM"][0], output_dir=".",
-                                  **run_options(science.run, values)))
+        options = run_options(science.run, values)
+        written = science.run(sof["SINGLE_SCI_RAW"][0], sof["DARK"][0], sof["FLAT"][0],
+                              sof["WAVE"][0], sof["P2VM"][0], output_dir=".", **options)
+        return publish(written)

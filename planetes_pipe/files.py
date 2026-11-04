@@ -5,7 +5,7 @@ extensions; everything else about files is here. No CPL is used.
 """
 
 from contextlib import contextmanager
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -14,7 +14,7 @@ import numpy as np
 from astropy.io import fits as afits
 
 from planetes_pipe import __version__
-from planetes_pipe.instrument import DetectorSetup, Raw, layout
+from planetes_pipe.instrument import DetectorSetup, Raw, layout, shutter_identity
 
 # Raw SOF tag -> ESO DPR TYPE of the raw file.
 RAW_TYPES = {
@@ -43,25 +43,6 @@ def _native(values):
     return np.array(values, dtype=dtype, copy=True)
 
 
-def as_compute_array(values):
-    """Convert a raw/Python array to native calculation precision at its input boundary.
-
-    Parameters
-    ----------
-    values : array-like
-        Real or complex samples; units and array shape are unchanged.
-
-    Returns
-    -------
-    array : ndarray
-        float64 for real input, complex128 for complex input. A copy is made only
-        when required, so the result may share memory with a compatible input.
-    """
-    return np.asarray(
-        values, dtype=np.complex128 if np.iscomplexobj(values) else np.float64
-    )
-
-
 def _storage_array(values):
     """Store floating payloads as float32/complex64; retain integers, flags and labels."""
     values = np.asarray(values)
@@ -73,9 +54,6 @@ def _verify_checksums(hdus):
     for h in hdus:
         if h.verify_checksum() != 1 or h.verify_datasum() != 1:
             raise ValueError("Invalid or missing FITS checksum")
-
-
-@contextmanager
 
 
 def set_card(header, key: str, value, comment: str = "") -> None:
@@ -110,13 +88,27 @@ def read_raw(path: Path, category: str, *, hdu: int | str = "IMAGING_DATA_SC") -
     with afits.open(path, memmap=True) as hdus:
         header = hdus[0].header
         cube = hdus[hdu].data
-    setup = read_setup(header) or DetectorSetup()
-    setup = DetectorSetup(**{
-        **{f.name: getattr(setup, f.name) for f in fields(setup)},
-        "height": cube.shape[1],
-        "width": cube.shape[2],
-    })
-    return Raw(cube, category, read_shutters(header), setup)
+    setup = replace(read_setup(header) or DetectorSetup(), height=cube.shape[1], width=cube.shape[2])
+    return Raw(cube, category, read_shutters(header), setup, Path(path))
+
+
+def read_raws(paths, category: str, identities: tuple[str, ...], *,
+              hdu: int | str = "IMAGING_DATA_SC") -> dict[str, Raw]:
+    """Read a calibration sequence keyed by physical identity, e.g. {"4": Raw, "3": Raw, ...}.
+
+    Identity comes from the recorded shutters ('4' = only T4 open, '43' = T4 and T3),
+    never from the filename or input order. Missing or duplicate identities raise.
+    """
+    raws = {}
+    for path in paths:
+        raw = read_raw(path, category, hdu=hdu)
+        identity = shutter_identity(raw.shutters)
+        if identity in raws:
+            raise ValueError(f"Duplicate calibration shutter state: {identity}")
+        raws[identity] = raw
+    if set(raws) != set(identities):
+        raise ValueError(f"Expected shutter configurations {identities}; found {tuple(raws)}")
+    return {identity: raws[identity] for identity in identities}
 
 
 def find_raw(directory: Path, category: str) -> list[Path]:
@@ -142,25 +134,24 @@ def read_setup(hdr) -> DetectorSetup | None:
     return setup if any(getattr(setup, f.name) is not None for f in fields(setup)) else None
 
 
-def write_setup(header, setup: DetectorSetup):
-    """Write known detector settings, converting Python ROI origins to FITS."""
-    for key, value in (
-        ("ESO DET WIN1 STRX", None if setup.origin_x is None else setup.origin_x + 1),
-        ("ESO DET WIN1 STRY", None if setup.origin_y is None else setup.origin_y + 1),
-        ("ESO DET WIN1 NX", setup.width),
-        ("ESO DET WIN1 NY", setup.height),
-        ("ESO DET WIN1 BINX", setup.binning_x),
-        ("ESO DET WIN1 BINY", setup.binning_y),
-    ):
+def write_setup(header, setup: DetectorSetup) -> None:
+    """Write the known detector settings; ROI origins become one-based."""
+    origin_x = setup.origin_x + 1 if setup.origin_x is not None else None
+    origin_y = setup.origin_y + 1 if setup.origin_y is not None else None
+    cards = {
+        "ESO DET WIN1 STRX": origin_x,
+        "ESO DET WIN1 STRY": origin_y,
+        "ESO DET WIN1 NX": setup.width,
+        "ESO DET WIN1 NY": setup.height,
+        "ESO DET WIN1 BINX": setup.binning_x,
+        "ESO DET WIN1 BINY": setup.binning_y,
+        "ESO DET ID": setup.detector,
+    }
+    for key, value in cards.items():
         if value is not None:
             header["HIERARCH " + key] = value
-    if setup.detector is not None:
-        header["HIERARCH ESO DET ID"] = setup.detector
     if setup.exposure_s is not None:
-        header["HIERARCH ESO DET WIN1 DIT1"] = (
-            setup.exposure_s,
-            "[s] Integration time",
-        )
+        header["HIERARCH ESO DET WIN1 DIT1"] = (setup.exposure_s, "[s] Integration time")
 
 
 def read_shutters(header):
@@ -203,17 +194,14 @@ def column(name, values, unit=""):
     )
 
 
-def table(name, columns):
-    return afits.BinTableHDU.from_columns(columns, name=name)
-
-
 def detector_table(baseline_outputs=None):
     labels = [f"REG{i + 1:02d}" for i in range(24)]
     if baseline_outputs is not None:
         for baseline, outputs in baseline_outputs.items():
             for output, phase in zip(outputs, layout.abcd_order, strict=True):
                 labels[output] = layout.baselines[baseline] + "-" + phase
-    return table("IMAGING_DETECTOR_SC", [column("REGNAME", np.asarray(labels))])
+    return afits.BinTableHDU.from_columns([column("REGNAME", np.asarray(labels))],
+                                          name="IMAGING_DETECTOR_SC")
 
 
 def baseline_outputs(labels) -> dict[int, list[int]]:
@@ -233,22 +221,14 @@ def read_column(hdus, ext, name):
     return _native(hdus[ext].data[name])
 
 
-def one_based_pixels(values):
-    """Convert valid pixel coordinates to FITS one-based indices."""
-    return (
-        np.where(values < 0, values, values + 1)
-        if values.dtype.kind in "iu"
-        else values + 1
-    )
+def to_fits_pixels(values):
+    """Zero-based pixel coordinates -> FITS one-based; the -1 sentinel is kept."""
+    return np.where(values < 0, values, values + 1)
 
 
-def zero_based_pixels(values):
-    """Restore zero-based pixel coordinates, preserving negative sentinels."""
-    return (
-        np.where(values < 0, values, values - 1)
-        if values.dtype.kind in "iu"
-        else values - 1
-    )
+def from_fits_pixels(values):
+    """FITS one-based pixel coordinates -> zero-based; the -1 sentinel is kept."""
+    return np.where(values < 0, values, values - 1)
 
 
 # ---------------------------------------------------------------- products
@@ -294,12 +274,13 @@ def open_product(path: Path, category: str):
         yield hdus
 
 
-def product_filename(reference: Path, category: str) -> str:
-    """<reference raw stem>_<category without underscores>.fits, e.g. ..._singlescip2vmred.fits.
+def product_path(output_dir, reference, category: str) -> Path:
+    """output_dir/<reference raw stem>_<category without underscores>.fits.
 
-    The reference stem is kept as is (timestamp or UNKNOWN marker); no time is invented.
+    E.g. PLANETES.2026-02-05T210609_singlescip2vmred.fits. The raw stem is kept as is
+    (timestamp or UNKNOWN marker); no time is invented.
     """
-    return f"{Path(reference).stem}_{category.lower().replace('_', '')}.fits"
+    return Path(output_dir) / f"{Path(reference).stem}_{category.lower().replace('_', '')}.fits"
 
 
 # ---------------------------------------------------------------- provenance
@@ -384,9 +365,3 @@ def provenance(recipe: str, reference, inputs: dict, **options) -> afits.Header:
     for key, value, comment in pro:
         set_card(header, f"ESO PRO {key}", value, comment)
     return header
-
-
-def output_paths(output_dir, reference, *categories: str) -> dict[str, Path]:
-    """{category: output_dir/<reference stem>_<category>.fits} for one step call."""
-    return {category: Path(output_dir) / product_filename(reference, category)
-            for category in categories}

@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -128,6 +129,7 @@ class Raw:
     category: str
     shutters: tuple[bool | None, bool | None, bool | None, bool | None]
     setup: DetectorSetup
+    path: Path | None = None
 
     def chunks(self, size: int = 16) -> Iterator[NDArray]:
         """Frames in order, as float64 blocks of up to `size` frames."""
@@ -155,14 +157,9 @@ def shutter_identity(shutters: tuple[bool | None, ...]) -> str:
     return "".join(str(n) for n in range(4, 0, -1) if shutters[n - 1])
 
 
-def order_raws(raws: list[Raw], identities: tuple[str, ...]) -> list[Raw]:
-    """Order a calibration sequence by recorded shutters, rejecting missing/duplicate inputs."""
-    grouped = {}
-    for raw in raws:
-        identity = shutter_identity(raw.shutters)
-        if identity in grouped:
-            raise ValueError(f"Duplicate calibration shutter state: {identity}")
-        grouped[identity] = raw
-    if set(grouped) != set(identities):
-        raise ValueError(f"Expected shutter configurations {identities}; found {tuple(grouped)}")
-    return [grouped[key] for key in identities]
+def check_calibrations(raw: Raw, *, dark=None, flat=None) -> None:
+    """Reject a DARK whose known DIT/ROI/detector, or a FLAT whose ROI/detector, differs from raw."""
+    if dark is not None:
+        check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
+    if flat is not None:
+        check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")

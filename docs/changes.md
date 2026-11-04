@@ -31,6 +31,13 @@
   `aperture-width-pixels`）。
 - 选择输入文件（原 `association.py`）移出 pipeline，放入 bench 的
   `scripts/reduce_calibrations.py`；示例脚本改为明确写出输入。
+- 入口与 helper 重写：`run()` 参数统一为 `*_file(s)`，按"读入 → 计算 → 写出"顺序书写；
+  删除只转发参数的 `make_p2vm` 与 `extract_phase_reference`（相位参考与扫描共用一个
+  extractor）；`files.read_raws` 读入时按快门确定一次物理身份，`Raw` 带 `path`；
+  `check_calibrations` 取代成对的 `check_setup`；删除 `as_compute_array`、`table()`、
+  `output_paths`，`product_filename` 改为 `product_path`，像素坐标转换合为
+  `to_fits_pixels`/`from_fits_pixels`；读写函数和 `plots.py`、`wave.py` 不再使用嵌套函数。
+  修复 `files.set_card` 上残留的 `@contextmanager`。
 - 数值算法、阈值和产品 FITS 布局不变。
 
 # PLANETES 0.15.0：让I/O直接表达读了什么、写了什么

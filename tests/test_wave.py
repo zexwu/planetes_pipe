@@ -10,7 +10,7 @@ import numpy as np
 from astropy.io import fits
 
 from planetes_pipe.dark import make_dark_products
-from planetes_pipe.files import read_raw, write_shutters
+from planetes_pipe.files import read_raw, read_raws, write_shutters
 from planetes_pipe.flat import make_flat, read_flat, write_flat
 from planetes_pipe.instrument import layout
 from planetes_pipe.wave import make_wave, match_peaks_grid, read_wave, write_wave
@@ -58,8 +58,8 @@ class WaveTests(unittest.TestCase):
                 write_shutters(header, tuple(str(t) == telescope for t in range(1, 5)))
                 fits.PrimaryHDU(np.stack([frame, frame]), header=header).writeto(path)
                 paths[telescope] = path
-            flat = make_flat([read_raw(path, "FLAT_RAW", hdu=0) for path in paths.values()],
-                             dark, bad)
+            flats = read_raws(paths.values(), "FLAT_RAW", layout.telescopes, hdu=0)
+            flat = make_flat(flats, dark, bad)
             np.testing.assert_allclose(flat.flat_map_adu, flat_image, atol=1e-10)
             np.testing.assert_allclose(
                 flat.trace_y_pixels,

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from astropy.io import fits as afits
 from numpy.typing import NDArray
 
 from planetes_pipe import files, log
@@ -18,9 +19,8 @@ from planetes_pipe.extraction import (
     extract_spectra,
     prepare_extraction,
 )
-from planetes_pipe.files import as_compute_array
 from planetes_pipe.flat import Flat, read_flat
-from planetes_pipe.instrument import Raw, check_setup, layout
+from planetes_pipe.instrument import Raw, check_calibrations, layout
 from planetes_pipe.p2vm import P2VM, read_p2vm
 from planetes_pipe.wave import Wave, read_wave
 
@@ -83,8 +83,7 @@ def reduce_science(
     is performed. All frames are retained; run() writes the product.
     """
 
-    check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
-    check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
+    check_calibrations(raw, dark=dark, flat=flat)
     extractor = prepare_extraction(flat, wave, p2vm.wavelength_m)
     spectra = extract_spectra(raw, extractor, dark)
     return reduce_spectra(
@@ -299,7 +298,7 @@ class FrameReducer:
             Instrumental observables with a length-one frame axis. GD and differential
             phase are None unless requested. The raw frame is not modified.
         """
-        cube = as_compute_array(raw)[None, :, :]
+        cube = np.asarray(raw, dtype=np.float64)[None, :, :]
         spectra = self.extractor.extract(cube, dark)
         return reduce_spectra(
             spectra,
@@ -311,32 +310,38 @@ class FrameReducer:
 
 
 def write_reduced(path: Path, product: P2VMRed, *, header=None) -> None:
-    """Save per-frame observables (requires GD and differential phase); never overwrite."""
+    """Save per-frame observables (requires GD and differential phase); never overwrite.
+
+    Table rows are frame-major: frame 1 telescopes (or baselines), frame 2, ...
+    """
     if product.group_delay_m is None or product.differential_phase_deg is None:
         raise ValueError("Saved P2VMRED requires GD and differential phase")
     nf, nt, nw = product.photometric_flux_adu.shape
     nb = layout.n_baselines
     stations = np.asarray(layout.telescopes, dtype=int)
-    pairs = np.asarray([[int(layout.telescopes[t]) for t in pair]
-                        for pair in layout.baseline_pairs])
-    files.save_product(path, "SINGLE_SCI_P2VMRED", [
+    pairs = np.asarray([[int(layout.telescopes[t]) for t in pair] for pair in layout.baseline_pairs])
+    wavelength = [files.column("WAVELENGTH", product.wavelength_m, "m")]
+    flux = [
+        files.column("FRAME", np.repeat(np.arange(1, nf + 1), nt)),
+        files.column("STA_INDEX", np.tile(stations, nf)),
+        files.column("FLUXDATA", product.photometric_flux_adu.reshape(-1, nw), "adu"),
+    ]
+    vis = [
+        files.column("FRAME", np.repeat(np.arange(1, nf + 1), nb)),
+        files.column("STA_INDEX", np.tile(pairs, (nf, 1))),
+        files.column("VISDATA", product.coherent_flux_adu.reshape(-1, nw), "adu"),
+        files.column("VISAMP", product.visibility_amplitude.reshape(-1, nw)),
+        files.column("FLAG", product.flags.reshape(-1, nw)),
+        files.column("GDELAY", product.group_delay_m.reshape(-1), "m"),
+        files.column("DIFFPHASE", product.differential_phase_deg.reshape(-1, nw), "deg"),
+    ]
+    extensions = [
         files.detector_table(product.baseline_outputs),
-        files.table("PLANETES_WAVELENGTH", [files.column("WAVELENGTH", product.wavelength_m, "m")]),
-        files.table("PLANETES_FLUX", [
-            files.column("FRAME", np.repeat(np.arange(1, nf + 1), nt)),
-            files.column("STA_INDEX", np.tile(stations, nf)),
-            files.column("FLUXDATA", product.photometric_flux_adu.reshape(-1, nw), "adu"),
-        ]),
-        files.table("PLANETES_VIS", [
-            files.column("FRAME", np.repeat(np.arange(1, nf + 1), nb)),
-            files.column("STA_INDEX", np.tile(pairs, (nf, 1))),
-            files.column("VISDATA", product.coherent_flux_adu.reshape(-1, nw), "adu"),
-            files.column("VISAMP", product.visibility_amplitude.reshape(-1, nw)),
-            files.column("FLAG", product.flags.reshape(-1, nw)),
-            files.column("GDELAY", product.group_delay_m.reshape(-1), "m"),
-            files.column("DIFFPHASE", product.differential_phase_deg.reshape(-1, nw), "deg"),
-        ]),
-    ], header=header)
+        afits.BinTableHDU.from_columns(wavelength, name="PLANETES_WAVELENGTH"),
+        afits.BinTableHDU.from_columns(flux, name="PLANETES_FLUX"),
+        afits.BinTableHDU.from_columns(vis, name="PLANETES_VIS"),
+    ]
+    files.save_product(path, "SINGLE_SCI_P2VMRED", extensions, header=header)
 
 
 def read_reduced(path: Path) -> P2VMRed:
@@ -345,36 +350,33 @@ def read_reduced(path: Path) -> P2VMRed:
         wavelength = files.read_column(hdus, "PLANETES_WAVELENGTH", "WAVELENGTH")
         nt, nb, nw = layout.n_telescopes, layout.n_baselines, len(wavelength)
         nf = len(hdus["PLANETES_FLUX"].data) // nt
-
-        def vis(name):
-            return files.read_column(hdus, "PLANETES_VIS", name).reshape(nf, nb, -1)
-
+        flux = files.read_column(hdus, "PLANETES_FLUX", "FLUXDATA").reshape(nf, nt, nw)
+        vis = {name: files.read_column(hdus, "PLANETES_VIS", name).reshape(nf, nb, -1)
+               for name in ("VISDATA", "VISAMP", "FLAG", "GDELAY", "DIFFPHASE")}
         return P2VMRed(
-            photometric_flux_adu=files.read_column(
-                hdus, "PLANETES_FLUX", "FLUXDATA").reshape(nf, nt, nw),
-            coherent_flux_adu=vis("VISDATA"),
-            visibility_amplitude=vis("VISAMP"),
-            flags=vis("FLAG"),
+            photometric_flux_adu=flux,
+            coherent_flux_adu=vis["VISDATA"],
+            visibility_amplitude=vis["VISAMP"],
+            flags=vis["FLAG"],
             wavelength_m=wavelength,
             baseline_outputs=files.baseline_outputs(hdus["IMAGING_DETECTOR_SC"].data["REGNAME"]),
-            group_delay_m=vis("GDELAY").reshape(nf, nb),
-            differential_phase_deg=vis("DIFFPHASE"),
+            group_delay_m=vis["GDELAY"].reshape(nf, nb),
+            differential_phase_deg=vis["DIFFPHASE"],
         )
 
 
-def run(science_raw, dark, flat, wave, p2vm, *, output_dir,
+def run(science_file, dark_file, flat_file, wave_file, p2vm_file, *, output_dir,
         gd_search_min_m=-100e-6, gd_search_max_m=100e-6) -> dict[str, Path]:
-    """Recipe planetes_reduce: SINGLE_SCI_RAW + DARK, FLAT, WAVE, P2VM -> P2VMRED."""
-    product = reduce_science(
-        files.read_raw(science_raw, "SINGLE_SCI_RAW"), read_dark(dark), read_flat(flat),
-        read_wave(wave), read_p2vm(p2vm),
-        gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m,
-    )
-    header = files.provenance(
-        "planetes_reduce", science_raw,
-        {"SINGLE_SCI_RAW": [science_raw], "DARK": [dark], "FLAT": [flat], "WAVE": [wave],
-         "P2VM": [p2vm]},
-        gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m)
-    out = files.output_paths(output_dir, science_raw, "SINGLE_SCI_P2VMRED")
-    write_reduced(out["SINGLE_SCI_P2VMRED"], product, header=header)
-    return out
+    """planetes_reduce: one SINGLE_SCI_RAW + DARK, FLAT, WAVE, P2VM -> SINGLE_SCI_P2VMRED."""
+    raw = files.read_raw(science_file, "SINGLE_SCI_RAW")
+    dark, flat, wave = read_dark(dark_file), read_flat(flat_file), read_wave(wave_file)
+    p2vm = read_p2vm(p2vm_file)
+    options = dict(gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m)
+    product = reduce_science(raw, dark, flat, wave, p2vm, **options)
+
+    inputs = {"SINGLE_SCI_RAW": [science_file], "DARK": [dark_file], "FLAT": [flat_file],
+              "WAVE": [wave_file], "P2VM": [p2vm_file]}
+    header = files.provenance("planetes_reduce", science_file, inputs, **options)
+    path = files.product_path(output_dir, science_file, "SINGLE_SCI_P2VMRED")
+    write_reduced(path, product, header=header)
+    return {"SINGLE_SCI_P2VMRED": path}

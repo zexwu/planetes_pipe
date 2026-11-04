@@ -10,7 +10,7 @@ from astropy.io import fits
 from fixtures import RawMetadata, write_raw
 
 from planetes_pipe.dark import Bad, Dark
-from planetes_pipe.files import read_raw, write_shutters
+from planetes_pipe.files import read_raws, write_shutters
 from planetes_pipe.flat import build_flat, make_flat
 from planetes_pipe.instrument import DetectorSetup, layout
 
@@ -52,11 +52,8 @@ class FlatTests(unittest.TestCase):
             for shape in ((1, 5), (3, 1), (3, 4)):
                 with self.subTest(shape=shape):
                     with self.assertRaisesRegex(ValueError, "DARK detector shapes"):
-                        make_flat(
-                            [read_raw(path, "FLAT_RAW", hdu=0) for path in paths.values()],
-                            Dark(np.zeros(shape)),
-                            Bad(np.zeros((3, 5), dtype=np.int16)),
-                        )
+                        flats = read_raws(paths.values(), "FLAT_RAW", layout.telescopes, hdu=0)
+                        make_flat(flats, Dark(np.zeros(shape)), Bad(np.zeros((3, 5), dtype=np.int16)))
 
     def test_metrology_selection_follows_trace_order_after_translation(self):
         height, width = 1200, 64
@@ -76,8 +73,8 @@ class FlatTests(unittest.TestCase):
                     paths[telescope] = Path(directory) / f"{telescope}.fits"
                     physical = RawMetadata("FLAT_RAW", tuple(str(t) == telescope for t in range(1, 5)), setup)
                     write_raw(paths[telescope], image[None], physical)
-                flats_raw = [read_raw(path, "FLAT_RAW") for path in paths.values()]
-                flat = make_flat(flats_raw, dark, bad, metrology_trace=True)
+                flats = read_raws(paths.values(), "FLAT_RAW", layout.telescopes)
+                flat = make_flat(flats, dark, bad, metrology_trace=True)
             expected = np.delete(centers, 12)
             np.testing.assert_allclose(flat.trace_y_pixels[:, 32], expected, atol=0.03)
             self.assertEqual(flat.profile_x_pixels.shape[0], 24)

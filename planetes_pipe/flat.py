@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
+from astropy.io import fits as afits
 from numba import njit, prange
 from numpy.typing import NDArray
 from scipy.ndimage import median_filter
@@ -15,14 +16,7 @@ from scipy.signal import find_peaks, medfilt
 
 from planetes_pipe import files, log
 from planetes_pipe.dark import Bad, Dark, read_bad, read_dark
-from planetes_pipe.instrument import (
-    DetectorSetup,
-    Raw,
-    check_setup,
-    layout,
-    order_raws,
-    shutter_identity,
-)
+from planetes_pipe.instrument import DetectorSetup, Raw, check_calibrations, check_setup, layout
 
 
 @dataclass(slots=True)
@@ -76,7 +70,7 @@ def _trace_illumination(
 
 
 def make_flat(
-    telescope_flats: list[Raw],
+    flats: dict[str, Raw],
     dark: Dark,
     bad: Bad,
     *,
@@ -87,8 +81,9 @@ def make_flat(
 
     Parameters
     ----------
-    telescope_flats : list of Raw
-        Four raw ADU cubes in any order; telescope identity comes from shutters.
+    flats : dict of str to Raw
+        The four flats keyed by open telescope ('4', '3', '2', '1'), as returned
+        by files.read_raws.
     dark : Dark
         Selected mean dark in ADU on exactly the raw detector grid. Known DIT,
         ROI and detector settings must match; dimensions are checked even when
@@ -119,8 +114,9 @@ def make_flat(
 
     maps = []
     setup = None
-    for raw in order_raws(telescope_flats, layout.telescopes):
-        check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
+    for telescope in layout.telescopes:
+        raw = flats[telescope]
+        check_calibrations(raw, dark=dark)
         if setup is None:
             setup = raw.setup
         check_setup(raw.setup, setup, exposure=False, role="flat sequence")
@@ -516,20 +512,21 @@ def write_flat(path: Path, product: Flat, *, header=None) -> None:
     detector = files.detector_table()
     columns = [
         files.column("REGNAME", detector.data["REGNAME"]),
-        files.column("CENTERY", files.one_based_pixels(product.trace_y_pixels), "pixel"),
+        files.column("CENTERY", files.to_fits_pixels(product.trace_y_pixels), "pixel"),
     ]
     if product.trace_x_range is not None:
-        columns.append(files.column("XRANGE", files.one_based_pixels(product.trace_x_range), "pixel"))
+        columns.append(files.column("XRANGE", files.to_fits_pixels(product.trace_x_range), "pixel"))
     if product.profile_sigma_pixels is not None:
         columns.append(files.column("WIDTH", product.profile_sigma_pixels, "pixel"))
+    profile = [
+        files.column("PIXEL_X", files.to_fits_pixels(product.profile_x_pixels), "pixel"),
+        files.column("PIXEL_Y", files.to_fits_pixels(product.profile_y_pixels), "pixel"),
+    ]
     extensions = [
         detector,
         files.image_hdu("PLANETES_FLAT_IMAGE", product.flat_map_adu, "adu"),
-        files.table("PROFILE_PARAMS", columns),
-        files.table("PLANETES_PROFILE", [
-            files.column("PIXEL_X", files.one_based_pixels(product.profile_x_pixels), "pixel"),
-            files.column("PIXEL_Y", files.one_based_pixels(product.profile_y_pixels), "pixel"),
-        ]),
+        afits.BinTableHDU.from_columns(columns, name="PROFILE_PARAMS"),
+        afits.BinTableHDU.from_columns(profile, name="PLANETES_PROFILE"),
     ]
     if product.telescope_flux_adu is not None:
         extensions.append(files.image_hdu("PLANETES_FLAT_FLUX", product.telescope_flux_adu, "adu"))
@@ -540,39 +537,38 @@ def write_flat(path: Path, product: Flat, *, header=None) -> None:
 def read_flat(path: Path) -> Flat:
     """Read a checksummed FLAT at computation precision, zero-based pixel indices."""
     with files.open_product(path, "FLAT") as hdus:
-        profile = hdus["PROFILE_PARAMS"].columns.names
-        return Flat(
+        flat = Flat(
             flat_map_adu=files.read_image(hdus, "PLANETES_FLAT_IMAGE"),
-            trace_y_pixels=files.zero_based_pixels(
+            trace_y_pixels=files.from_fits_pixels(
                 files.read_column(hdus, "PROFILE_PARAMS", "CENTERY")),
-            profile_x_pixels=files.zero_based_pixels(
+            profile_x_pixels=files.from_fits_pixels(
                 files.read_column(hdus, "PLANETES_PROFILE", "PIXEL_X")),
-            profile_y_pixels=files.zero_based_pixels(
+            profile_y_pixels=files.from_fits_pixels(
                 files.read_column(hdus, "PLANETES_PROFILE", "PIXEL_Y")),
-            trace_x_range=files.zero_based_pixels(
-                files.read_column(hdus, "PROFILE_PARAMS", "XRANGE")).astype(int)
-            if "XRANGE" in profile else None,
-            profile_sigma_pixels=files.read_column(hdus, "PROFILE_PARAMS", "WIDTH")
-            if "WIDTH" in profile else None,
-            telescope_flux_adu=files.read_image(hdus, "PLANETES_FLAT_FLUX")
-            if "PLANETES_FLAT_FLUX" in hdus else None,
             setup=files.read_setup(hdus[0].header),
         )
+        profile = hdus["PROFILE_PARAMS"].columns.names
+        if "XRANGE" in profile:
+            flat.trace_x_range = files.from_fits_pixels(
+                files.read_column(hdus, "PROFILE_PARAMS", "XRANGE")).astype(int)
+        if "WIDTH" in profile:
+            flat.profile_sigma_pixels = files.read_column(hdus, "PROFILE_PARAMS", "WIDTH")
+        if "PLANETES_FLAT_FLUX" in hdus:
+            flat.telescope_flux_adu = files.read_image(hdus, "PLANETES_FLAT_FLUX")
+        return flat
 
 
-def run(dark, bad, flat_raws, *, output_dir,
+def run(dark_file, bad_file, flat_files, *, output_dir,
         aperture_width_pixels=APERTURE_WIDTH_PIXELS, metrology_trace=False) -> dict[str, Path]:
-    """Recipe planetes_flat: four FLAT_RAW (one per open shutter) + DARK + BAD -> FLAT."""
-    raws = [files.read_raw(path, "FLAT_RAW") for path in flat_raws]
-    product = make_flat(raws, read_dark(dark), read_bad(bad),
-                        aperture_width_pixels=aperture_width_pixels,
-                        metrology_trace=metrology_trace)
-    # Name and inherit the header from the T4 flat, independent of input order.
-    reference = next(p for p, raw in zip(flat_raws, raws) if shutter_identity(raw.shutters) == "4")
-    header = files.provenance("planetes_flat", reference,
-                             {"FLAT_RAW": flat_raws, "DARK": [dark], "BAD": [bad]},
-                             aperture_width_pixels=aperture_width_pixels,
-                             metrology_trace=metrology_trace)
-    out = files.output_paths(output_dir, reference, "FLAT")
-    write_flat(out["FLAT"], product, header=header)
-    return out
+    """planetes_flat: four FLAT_RAW (one telescope open each) + DARK + BAD -> FLAT."""
+    dark, bad = read_dark(dark_file), read_bad(bad_file)
+    flats = files.read_raws(flat_files, "FLAT_RAW", layout.telescopes)
+    options = dict(aperture_width_pixels=aperture_width_pixels, metrology_trace=metrology_trace)
+    product = make_flat(flats, dark, bad, **options)
+
+    reference = flats["4"].path  # Names the product and supplies its observation header.
+    inputs = {"FLAT_RAW": flat_files, "DARK": [dark_file], "BAD": [bad_file]}
+    header = files.provenance("planetes_flat", reference, inputs, **options)
+    path = files.product_path(output_dir, reference, "FLAT")
+    write_flat(path, product, header=header)
+    return {"FLAT": path}

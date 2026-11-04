@@ -44,8 +44,8 @@ class HeaderTests(unittest.TestCase):
             calibration = p2vm.run(inputs["DARK"], inputs["FLAT"], inputs["WAVE"],
                                    inputs["FLAT_RAW"], inputs["P2VM_RAW"],
                                    output_dir=root / "out",
-                                   phase_reference=inputs["PHASE_REFERENCE"],
-                                   phase_dark=inputs["PHASE_DARK_CALIB"],
+                                   phase_file=inputs["PHASE_REFERENCE"],
+                                   phase_dark_file=inputs["PHASE_DARK_CALIB"],
                                    keep_diagnostics=True)
             reduced = science.run(inputs["PHASE_REFERENCE"], inputs["DARK"], inputs["FLAT"],
                                  inputs["WAVE"], calibration["P2VM"], output_dir=root / "out")
@@ -73,7 +73,7 @@ class QCTests(unittest.TestCase):
         self.assertEqual(quality["ESO QC NWAVE SC"], 2)
 
     def test_run_defaults_match_the_scientific_functions(self):
-        for module, function in [(p2vm, p2vm.make_p2vm), (science, science.reduce_science)]:
+        for module, function in [(p2vm, p2vm.fit_p2vm), (science, science.reduce_science)]:
             for name in ("gd_search_min_m", "gd_search_max_m"):
                 self.assertEqual(signature(module.run).parameters[name].default,
                                  signature(function).parameters[name].default)

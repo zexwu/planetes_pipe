@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from astropy.io import fits as afits
 from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
@@ -17,7 +18,7 @@ from scipy.signal import find_peaks
 from planetes_pipe import files, log
 from planetes_pipe.dark import Dark, read_dark
 from planetes_pipe.flat import Flat, extract_sparse_spectra, read_flat
-from planetes_pipe.instrument import Raw, check_setup, layout
+from planetes_pipe.instrument import Raw, check_calibrations, layout
 
 
 @dataclass(slots=True)
@@ -100,13 +101,24 @@ def make_wave(raw: Raw, dark: Dark, flat: Flat) -> Wave:
     This step uses FLAT geometry but does not divide the lamp by the flat response.
     """
 
-    check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
-    check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")
+    check_calibrations(raw, dark=dark, flat=flat)
     image = raw.mean()
     if image.shape != dark.mean_adu.shape or image.shape != flat.flat_map_adu.shape:
         raise ValueError("Lamp/dark/flat detector shapes differ")
     image = image - dark.mean_adu
     return fit_wavelength_solution(image, flat, REFERENCE_WAVELENGTH_M)
+
+
+def _peak_threshold(spectrum: NDArray) -> np.floating[Any]:
+    """Gaussian-equivalent MAD threshold above the median."""
+    median = np.median(spectrum)
+    mad = np.median(abs(spectrum - median))
+    return median + DETECTION_SIGMA * mad * 1.4826
+
+
+def _surface_terms(x, y, degree: int) -> list[NDArray]:
+    """Monomials x^(d-i) y^i of total degree d <= degree, in fixed order."""
+    return [x ** (d - i) * y**i for d in range(degree + 1) for i in range(d + 1)]
 
 
 def fit_wavelength_solution(
@@ -160,14 +172,8 @@ def fit_wavelength_solution(
     # Fixed bench reference quartet; no automatic S/N-based output selection.
     mean_spectrum = lamp_spectra[-4:].mean(axis=0)
 
-    # Gaussian-equivalent MAD threshold above the median.
-    def peak_threshold(_spec: NDArray) -> np.floating[Any]:
-        med = np.median(_spec)
-        mad = np.median(abs(_spec - med))
-        return med + DETECTION_SIGMA * mad * 1.4826
-
     mean_peaks, _ = find_peaks(
-        mean_spectrum, height=peak_threshold(mean_spectrum), distance=5
+        mean_spectrum, height=_peak_threshold(mean_spectrum), distance=5
     )
     mean_matches, _ = match_lines_ransac(
         lines_m, mean_peaks, tol=3, n_iter=RANSAC_ITERATIONS
@@ -181,7 +187,7 @@ def fit_wavelength_solution(
         spec = lamp_spectra[output]
 
         # Locate peaks independently, then align them to the reference quartet.
-        peak_pixels, _ = find_peaks(spec, height=peak_threshold(spec), distance=5)
+        peak_pixels, _ = find_peaks(spec, height=_peak_threshold(spec), distance=5)
 
         # A Gaussian line has a quadratic log profile near its peak. Refine
         # only positive samples with sufficient log curvature (fixed bench cuts).
@@ -232,19 +238,10 @@ def fit_wavelength_solution(
     fit_y = np.concatenate(line_y)
     fit_wave_m = np.concatenate(line_wave_m)
 
-    # Monomials use total degree <= SURFACE_DEGREE.
-    def surface_basis(x, y, max_deg: int = 3) -> NDArray:
-        terms = [x ** (d - i) * y**i for d in range(max_deg + 1) for i in range(d + 1)]
-        return np.array(terms)
-
-    def surface_design_matrix(x, y, max_deg: int = 3) -> NDArray:
-        terms = [x ** (d - i) * y**i for d in range(max_deg + 1) for i in range(d + 1)]
-        return np.column_stack(terms)
-
     # Fit the wl = f(x, y), using a 3rd order polynomial
     deg = SURFACE_DEGREE
     log.info("Fitting 2D wavelength solution...")
-    design = surface_design_matrix(fit_x, fit_y, max_deg=deg)
+    design = np.column_stack(_surface_terms(fit_x, fit_y, deg))
     terms = [f"x{d - i}y{i}" for d in range(deg + 1) for i in range(d + 1)]
     log.debug("Kernel used for wavelength_map_m fit: ")
     log.debug(", ".join(terms))
@@ -266,7 +263,7 @@ def fit_wavelength_solution(
     # Evaluate the fitted 2-D polynomial on every detector trace.
     trace_x = np.repeat(np.arange(nx)[None, :], layout.n_outputs, axis=0)
     trace_y = y_trace
-    basis = surface_basis(trace_x, trace_y, max_deg=deg)
+    basis = np.array(_surface_terms(trace_x, trace_y, deg))
     wave_map_m = np.einsum("i,iyx->yx", coeffs, basis)
 
     wave = Wave(
@@ -621,44 +618,42 @@ def qc(product: Wave) -> dict:
 
 def write_wave(path: Path, product: Wave, *, header=None) -> None:
     """Save a WAVE solution (metres) with its QC; never overwrite."""
+    wavelengths = [files.column(f"DATA{i + 1}", row[None], "m")
+                   for i, row in enumerate(product.wavelength_map_m)]
     extensions = [
         files.detector_table(),
-        files.table("WAVE_DATA_SC", [files.column(f"DATA{i + 1}", row[None], "m")
-                                    for i, row in enumerate(product.wavelength_map_m)]),
+        afits.BinTableHDU.from_columns(wavelengths, name="WAVE_DATA_SC"),
     ]
     if product.fit_residual_m is not None:
-        extensions.append(files.table("PLANETES_WAVE_FIT", [
+        fit = [
             files.column("RESIDUAL", product.fit_residual_m, "m"),
             files.column("X", product.fit_x_pixels, "pixel"),
             files.column("Y", product.fit_y_pixels, "pixel"),
-        ]))
+        ]
+        extensions.append(afits.BinTableHDU.from_columns(fit, name="PLANETES_WAVE_FIT"))
     files.save_product(path, "WAVE", extensions, header=header, qc=qc(product))
 
 
 def read_wave(path: Path) -> Wave:
     """Read a checksummed WAVE solution at computation precision."""
     with files.open_product(path, "WAVE") as hdus:
-        fitted = "PLANETES_WAVE_FIT" in hdus
-        return Wave(
-            wavelength_map_m=np.stack([
-                files.read_column(hdus, "WAVE_DATA_SC", f"DATA{i + 1}")[0]
-                for i in range(layout.n_outputs)
-            ]),
-            fit_residual_m=files.read_column(hdus, "PLANETES_WAVE_FIT", "RESIDUAL")
-            if fitted else None,
-            fit_x_pixels=files.read_column(hdus, "PLANETES_WAVE_FIT", "X")
-            if fitted else None,
-            fit_y_pixels=files.read_column(hdus, "PLANETES_WAVE_FIT", "Y")
-            if fitted else None,
-        )
+        rows = [files.read_column(hdus, "WAVE_DATA_SC", f"DATA{i + 1}")[0]
+                for i in range(layout.n_outputs)]
+        wave = Wave(wavelength_map_m=np.stack(rows))
+        if "PLANETES_WAVE_FIT" in hdus:
+            wave.fit_residual_m = files.read_column(hdus, "PLANETES_WAVE_FIT", "RESIDUAL")
+            wave.fit_x_pixels = files.read_column(hdus, "PLANETES_WAVE_FIT", "X")
+            wave.fit_y_pixels = files.read_column(hdus, "PLANETES_WAVE_FIT", "Y")
+        return wave
 
 
-def run(wavelamp_raw, dark, flat, *, output_dir) -> dict[str, Path]:
-    """Recipe planetes_wave: WAVELAMP_RAW + its DARK + FLAT -> WAVE."""
-    product = make_wave(files.read_raw(wavelamp_raw, "WAVELAMP_RAW"), read_dark(dark),
-                        read_flat(flat))
-    header = files.provenance("planetes_wave", wavelamp_raw,
-                             {"WAVELAMP_RAW": [wavelamp_raw], "DARK": [dark], "FLAT": [flat]})
-    out = files.output_paths(output_dir, wavelamp_raw, "WAVE")
-    write_wave(out["WAVE"], product, header=header)
-    return out
+def run(lamp_file, dark_file, flat_file, *, output_dir) -> dict[str, Path]:
+    """planetes_wave: one WAVELAMP_RAW + its DARK + FLAT -> WAVE."""
+    raw = files.read_raw(lamp_file, "WAVELAMP_RAW")
+    product = make_wave(raw, read_dark(dark_file), read_flat(flat_file))
+
+    inputs = {"WAVELAMP_RAW": [lamp_file], "DARK": [dark_file], "FLAT": [flat_file]}
+    header = files.provenance("planetes_wave", lamp_file, inputs)
+    path = files.product_path(output_dir, lamp_file, "WAVE")
+    write_wave(path, product, header=header)
+    return {"WAVE": path}

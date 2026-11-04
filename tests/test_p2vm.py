@@ -11,14 +11,14 @@ from fixtures import calibration_arrays, calibration_spectra, write_recipe_input
 
 from planetes_pipe.dark import Dark, read_dark
 from planetes_pipe.extraction import extract_spectra, prepare_extraction
-from planetes_pipe.files import read_raw, write_shutters
+from planetes_pipe.files import read_raw, read_raws, write_shutters
 from planetes_pipe.flat import read_flat, write_flat
-from planetes_pipe.instrument import layout
+from planetes_pipe.instrument import DetectorSetup, Raw, layout
 from planetes_pipe.p2vm import (
     build_v2pm,
+    extract_p2vm_spectra,
     fit_abcd_ellipse,
     fit_p2vm,
-    make_p2vm,
     read_scan_opd,
     unwrap_scan_phase,
     wavelength_grid,
@@ -69,13 +69,14 @@ class P2VMTests(unittest.TestCase):
             dark = read_dark(paths["DARK"])
             with self.assertRaisesRegex(ValueError, "outside calibration"):
                 prepare_extraction(flat, wave, np.linspace(1.14e-6, 1.30e-6, 15))
-            expected = make_p2vm(
-                flat,
-                wave,
-                dark,
-                telescope_flats=[read_raw(p, "FLAT_RAW") for p in paths["FLAT_RAW"]],
-                baseline_cubes=[read_raw(p, "P2VM_RAW") for p in paths["P2VM_RAW"]],
-            )
+            extractor = prepare_extraction(flat, wave, wavelength_grid(flat, wave))
+
+            def fit(flat_files, scan_files, hdu):
+                flats = read_raws(flat_files, "FLAT_RAW", layout.telescopes, hdu=hdu)
+                scans = read_raws(scan_files, "P2VM_RAW", layout.baselines, hdu=hdu)
+                return fit_p2vm(extract_p2vm_spectra(flats, scans, extractor, dark, flat))
+
+            expected = fit(paths["FLAT_RAW"], paths["P2VM_RAW"], "IMAGING_DATA_SC")
 
             def bench_files(role, identities):
                 result = {}
@@ -88,13 +89,7 @@ class P2VMTests(unittest.TestCase):
 
             flats = bench_files("FLAT_RAW", ("4", "3", "2", "1")).values()
             scans = bench_files("P2VM_RAW", ("43", "42", "41", "32", "31", "21")).values()
-            actual = make_p2vm(
-                flat,
-                wave,
-                dark,
-                telescope_flats=[read_raw(p, "FLAT_RAW", hdu=0) for p in reversed(list(flats))],
-                baseline_cubes=[read_raw(p, "P2VM_RAW", hdu=0) for p in reversed(list(scans))],
-            )
+            actual = fit(reversed(list(flats)), reversed(list(scans)), 0)
             np.testing.assert_array_equal(actual.matrix, expected.matrix)
             self.assertEqual(actual.baseline_outputs, expected.baseline_outputs)
 
@@ -190,7 +185,9 @@ class P2VMTests(unittest.TestCase):
                 write_shutters(header, tuple(str(t) in baseline for t in range(1, 5)))
                 fits.HDUList([fits.PrimaryHDU(header=header), table]).writeto(path)
                 paths[baseline] = path
-            actual = read_scan_opd(list(reversed(paths.values())), gains)
+            scans = {b: Raw(np.zeros((1, 1, 1)), "P2VM_RAW", (None,) * 4, DetectorSetup(), path)
+                     for b, path in paths.items()}
+            actual = read_scan_opd(scans, gains)
             expected = np.array([gains[b] * np.array([0., 30e-6, 30e-6, -30e-6])
                                  for b in layout.baselines])
             np.testing.assert_allclose(actual, expected, rtol=1e-15, atol=0)
