@@ -1,11 +1,8 @@
-"""Fixed PLANETES layout, detector setup and raw cubes."""
+"""Fixed PLANETES layout, detector setup and shutter identity."""
 
-from collections.abc import Iterator
 from dataclasses import dataclass
-from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,38 +113,6 @@ def check_setup(
             raise ValueError(f"Incompatible {role} {name}: {actual} != {expected}")
 
 
-@dataclass(frozen=True, slots=True)
-class Raw:
-    """One raw detector cube and its recorded metadata.
-
-    cube is the (frame, y, x) ADU image HDU as stored, memory-mapped by
-    files.read_raw, so large files are not loaded at once. Shutters are in
-    physical T1,T2,T3,T4 order; unknown metadata stays None.
-    """
-
-    cube: NDArray
-    category: str
-    shutters: tuple[bool | None, bool | None, bool | None, bool | None]
-    setup: DetectorSetup
-    path: Path | None = None
-
-    def chunks(self, size: int = 16) -> Iterator[NDArray]:
-        """Frames in order, as float64 blocks of up to `size` frames."""
-        for start in range(0, len(self.cube), size):
-            yield np.asarray(self.cube[start : start + size], dtype=np.float64)
-
-    def mean(self) -> NDArray:
-        """Equally weighted temporal mean over all frames, float64 (y, x) in ADU."""
-        total = None
-        count = 0
-        for chunk in self.chunks():
-            if total is None:
-                total = np.zeros(chunk.shape[1:])
-            total += chunk.sum(axis=0)
-            count += len(chunk)
-        if total is None:
-            raise ValueError("Cube contains no frames")
-        return total / count
 
 
 def shutter_identity(shutters: tuple[bool | None, ...]) -> str:
@@ -157,9 +122,3 @@ def shutter_identity(shutters: tuple[bool | None, ...]) -> str:
     return "".join(str(n) for n in range(4, 0, -1) if shutters[n - 1])
 
 
-def check_calibrations(raw: Raw, *, dark=None, flat=None) -> None:
-    """Reject a DARK whose known DIT/ROI/detector, or a FLAT whose ROI/detector, differs from raw."""
-    if dark is not None:
-        check_setup(raw.setup, dark.setup, exposure=True, role="DARK")
-    if flat is not None:
-        check_setup(raw.setup, flat.setup, exposure=False, role="FLAT")

@@ -75,9 +75,8 @@ flat. The interpolation is pointwise in wavenumber, not an integral over bins.
 P2VM calibration defines its explicit target grid (default 1.15e-6–1.30e-6 m, 151
 channels). Science and live processing consume this saved grid. Every output
 must cover it fully; detector dimensions, sparse geometry and wavelength ordering
-are checked before extraction. Calibration files are selected explicitly by the caller. A coverage edge tolerates
-only the float32 storage rounding bound (`2**-24` relative); larger gaps fail.
-Within that encoding allowance, interpolation retains its endpoint behavior.
+are checked before extraction. Calibration files are selected explicitly by the caller. The target grid
+must lie within each output's wavelength coverage exactly.
 
 File workflows receive explicit telescope/baseline path mappings. SOF shutter
 identification is performed by the recipe before calling these workflows. Each
@@ -180,11 +179,9 @@ closure-phase definition or OIFITS/Phase 3 product is introduced here.
 
 ## File representations and QC
 
-Floating input is adapted to float64/complex128 at the I/O or live-frame boundary;
-scientific arrays stay at that precision. New floating files use float32/complex64.
-Integers/flags retain their types. Precision is defined in `files.py`, not inside
-the numerical steps. This changes rounding compared with 0.9.0; the report
-separates calculation changes from calibration-file and final-output rounding.
+Calculations use float64/complex128 and products are stored exactly as computed
+(since 0.17.0; earlier products were float32). Integers and flags keep their types.
+Raw cubes are read as recorded and converted to float64 frame by frame.
 
 Wavelength, OPD and GD use metres throughout calculations and files. There is no
 micrometre/metre conversion or retained-representation cache in the numerical path.

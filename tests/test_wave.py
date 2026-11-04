@@ -10,9 +10,9 @@ import numpy as np
 from astropy.io import fits
 
 from planetes_pipe.dark import make_dark_products
-from planetes_pipe.files import read_raw, read_raws, write_shutters
 from planetes_pipe.flat import make_flat, read_flat, write_flat
 from planetes_pipe.instrument import layout
+from planetes_pipe.raw import read_raw, read_raws, write_shutters
 from planetes_pipe.wave import make_wave, match_peaks_grid, read_wave, write_wave
 
 

@@ -7,9 +7,9 @@ from numba import njit, prange
 from numpy.typing import NDArray
 
 from planetes_pipe.dark import Dark
-from planetes_pipe.files import STORAGE_RTOL
 from planetes_pipe.flat import Flat, extract_sparse_spectra
-from planetes_pipe.instrument import DetectorSetup, Raw
+from planetes_pipe.instrument import DetectorSetup
+from planetes_pipe.raw import Raw
 from planetes_pipe.wave import Wave
 
 
@@ -165,11 +165,7 @@ def prepare_extraction(
     ):
         raise ValueError("Wavelengths must increase for spectral resampling")
     for output, row in enumerate(wave.wavelength_map_m):
-        # Only tolerate the error of one on-disk rounding at a coverage edge.
-        if (
-            wavelength_m[0] < row[0] - abs(row[0]) * STORAGE_RTOL
-            or wavelength_m[-1] > row[-1] + abs(row[-1]) * STORAGE_RTOL
-        ):
+        if wavelength_m[0] < row[0] or wavelength_m[-1] > row[-1]:
             raise ValueError(
                 f"Output {output}: target {wavelength_m[0]:.9g}..{wavelength_m[-1]:.9g} m outside calibration {row[0]:.9g}..{row[-1]:.9g} m"
             )

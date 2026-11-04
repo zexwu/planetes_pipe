@@ -1,3 +1,16 @@
+# PLANETES 0.17.0：产品按 float64 原样存储
+
+- 产品不再降为 float32 存储：删除 `_storage_array` 与 `STORAGE_RTOL`，波长覆盖按精确值检查；
+  读取只做字节序转换（FITS 大端 → 本机，numba 需要）；读取时不再重新校验 checksum
+  （写出时仍写）。0.17.0 之前的产品是 float32，建议重新生成。
+- `files.py` 按方向拆为 `raw.py`（`Raw`、raw 读取、DET/快门 header）和 `products.py`
+  （产品读写、扩展、QC 卡片、溯源）；像素坐标转换移入 `flat.py`。`read_raws` 改为一条
+  明确规则：每种快门配置恰好一个文件。
+- 2026-02-05 数据相对 float32 版本：标定读回不再舍入，lamp 拟合多接受一条谱线
+  （544 → 545），WAVE 中位偏移 0.9 pm（最大 26 pm，拟合残差约 127 pm），P2VM 波长网格
+  最大偏移 2.4 pm；science 的 VISAMP 中位变化 1e-4，差分相位 0.008°，GD 0.3 nm，flags 不变。
+  文件约为原来的两倍（DARK 21 MB，P2VM 26 MB，science 91 MB）。
+
 # PLANETES 0.16.0：每个产品一个模块
 
 - 删除 `model/`、`io/`、`processing/` 三层结构。每个步骤（dark、flat、wave、p2vm、

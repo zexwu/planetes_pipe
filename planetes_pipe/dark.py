@@ -13,8 +13,9 @@ import numpy as np
 from astropy.io.fits import Header
 from numpy.typing import NDArray
 
-from planetes_pipe import files
-from planetes_pipe.instrument import DetectorSetup, Raw
+from planetes_pipe import products
+from planetes_pipe.instrument import DetectorSetup
+from planetes_pipe.raw import Raw, read_raw, read_setup
 
 
 @dataclass(slots=True)
@@ -47,7 +48,7 @@ def make_dark_products(
     Parameters
     ----------
     raw : Raw
-        Raw dark cube and its recorded setup, from files.read_raw.
+        Raw dark cube and its recorded setup, from products.read_raw.
     bad_pixel_threshold : float, optional
         Multiplier of the spatial median temporal RMS for BAD classification.
         Default is 5; this is not an independently measured read-noise threshold.
@@ -207,44 +208,44 @@ def write_dark(path: Path, product: Dark, *, header=None) -> None:
         raise ValueError("Saved DARK requires measured RMS and at least two frames")
     header = Header() if header is None else header.copy()
     header["NFRAMES"] = product.n_frames
-    files.save_product(path, "DARK", [
-        files.image_hdu("IMAGING_DATA_SC", product.mean_adu, "adu"),
-        files.image_hdu("IMAGING_ERR_SC", product.temporal_rms_adu, "adu"),
+    products.save_product(path, "DARK", [
+        products.image_hdu("IMAGING_DATA_SC", product.mean_adu, "adu"),
+        products.image_hdu("IMAGING_ERR_SC", product.temporal_rms_adu, "adu"),
     ], header=header, qc=qc(product), setup=product.setup)
 
 
 def read_dark(path: Path) -> Dark:
     """Read a checksummed DARK at computation precision."""
-    with files.open_product(path, "DARK") as hdus:
+    with products.open_product(path, "DARK") as hdus:
         return Dark(
-            mean_adu=files.read_image(hdus, "IMAGING_DATA_SC"),
-            temporal_rms_adu=files.read_image(hdus, "IMAGING_ERR_SC"),
+            mean_adu=products.read_image(hdus, "IMAGING_DATA_SC"),
+            temporal_rms_adu=products.read_image(hdus, "IMAGING_ERR_SC"),
             n_frames=hdus[0].header["NFRAMES"],
-            setup=files.read_setup(hdus[0].header),
+            setup=read_setup(hdus[0].header),
         )
 
 
 def write_bad(path: Path, product: Bad, *, header=None) -> None:
     """Save a BAD pixel map (hot=1, dead=2, noisy=4) with its QC; never overwrite."""
-    files.save_product(path, "BAD", [files.image_hdu("IMAGING_DATA_SC", product.bad_pixel_flags)],
+    products.save_product(path, "BAD", [products.image_hdu("IMAGING_DATA_SC", product.bad_pixel_flags)],
                       header=header, qc=qc(product))
 
 
 def read_bad(path: Path) -> Bad:
     """Read a checksummed BAD pixel map."""
-    with files.open_product(path, "BAD") as hdus:
-        return Bad(files.read_image(hdus, "IMAGING_DATA_SC"))
+    with products.open_product(path, "BAD") as hdus:
+        return Bad(products.read_image(hdus, "IMAGING_DATA_SC"))
 
 
 def run(dark_file, *, output_dir, bad_pixel_threshold=BAD_PIXEL_THRESHOLD) -> dict[str, Path]:
     """planetes_dark: one DARK_RAW -> DARK and BAD."""
-    raw = files.read_raw(dark_file, "DARK_RAW")
+    raw = read_raw(dark_file, "DARK_RAW")
     dark, bad = make_dark_products(raw, bad_pixel_threshold=bad_pixel_threshold)
 
-    header = files.provenance("planetes_dark", dark_file, {"DARK_RAW": [dark_file]},
+    header = products.provenance("planetes_dark", dark_file, {"DARK_RAW": [dark_file]},
                               bad_pixel_threshold=bad_pixel_threshold)
-    dark_path = files.product_path(output_dir, dark_file, "DARK")
-    bad_path = files.product_path(output_dir, dark_file, "BAD")
+    dark_path = products.product_path(output_dir, dark_file, "DARK")
+    bad_path = products.product_path(output_dir, dark_file, "BAD")
     write_dark(dark_path, dark, header=header)
     write_bad(bad_path, bad, header=header)
     return {"DARK": dark_path, "BAD": bad_path}

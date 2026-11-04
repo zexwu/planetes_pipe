@@ -11,7 +11,7 @@ import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from planetes_pipe import files, log
+from planetes_pipe import log, products
 from planetes_pipe.dark import Dark, read_dark
 from planetes_pipe.extraction import (
     SpectralExtractor,
@@ -20,8 +20,9 @@ from planetes_pipe.extraction import (
     prepare_extraction,
 )
 from planetes_pipe.flat import Flat, read_flat
-from planetes_pipe.instrument import Raw, check_calibrations, layout
+from planetes_pipe.instrument import layout
 from planetes_pipe.p2vm import P2VM, read_p2vm
+from planetes_pipe.raw import Raw, check_calibrations, read_raw
 from planetes_pipe.wave import Wave, read_wave
 
 
@@ -246,7 +247,7 @@ class FrameReducer:
 
     Notes
     -----
-    Construction prepares read-only extraction arrays; it does not load files.
+    Construction prepares read-only extraction arrays; it does not load products.
     Pass the selected DARK to each reduce_frame call. NDArray-only live frames do
     not carry exposure metadata, so the caller must ensure calibration matching.
     """
@@ -320,38 +321,38 @@ def write_reduced(path: Path, product: P2VMRed, *, header=None) -> None:
     nb = layout.n_baselines
     stations = np.asarray(layout.telescopes, dtype=int)
     pairs = np.asarray([[int(layout.telescopes[t]) for t in pair] for pair in layout.baseline_pairs])
-    wavelength = [files.column("WAVELENGTH", product.wavelength_m, "m")]
+    wavelength = [products.column("WAVELENGTH", product.wavelength_m, "m")]
     flux = [
-        files.column("FRAME", np.repeat(np.arange(1, nf + 1), nt)),
-        files.column("STA_INDEX", np.tile(stations, nf)),
-        files.column("FLUXDATA", product.photometric_flux_adu.reshape(-1, nw), "adu"),
+        products.column("FRAME", np.repeat(np.arange(1, nf + 1), nt)),
+        products.column("STA_INDEX", np.tile(stations, nf)),
+        products.column("FLUXDATA", product.photometric_flux_adu.reshape(-1, nw), "adu"),
     ]
     vis = [
-        files.column("FRAME", np.repeat(np.arange(1, nf + 1), nb)),
-        files.column("STA_INDEX", np.tile(pairs, (nf, 1))),
-        files.column("VISDATA", product.coherent_flux_adu.reshape(-1, nw), "adu"),
-        files.column("VISAMP", product.visibility_amplitude.reshape(-1, nw)),
-        files.column("FLAG", product.flags.reshape(-1, nw)),
-        files.column("GDELAY", product.group_delay_m.reshape(-1), "m"),
-        files.column("DIFFPHASE", product.differential_phase_deg.reshape(-1, nw), "deg"),
+        products.column("FRAME", np.repeat(np.arange(1, nf + 1), nb)),
+        products.column("STA_INDEX", np.tile(pairs, (nf, 1))),
+        products.column("VISDATA", product.coherent_flux_adu.reshape(-1, nw), "adu"),
+        products.column("VISAMP", product.visibility_amplitude.reshape(-1, nw)),
+        products.column("FLAG", product.flags.reshape(-1, nw)),
+        products.column("GDELAY", product.group_delay_m.reshape(-1), "m"),
+        products.column("DIFFPHASE", product.differential_phase_deg.reshape(-1, nw), "deg"),
     ]
     extensions = [
-        files.detector_table(product.baseline_outputs),
+        products.detector_table(product.baseline_outputs),
         afits.BinTableHDU.from_columns(wavelength, name="PLANETES_WAVELENGTH"),
         afits.BinTableHDU.from_columns(flux, name="PLANETES_FLUX"),
         afits.BinTableHDU.from_columns(vis, name="PLANETES_VIS"),
     ]
-    files.save_product(path, "SINGLE_SCI_P2VMRED", extensions, header=header)
+    products.save_product(path, "SINGLE_SCI_P2VMRED", extensions, header=header)
 
 
 def read_reduced(path: Path) -> P2VMRed:
     """Read a checksummed SINGLE_SCI_P2VMRED; rows are frame-major as written."""
-    with files.open_product(path, "SINGLE_SCI_P2VMRED") as hdus:
-        wavelength = files.read_column(hdus, "PLANETES_WAVELENGTH", "WAVELENGTH")
+    with products.open_product(path, "SINGLE_SCI_P2VMRED") as hdus:
+        wavelength = products.read_column(hdus, "PLANETES_WAVELENGTH", "WAVELENGTH")
         nt, nb, nw = layout.n_telescopes, layout.n_baselines, len(wavelength)
         nf = len(hdus["PLANETES_FLUX"].data) // nt
-        flux = files.read_column(hdus, "PLANETES_FLUX", "FLUXDATA").reshape(nf, nt, nw)
-        vis = {name: files.read_column(hdus, "PLANETES_VIS", name).reshape(nf, nb, -1)
+        flux = products.read_column(hdus, "PLANETES_FLUX", "FLUXDATA").reshape(nf, nt, nw)
+        vis = {name: products.read_column(hdus, "PLANETES_VIS", name).reshape(nf, nb, -1)
                for name in ("VISDATA", "VISAMP", "FLAG", "GDELAY", "DIFFPHASE")}
         return P2VMRed(
             photometric_flux_adu=flux,
@@ -359,7 +360,7 @@ def read_reduced(path: Path) -> P2VMRed:
             visibility_amplitude=vis["VISAMP"],
             flags=vis["FLAG"],
             wavelength_m=wavelength,
-            baseline_outputs=files.baseline_outputs(hdus["IMAGING_DETECTOR_SC"].data["REGNAME"]),
+            baseline_outputs=products.baseline_outputs(hdus["IMAGING_DETECTOR_SC"].data["REGNAME"]),
             group_delay_m=vis["GDELAY"].reshape(nf, nb),
             differential_phase_deg=vis["DIFFPHASE"],
         )
@@ -368,7 +369,7 @@ def read_reduced(path: Path) -> P2VMRed:
 def run(science_file, dark_file, flat_file, wave_file, p2vm_file, *, output_dir,
         gd_search_min_m=-100e-6, gd_search_max_m=100e-6) -> dict[str, Path]:
     """planetes_reduce: one SINGLE_SCI_RAW + DARK, FLAT, WAVE, P2VM -> SINGLE_SCI_P2VMRED."""
-    raw = files.read_raw(science_file, "SINGLE_SCI_RAW")
+    raw = read_raw(science_file, "SINGLE_SCI_RAW")
     dark, flat, wave = read_dark(dark_file), read_flat(flat_file), read_wave(wave_file)
     p2vm = read_p2vm(p2vm_file)
     options = dict(gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m)
@@ -376,7 +377,7 @@ def run(science_file, dark_file, flat_file, wave_file, p2vm_file, *, output_dir,
 
     inputs = {"SINGLE_SCI_RAW": [science_file], "DARK": [dark_file], "FLAT": [flat_file],
               "WAVE": [wave_file], "P2VM": [p2vm_file]}
-    header = files.provenance("planetes_reduce", science_file, inputs, **options)
-    path = files.product_path(output_dir, science_file, "SINGLE_SCI_P2VMRED")
+    header = products.provenance("planetes_reduce", science_file, inputs, **options)
+    path = products.product_path(output_dir, science_file, "SINGLE_SCI_P2VMRED")
     write_reduced(path, product, header=header)
     return {"SINGLE_SCI_P2VMRED": path}

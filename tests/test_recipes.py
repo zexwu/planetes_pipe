@@ -14,9 +14,9 @@ from fixtures import input_rows, metadata, write_raw, write_recipe_inputs
 
 import planetes_pipe
 from planetes_pipe.dark import read_bad, read_dark, write_dark
-from planetes_pipe.files import read_raw
 from planetes_pipe.flat import read_flat
 from planetes_pipe.p2vm import read_p2vm
+from planetes_pipe.raw import read_raw
 from planetes_pipe.science import read_reduced, reduce_science
 from planetes_pipe.wave import read_wave
 
@@ -142,13 +142,7 @@ class ESOChainTests(unittest.TestCase):
                     getattr(actual, field.name),
                 )
                 if isinstance(before, np.ndarray):
-                    expected_array = before
-                    if before.dtype.kind in "fc":
-                        stored = (
-                            np.complex64 if before.dtype.kind == "c" else np.float32
-                        )
-                        expected_array = before.astype(stored).astype(before.dtype)
-                    np.testing.assert_array_equal(expected_array, after)
+                    np.testing.assert_array_equal(before, after)
                 else:
                     self.assertEqual(before, after)
             self.assertTrue(actual.flags[0].all())

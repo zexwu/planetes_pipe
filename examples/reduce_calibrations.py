@@ -7,7 +7,7 @@ check that each calibration matches its raw data (DIT, ROI, detector).
 from pathlib import Path
 
 from planetes_pipe import dark, flat, p2vm, wave
-from planetes_pipe.files import find_raw
+from planetes_pipe.raw import find_raw
 
 RAW = Path("D:/camera_captures/2026-10-29/raw/calibration")
 DARK_RAW = RAW / "PLANETES.2026-10-29T101500.000.fits"  # Same DIT as flats and scans.

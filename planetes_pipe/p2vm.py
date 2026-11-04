@@ -15,12 +15,17 @@ import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from planetes_pipe import files, log
+from planetes_pipe import log, products
 from planetes_pipe.dark import Dark, read_dark
-from planetes_pipe.extraction import (SpectralExtractor, estimate_group_delay, extract_spectra,
-                                      prepare_extraction)
+from planetes_pipe.extraction import (
+    SpectralExtractor,
+    estimate_group_delay,
+    extract_spectra,
+    prepare_extraction,
+)
 from planetes_pipe.flat import Flat, read_flat
-from planetes_pipe.instrument import Raw, check_calibrations, layout
+from planetes_pipe.instrument import layout
+from planetes_pipe.raw import Raw, check_calibrations, read_raw, read_raws
 from planetes_pipe.wave import Wave, read_wave
 
 
@@ -79,7 +84,7 @@ def extract_p2vm_spectra(flats: dict[str, Raw], scans: dict[str, Raw],
     ----------
     flats, scans : dict of str to Raw
         Four telescope flats ('4', ...) and six baseline scans ('43', ...), from
-        files.read_raws. Frame counts must agree within each group.
+        products.read_raws. Frame counts must agree within each group.
     extractor : SpectralExtractor
         Extraction geometry and target wavelength grid (prepare_extraction).
     dark, flat : Dark, Flat
@@ -815,42 +820,42 @@ _IMAGES = [
 
 def write_p2vm(path: Path, product: P2VM, *, header=None) -> None:
     """Save a P2VM with its QC; never overwrite."""
-    detector = files.detector_table(product.baseline_outputs)
+    detector = products.detector_table(product.baseline_outputs)
     columns = [
-        files.column("REGNAME", detector.data["REGNAME"]),
-        files.column("TRANSMISSION", product.transmission),
-        files.column("COHERENCE", product.coherence_amplitude),
-        files.column("PHASE", product.coherence_phase_rad, "rad"),
+        products.column("REGNAME", detector.data["REGNAME"]),
+        products.column("TRANSMISSION", product.transmission),
+        products.column("COHERENCE", product.coherence_amplitude),
+        products.column("PHASE", product.coherence_phase_rad, "rad"),
     ]
     if product.dc_term_adu is not None:
-        columns.append(files.column("C_MATRIX", product.dc_term_adu, "adu"))
-    wavelength = [files.column("WAVELENGTH", product.wavelength_m, "m")]
+        columns.append(products.column("C_MATRIX", product.dc_term_adu, "adu"))
+    wavelength = [products.column("WAVELENGTH", product.wavelength_m, "m")]
     extensions = [
         detector,
         afits.BinTableHDU.from_columns(wavelength, name="PLANETES_WAVELENGTH"),
         afits.BinTableHDU.from_columns(columns, name="P2VM_SC"),
     ]
-    extensions += [files.image_hdu(ext, getattr(product, name), unit)
+    extensions += [products.image_hdu(ext, getattr(product, name), unit)
                    for name, ext, unit in _IMAGES if getattr(product, name) is not None]
-    files.save_product(path, "P2VM", extensions, header=header, qc=qc(product))
+    products.save_product(path, "P2VM", extensions, header=header, qc=qc(product))
 
 
 def read_p2vm(path: Path) -> P2VM:
     """Read a checksummed P2VM at computation precision."""
-    with files.open_product(path, "P2VM") as hdus:
+    with products.open_product(path, "P2VM") as hdus:
         labels = hdus["IMAGING_DETECTOR_SC"].data["REGNAME"]
         values = {
-            "wavelength_m": files.read_column(hdus, "PLANETES_WAVELENGTH", "WAVELENGTH"),
-            "baseline_outputs": files.baseline_outputs(labels),
-            "transmission": files.read_column(hdus, "P2VM_SC", "TRANSMISSION"),
-            "coherence_amplitude": files.read_column(hdus, "P2VM_SC", "COHERENCE"),
-            "coherence_phase_rad": files.read_column(hdus, "P2VM_SC", "PHASE"),
+            "wavelength_m": products.read_column(hdus, "PLANETES_WAVELENGTH", "WAVELENGTH"),
+            "baseline_outputs": products.baseline_outputs(labels),
+            "transmission": products.read_column(hdus, "P2VM_SC", "TRANSMISSION"),
+            "coherence_amplitude": products.read_column(hdus, "P2VM_SC", "COHERENCE"),
+            "coherence_phase_rad": products.read_column(hdus, "P2VM_SC", "PHASE"),
         }
         if "C_MATRIX" in hdus["P2VM_SC"].columns.names:
-            values["dc_term_adu"] = files.read_column(hdus, "P2VM_SC", "C_MATRIX")
+            values["dc_term_adu"] = products.read_column(hdus, "P2VM_SC", "C_MATRIX")
         for name, ext, unit in _IMAGES:
             if ext in hdus:
-                values[name] = files.read_image(hdus, ext)
+                values[name] = products.read_image(hdus, ext)
         return P2VM(**values)
 
 
@@ -885,8 +890,8 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
     ({'43': gain, ...}, mm -> OPD m) guides phase unwrapping with the DL_SCAN tables.
     """
     dark, flat, wave = read_dark(dark_file), read_flat(flat_file), read_wave(wave_file)
-    flats = files.read_raws(flat_files, "FLAT_RAW", layout.telescopes)
-    scans = files.read_raws(scan_files, "P2VM_RAW", layout.baselines)
+    flats = read_raws(flat_files, "FLAT_RAW", layout.telescopes)
+    scans = read_raws(scan_files, "P2VM_RAW", layout.baselines)
 
     # Extract every input on the common illuminated wavelength grid.
     extractor = prepare_extraction(flat, wave, wavelength_grid(flat, wave))
@@ -894,7 +899,7 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
 
     phase_spectra = None
     if phase_file is not None:
-        phase_raw = files.read_raw(phase_file, "SINGLE_SCI_RAW")
+        phase_raw = read_raw(phase_file, "SINGLE_SCI_RAW")
         phase_dark = read_dark(phase_dark_file) if phase_dark_file is not None else dark
         check_calibrations(phase_raw, dark=phase_dark, flat=flat)
         phase_spectra = extract_spectra(phase_raw, extractor, phase_dark)
@@ -914,7 +919,7 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
         inputs["PHASE_REFERENCE"] = [phase_file]
     if phase_dark_file is not None:
         inputs["PHASE_DARK_CALIB"] = [phase_dark_file]
-    header = files.provenance("planetes_p2vm", reference, inputs, dl_gain=dl_gain, **options)
-    path = files.product_path(output_dir, reference, "P2VM")
+    header = products.provenance("planetes_p2vm", reference, inputs, dl_gain=dl_gain, **options)
+    path = products.product_path(output_dir, reference, "P2VM")
     write_p2vm(path, product, header=header)
     return {"P2VM": path}

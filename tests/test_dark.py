@@ -17,8 +17,8 @@ from planetes_pipe.dark import (
     write_bad,
     write_dark,
 )
-from planetes_pipe.files import read_raw
 from planetes_pipe.instrument import DetectorSetup
+from planetes_pipe.raw import read_raw
 
 
 class DarkTests(unittest.TestCase):
@@ -46,10 +46,7 @@ class DarkTests(unittest.TestCase):
             ):
                 output = Path(directory) / (type(product).__name__ + ".fits")
                 write(output, product)
-                expected = getattr(product, field)
-                if field == "mean_adu":
-                    expected = expected.astype(np.float32).astype(float)
-                np.testing.assert_array_equal(getattr(read(output), field), expected)
+                np.testing.assert_array_equal(getattr(read(output), field), getattr(product, field))
                 with self.assertRaises(OSError):
                     write(output, product)
             self.assertEqual(path.read_bytes(), original)

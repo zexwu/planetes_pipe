@@ -31,15 +31,15 @@ in-memory only. A `P2VMRed` from the live preview has no GD/phase and cannot be 
   in degrees; counts in ADU. `FLAG=True` marks an invalid visibility sample.
 - Pixel indices and trace centres are one-based on disk and zero-based in Python;
   `-1` is the invalid sparse-pixel sentinel. WAVE fit X/Y stay zero-based.
-- Calculations use float64/complex128. Files store float32/complex64
-  (`files.STORAGE_RTOL`); integers and flags keep their types.
+- Calculations use float64/complex128 and products store them as computed;
+  integers and flags keep their types. Products written before 0.17.0 are float32.
 
 ## Raw input
 
-`files.read_raw(path, category, hdu="IMAGING_DATA_SC")` returns `Raw`: the
+`raw.read_raw(path, category, hdu="IMAGING_DATA_SC")` returns `Raw`: the
 memory-mapped cube as stored, the four shutter states and the `DetectorSetup`
 (DIT, ROI, binning, detector id). Missing header fields stay `None`. Raw tags
-map to `ESO DPR TYPE` in `files.RAW_TYPES`. Shutters are `ESO INS SHUTn ST`;
+map to `ESO DPR TYPE` in `raw.RAW_TYPES`. Shutters are `ESO INS SHUTn ST`;
 files written before 2026-11 use `PLANETES INS SHUTn ST`, which is still read.
 FLAT and P2VM raw lists may be in any order: physical identity comes from shutters.
 
@@ -50,7 +50,7 @@ e.g. `PLANETES.2026-02-05T210609_singlescip2vmred.fits`. The reference is DARK_R
 WAVELAMP_RAW or SINGLE_SCI_RAW, the T4 flat for FLAT, and the 43 scan for P2VM.
 Existing files are never overwritten (`OSError`).
 
-The primary header (`files.provenance`, `files.save_product`) contains:
+The primary header (`products.provenance`, `products.save_product`) contains:
 
 - the reference raw's cards, without DPR and file-identity cards;
 - `ESO PRO CATG/TYPE/TECH/SCIENCE/DID`, `ESO PRO REC1 ID/DRS ID/PIPE ID`,
@@ -107,4 +107,4 @@ Only mistakes a user or the data can make are checked:
 - detector-shape mismatches between raw, DARK, BAD, FLAT and WAVE;
 - wavelength coverage and sparse pixel bounds before the numba kernels;
 - rank-deficient P2VM matrices and failed wavelength fits;
-- product category and FITS checksums when a product is read.
+- product category when a product is read (checksums are written, not re-verified).

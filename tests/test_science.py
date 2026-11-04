@@ -1,4 +1,4 @@
-"""science.py: visibility normalization and P2VMRED storage precision."""
+"""science.py: visibility normalization and exact P2VMRED round trips."""
 
 
 import tempfile
@@ -31,7 +31,7 @@ class ReducedProductTests(unittest.TestCase):
         science[:, 0] = 0
         cls.product = reduce_spectra(science, p2vm)
 
-    def test_complex_flux_and_flags_preserve_storage_precision(self):
+    def test_complex_flux_and_flags_round_trip_exactly(self):
         coherent = self.product.coherent_flux_adu.copy()
         coherent[0, 0, 0] = complex(-0.0, -0.0)
         coherent[0, 0, 1] = complex(np.nan, np.nan)
@@ -46,17 +46,11 @@ class ReducedProductTests(unittest.TestCase):
                     getattr(loaded, field.name),
                 )
                 if isinstance(before, np.ndarray):
-                    expected = before
-                    if before.dtype.kind in "fc":
-                        stored = (
-                            np.complex64 if before.dtype.kind == "c" else np.float32
-                        )
-                        expected = before.astype(stored).astype(before.dtype)
-                    np.testing.assert_array_equal(expected, after)
+                    np.testing.assert_array_equal(before, after)  # Stored as computed.
                 else:
                     self.assertEqual(before, after)
             np.testing.assert_array_equal(
-                coherent.astype(np.complex64).astype(np.complex128).view(np.uint64),
+                coherent.view(np.uint64),  # Bit-exact, including -0.0 and NaN.
                 loaded.coherent_flux_adu.view(np.uint64),
             )
             self.assertTrue(loaded.flags[0].all())

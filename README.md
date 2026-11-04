@@ -42,9 +42,9 @@ planetes_pipe/
                     (with its numba kernels), qc(), read_<x>/write_<x>, run()
   extraction.py     algorithms shared by WAVE, P2VM and science: spectral
                     extraction and resampling, group delay
-  instrument.py     data format: channel order, DetectorSetup, Raw cube
-  files.py          FITS: raw tags and raw reading, product read/write, QC cards,
-                    provenance header
+  instrument.py     channel order, DetectorSetup, shutter identity
+  raw.py            raw data: the Raw cube, reading raw files, DET/shutter headers
+  products.py       product FITS: write/read, extensions, QC cards, provenance header
   plots.py          diagnostic PDF reports
   eso/recipes.py    PyEsoRex recipes; the only file that imports CPL
 examples/           two complete reduction scripts
@@ -72,12 +72,12 @@ Each step can be used at the level that fits the task:
 `run()` reads the files, calls the raw level, computes QC and writes the products;
 its arguments are file paths (`dark_file`, `flat_files`, ...). The raw level checks
 that calibrations match the raw detector setup; FLAT and P2VM take their raws keyed
-by physical identity, as returned by `files.read_raws`. The array level is pure
+by physical identity, as returned by `raw.read_raws`. The array level is pure
 arithmetic, used by the live viewer and the tests.
 
 ```python
 from planetes_pipe.dark import make_dark_products
-from planetes_pipe.files import read_raw
+from planetes_pipe.raw import read_raw
 
 master, bad = make_dark_products(read_raw("dark.fits", "DARK_RAW"))
 ```

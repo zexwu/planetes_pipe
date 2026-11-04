@@ -7,10 +7,10 @@ import numpy as np
 from astropy.io import fits
 
 from planetes_pipe.dark import Bad, Dark, write_bad, write_dark
-from planetes_pipe.files import RAW_TYPES, write_setup, write_shutters
 from planetes_pipe.flat import Flat, write_flat
 from planetes_pipe.instrument import DetectorSetup, layout
 from planetes_pipe.p2vm import P2VM, P2VMSpectra, write_p2vm
+from planetes_pipe.raw import RAW_TYPES, write_setup, write_shutters
 from planetes_pipe.science import P2VMRed, write_reduced
 from planetes_pipe.wave import Wave, write_wave
 

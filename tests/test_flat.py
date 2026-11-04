@@ -10,9 +10,9 @@ from astropy.io import fits
 from fixtures import RawMetadata, write_raw
 
 from planetes_pipe.dark import Bad, Dark
-from planetes_pipe.files import read_raws, write_shutters
 from planetes_pipe.flat import build_flat, make_flat
 from planetes_pipe.instrument import DetectorSetup, layout
+from planetes_pipe.raw import read_raws, write_shutters
 
 
 class FlatTests(unittest.TestCase):

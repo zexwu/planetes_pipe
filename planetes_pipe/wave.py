@@ -15,10 +15,11 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
-from planetes_pipe import files, log
+from planetes_pipe import log, products
 from planetes_pipe.dark import Dark, read_dark
 from planetes_pipe.flat import Flat, extract_sparse_spectra, read_flat
-from planetes_pipe.instrument import Raw, check_calibrations, layout
+from planetes_pipe.instrument import layout
+from planetes_pipe.raw import Raw, check_calibrations, read_raw
 
 
 @dataclass(slots=True)
@@ -618,42 +619,42 @@ def qc(product: Wave) -> dict:
 
 def write_wave(path: Path, product: Wave, *, header=None) -> None:
     """Save a WAVE solution (metres) with its QC; never overwrite."""
-    wavelengths = [files.column(f"DATA{i + 1}", row[None], "m")
+    wavelengths = [products.column(f"DATA{i + 1}", row[None], "m")
                    for i, row in enumerate(product.wavelength_map_m)]
     extensions = [
-        files.detector_table(),
+        products.detector_table(),
         afits.BinTableHDU.from_columns(wavelengths, name="WAVE_DATA_SC"),
     ]
     if product.fit_residual_m is not None:
         fit = [
-            files.column("RESIDUAL", product.fit_residual_m, "m"),
-            files.column("X", product.fit_x_pixels, "pixel"),
-            files.column("Y", product.fit_y_pixels, "pixel"),
+            products.column("RESIDUAL", product.fit_residual_m, "m"),
+            products.column("X", product.fit_x_pixels, "pixel"),
+            products.column("Y", product.fit_y_pixels, "pixel"),
         ]
         extensions.append(afits.BinTableHDU.from_columns(fit, name="PLANETES_WAVE_FIT"))
-    files.save_product(path, "WAVE", extensions, header=header, qc=qc(product))
+    products.save_product(path, "WAVE", extensions, header=header, qc=qc(product))
 
 
 def read_wave(path: Path) -> Wave:
     """Read a checksummed WAVE solution at computation precision."""
-    with files.open_product(path, "WAVE") as hdus:
-        rows = [files.read_column(hdus, "WAVE_DATA_SC", f"DATA{i + 1}")[0]
+    with products.open_product(path, "WAVE") as hdus:
+        rows = [products.read_column(hdus, "WAVE_DATA_SC", f"DATA{i + 1}")[0]
                 for i in range(layout.n_outputs)]
         wave = Wave(wavelength_map_m=np.stack(rows))
         if "PLANETES_WAVE_FIT" in hdus:
-            wave.fit_residual_m = files.read_column(hdus, "PLANETES_WAVE_FIT", "RESIDUAL")
-            wave.fit_x_pixels = files.read_column(hdus, "PLANETES_WAVE_FIT", "X")
-            wave.fit_y_pixels = files.read_column(hdus, "PLANETES_WAVE_FIT", "Y")
+            wave.fit_residual_m = products.read_column(hdus, "PLANETES_WAVE_FIT", "RESIDUAL")
+            wave.fit_x_pixels = products.read_column(hdus, "PLANETES_WAVE_FIT", "X")
+            wave.fit_y_pixels = products.read_column(hdus, "PLANETES_WAVE_FIT", "Y")
         return wave
 
 
 def run(lamp_file, dark_file, flat_file, *, output_dir) -> dict[str, Path]:
     """planetes_wave: one WAVELAMP_RAW + its DARK + FLAT -> WAVE."""
-    raw = files.read_raw(lamp_file, "WAVELAMP_RAW")
+    raw = read_raw(lamp_file, "WAVELAMP_RAW")
     product = make_wave(raw, read_dark(dark_file), read_flat(flat_file))
 
     inputs = {"WAVELAMP_RAW": [lamp_file], "DARK": [dark_file], "FLAT": [flat_file]}
-    header = files.provenance("planetes_wave", lamp_file, inputs)
-    path = files.product_path(output_dir, lamp_file, "WAVE")
+    header = products.provenance("planetes_wave", lamp_file, inputs)
+    path = products.product_path(output_dir, lamp_file, "WAVE")
     write_wave(path, product, header=header)
     return {"WAVE": path}
