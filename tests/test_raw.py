@@ -10,7 +10,8 @@ from astropy.io import fits
 from fixtures import RawMetadata, cards, metadata, write_raw
 
 from planetes_pipe.io import raw as raw_module
-from planetes_pipe.io.raw import find_raw, read_raw
+from planetes_pipe.io.keywords import QC_SATURATED
+from planetes_pipe.io.raw import SATURATION_ADU, find_raw, read_raw, record_saturation
 from planetes_pipe.steps.dark import (
     QC_DARK_MEDIAN,
     QC_DARK_RMS,
@@ -23,6 +24,25 @@ from planetes_pipe.steps.dark import (
 
 
 class RawTests(unittest.TestCase):
+    def test_saturated_samples_are_counted_and_recorded(self):
+        cube = np.zeros((20, 2, 3), dtype=np.int16)
+        cube[3, 0, 0] = cube[17, 1, 2] = SATURATION_ADU  # two clipped samples, 16-frame chunks
+        cube[5, 1, 1] = SATURATION_ADU - 1
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            path = Path(tmp) / "raw.fits"
+            write_raw(path, cube, RawMetadata("P2VM_RAW", (False, False, True, True),
+                                              cards(WIN_NX=3, WIN_NY=2)))
+            raw = read_raw(path, "P2VM_RAW")
+            self.assertEqual(raw.saturated(), 2)
+            only_first = np.zeros((2, 3), bool)
+            only_first[0, 0] = True  # e.g. Flat.extracted_pixels()
+            self.assertEqual(raw.saturated(only_first), 1)
+            header = fits.Header()
+            with self.assertLogs("planetes_pipe", "WARNING") as logs:
+                record_saturation(header, {"SC43": raw})
+            self.assertEqual(QC_SATURATED.at("SC43").get(header), 2)
+            self.assertIn("2 samples at the 4095 ADU saturation level", logs.output[0])
+
     def test_bench_cubes_keep_missing_metadata_and_all_frames(self):
         cube = np.arange(17 * 3 * 5, dtype=np.int16).reshape(17, 3, 5)
         for primary in (True, False):

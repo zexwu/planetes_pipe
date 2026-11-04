@@ -19,7 +19,7 @@ from planetes_pipe import log
 from planetes_pipe.instrument import layout
 from planetes_pipe.io import products
 from planetes_pipe.io.keywords import Keyword
-from planetes_pipe.io.raw import Raw, check_calibrations, read_raw
+from planetes_pipe.io.raw import Raw, check_calibrations, read_raw, record_saturation
 from planetes_pipe.steps.dark import Dark, read_dark
 from planetes_pipe.steps.flat import Flat, extract_sparse_spectra, read_flat
 
@@ -658,11 +658,12 @@ def read_wave(path: Path) -> Wave:
 
 def run(lamp_file, dark_file, flat_file, *, output_dir) -> dict[str, Path]:
     """planetes_wave: one WAVELAMP_RAW + its DARK + FLAT -> WAVE."""
-    raw = read_raw(lamp_file, "WAVELAMP_RAW")
-    product = make_wave(raw, read_dark(dark_file), read_flat(flat_file))
+    raw, flat = read_raw(lamp_file, "WAVELAMP_RAW"), read_flat(flat_file)
+    product = make_wave(raw, read_dark(dark_file), flat)
 
     inputs = {"WAVELAMP_RAW": [lamp_file], "DARK": [dark_file], "FLAT": [flat_file]}
     header = products.provenance("planetes_wave", lamp_file, inputs)
+    record_saturation(header, {"LAMP": raw}, flat.extracted_pixels())
     path = products.product_path(output_dir, lamp_file, "WAVE")
     write_wave(path, product, header=header)
     return {"WAVE": path}

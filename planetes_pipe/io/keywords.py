@@ -106,6 +106,10 @@ PRO_PARAM_NAME = Keyword("PRO.REC1.PARAM{}.NAME", "Recipe parameter")
 PRO_PARAM_VALUE = Keyword("PRO.REC1.PARAM{}.VALUE", "Value of the recipe parameter")
 
 
+# Quality control shared by every step that reads raw data (io/raw.record_saturation).
+QC_SATURATED = Keyword("QC.NSAT.{0}", "Raw samples at the saturation level, {0}")
+
+
 # Recommended order of hierarchical categories after the primary keywords (DICD §3.1.1.3).
 CATEGORY_ORDER = ("DPR", "OBS", "TPL", "GEN", "TEL", "ADA", "INS", "DET")
 

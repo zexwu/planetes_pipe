@@ -19,7 +19,13 @@ from planetes_pipe import log
 from planetes_pipe.instrument import layout
 from planetes_pipe.io import products
 from planetes_pipe.io.keywords import Keyword
-from planetes_pipe.io.raw import Raw, check_calibrations, read_raw, read_raws
+from planetes_pipe.io.raw import (
+    Raw,
+    check_calibrations,
+    read_raw,
+    read_raws,
+    record_saturation,
+)
 from planetes_pipe.steps.dark import Dark, read_dark
 from planetes_pipe.steps.extraction import (
     SpectralExtractor,
@@ -925,6 +931,9 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
     if phase_dark_file is not None:
         inputs["PHASE_DARK_CALIB"] = [phase_dark_file]
     header = products.provenance("planetes_p2vm", reference, inputs, dl_gain=dl_gain, **options)
+    record_saturation(header, {**{f"T{t}": raw for t, raw in flats.items()},
+                               **{f"SC{b}": raw for b, raw in scans.items()}},
+                      flat.extracted_pixels())
     path = products.product_path(output_dir, reference, "P2VM")
     write_p2vm(path, product, header=header)
     return {"P2VM": path}

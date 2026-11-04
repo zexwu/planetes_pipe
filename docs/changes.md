@@ -1,3 +1,18 @@
+# PLANETES 0.21.0：记录 raw 饱和
+
+- `io/raw.py` 新增 `SATURATION_ADU = 4095`（探测器 12 位读出的截断值）、
+  `Raw.saturated()`（所有帧中达到该值的采样数）与 `record_saturation(header, raws)`。
+- FLAT、WAVE、P2VM 与科学产品的 header 记录每个 raw 输入的饱和采样数：
+  `QC.NSAT.T4…T1`（flat）、`QC.NSAT.SC43…SC21`（扫描）、`QC.NSAT.LAMP`、`QC.NSAT.SCI`；
+  有 FLAT 时只计提取用到的像素（`Flat.extracted_pixels()`），FLAT 本身计整个探测器；
+  不为零时记录 warning。QC 只做描述，不改变拟合与产品数据。
+- 原因：2026-11-04 的扫描 43 在 B/D 输出（约 1240–1265 nm）有 39,725 个采样截断在
+  4095 ADU，P2VM coherence 因而在该波段出现 dip；2026-02-05 测试数据的扫描 43 同样有
+  7,912 个截断采样。
+- 新增 keyword `DATE-OBS`、`MJD-OBS`、`TPL.ID`、`TPL.START`，供 bench 记录拍摄时间与
+  拍摄脚本的运行（产品从 reference raw 继承这些卡片）。
+- 数值结果不变。
+
 # PLANETES 0.20.0：探测器设置直接使用 ESO DET 卡片
 
 - 删除 `DetectorSetup`、`check_setup`、`read_setup`/`write_setup` 与 `UIT1` 回退。探测器

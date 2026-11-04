@@ -9,6 +9,7 @@ recorded: a calibration carries the DET cards of the raw it was made from, and
 check_calibrations compares those cards directly. The bench writes the same cards.
 """
 
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,11 @@ import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from planetes_pipe.io.keywords import DIT, DPR_TYPE, PRO_CATG, SHUTTER, WINDOW
+from planetes_pipe.io.keywords import DIT, DPR_TYPE, PRO_CATG, QC_SATURATED, SHUTTER, WINDOW
+
+# Raw value at which the detector's 12-bit readout clips. A clipped sample is not
+# a measurement: fringes and fluxes computed from it are biased low.
+SATURATION_ADU = 4095
 
 # Raw SOF tag -> ESO DPR TYPE of the raw file.
 RAW_TYPES = {
@@ -56,6 +61,16 @@ class Raw:
         """Frames in order, as float64 blocks of up to `size` frames."""
         for start in range(0, len(self.cube), size):
             yield np.asarray(self.cube[start : start + size], dtype=np.float64)
+
+    def saturated(self, pixels: NDArray | None = None) -> int:
+        """Number of samples at or above SATURATION_ADU, over all frames.
+
+        pixels is an optional boolean (y, x) mask, e.g. Flat.extracted_pixels(),
+        to count only the pixels a reduction uses.
+        """
+        where = True if pixels is None else pixels
+        return sum(int(np.count_nonzero((self.cube[start : start + 16] >= SATURATION_ADU) & where))
+                   for start in range(0, len(self.cube), 16))
 
     def mean(self) -> NDArray:
         """Equally weighted temporal mean over all frames, float64 (y, x) in ADU."""
@@ -133,6 +148,22 @@ def check_calibrations(raw: Raw, *, dark=None, flat=None) -> None:
         check_match(raw.header, dark.detector, (*WINDOW, DIT), "DARK")
     if flat is not None:
         check_match(raw.header, flat.detector, WINDOW, "FLAT")
+
+
+def record_saturation(header: afits.Header, raws: dict[str, Raw], pixels=None) -> None:
+    """Write QC.NSAT.<label> for each raw input into a product header; warn if any is clipped.
+
+    raws maps a short label to each input, e.g. {"SC43": scan, "T4": flat}; pixels
+    restricts the count to the extracted pixels (Flat.extracted_pixels()) when known.
+    """
+    for label, raw in raws.items():
+        count = raw.saturated(pixels)
+        QC_SATURATED.at(label).set(header, count)
+        if count:
+            name = raw.path.name if raw.path else label
+            logging.getLogger("planetes_pipe").warning(
+                "%s: %d samples at the %d ADU saturation level; results from those pixels "
+                "are biased. Lower the exposure or the source.", name, count, SATURATION_ADU)
 
 
 def read_shutters(header: afits.Header) -> tuple:

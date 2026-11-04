@@ -25,6 +25,7 @@ from planetes_pipe.io.raw import (
     check_match,
     detector_cards,
     read_raws,
+    record_saturation,
 )
 from planetes_pipe.steps.dark import Bad, Dark, read_bad, read_dark
 
@@ -41,6 +42,13 @@ class Flat:
     telescope_flux_adu: NDArray | None = None  # (telescope,)
     detector: Header | None = None  # DET cards of the raw flats
     trace_x_range: NDArray | None = None  # (output, 2), inclusive fitted limits, zero-based
+
+    def extracted_pixels(self) -> NDArray:
+        """Boolean (y, x) image: True where a pixel belongs to an extracted output."""
+        mask = np.zeros(self.flat_map_adu.shape, dtype=bool)
+        valid = (self.profile_x_pixels >= 0) & (self.profile_y_pixels >= 0)
+        mask[self.profile_y_pixels[valid], self.profile_x_pixels[valid]] = True
+        return mask
 
 
 APERTURE_WIDTH_PIXELS = 10.0
@@ -590,6 +598,7 @@ def run(dark_file, bad_file, flat_files, *, output_dir,
     reference = flats["4"].path  # Names the product and supplies its observation header.
     inputs = {"FLAT_RAW": flat_files, "DARK": [dark_file], "BAD": [bad_file]}
     header = products.provenance("planetes_flat", reference, inputs, **options)
+    record_saturation(header, {f"T{telescope}": raw for telescope, raw in flats.items()})
     path = products.product_path(output_dir, reference, "FLAT")
     write_flat(path, product, header=header)
     return {"FLAT": path}

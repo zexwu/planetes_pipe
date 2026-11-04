@@ -45,6 +45,7 @@ Raw tags
 map to `ESO DPR TYPE` in `raw.RAW_TYPES`. Shutters are `ESO INS SHUTn ST`;
 files written before 2026-11 use `PLANETES INS SHUTn ST`, which is still read.
 FLAT and P2VM raw lists may be in any order: physical identity comes from shutters.
+The detector clips at `raw.SATURATION_ADU = 4095` ADU; `Raw.saturated()` counts such samples.
 
 ## File names and headers
 
@@ -86,8 +87,11 @@ changes masks, weights or fits. Definitions follow GRAVITY 1.9.6
 | WAVE | MINWAVE SC / MAXWAVE SC | wavelength range covered by every output [m] |
 | WAVE | RMSWAVE SC / NWAVE SC | sample stdev of accepted lamp residuals [m] / their number |
 | P2VM | P2VM_COHERENCE_SC43 … SC21 | coherence / (2 √T1 √T2), mean over outputs and wavelengths |
+| FLAT, WAVE, P2VM, P2VMRED | NSAT T4…T1 / SC43…SC21 / LAMP / SCI | raw samples at `raw.SATURATION_ADU` (4095 ADU) in each raw input: in the extracted pixels (`Flat.extracted_pixels()`), anywhere on the detector for FLAT |
 
-P2VMRED has no QC yet.
+P2VMRED has only NSAT. A nonzero NSAT is also logged as a warning: clipped samples
+bias fluxes and fringe amplitudes low (two telescopes in phase reach about four times
+a single flat, so P2VM scans need that headroom).
 
 ## Recipe options
 

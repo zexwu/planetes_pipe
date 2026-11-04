@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 from planetes_pipe import log
 from planetes_pipe.instrument import layout
 from planetes_pipe.io import products
-from planetes_pipe.io.raw import Raw, check_calibrations, read_raw
+from planetes_pipe.io.raw import Raw, check_calibrations, read_raw, record_saturation
 from planetes_pipe.steps.dark import Dark, read_dark
 from planetes_pipe.steps.extraction import (
     SpectralExtractor,
@@ -379,6 +379,7 @@ def run(science_file, dark_file, flat_file, wave_file, p2vm_file, *, output_dir,
     inputs = {"SINGLE_SCI_RAW": [science_file], "DARK": [dark_file], "FLAT": [flat_file],
               "WAVE": [wave_file], "P2VM": [p2vm_file]}
     header = products.provenance("planetes_reduce", science_file, inputs, **options)
+    record_saturation(header, {"SCI": raw}, flat.extracted_pixels())
     path = products.product_path(output_dir, science_file, "SINGLE_SCI_P2VMRED")
     write_reduced(path, product, header=header)
     return {"SINGLE_SCI_P2VMRED": path}
