@@ -55,6 +55,8 @@ class Keyword:
 # Primary FITS keywords (DICD §4.1, §4.7.1).
 INSTRUME = Keyword("INSTRUME", "Instrument used")
 DATE = Keyword("DATE", "Date this file was written (UTC)")
+DATE_OBS = Keyword("DATE-OBS", "Observing date (UTC)")
+MJD_OBS = Keyword("MJD-OBS", "Observation start", "d")
 PIPEFILE = Keyword("PIPEFILE", "Filename of data product")
 EXPTIME = Keyword("EXPTIME", "Sum of integration times", "s")
 NFRAMES = Keyword("NFRAMES", "Number of frames averaged")
@@ -64,6 +66,10 @@ INHERIT = Keyword("INHERIT", "Primary header keywords apply to this extension")
 DPR_CATG = Keyword("DPR.CATG", "Observation category")
 DPR_TYPE = Keyword("DPR.TYPE", "Observation type")
 DPR_TECH = Keyword("DPR.TECH", "Observation technique")
+
+# Template: one run of a capture script (DICD §4.4.2.4); TPL.START groups its files.
+TPL_ID = Keyword("TPL.ID", "Template signature ID")
+TPL_START = Keyword("TPL.START", "TPL start time")
 
 # Detector.
 DET_ID = Keyword("DET.ID", "Detector identifier")
