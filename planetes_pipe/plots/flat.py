@@ -2,7 +2,7 @@
 import numpy as np
 
 from planetes_pipe.instrument import layout
-from planetes_pipe.plots.pages import Section, table, table_height
+from planetes_pipe.plots.pages import Section, name, panels, table, table_height
 from planetes_pipe.steps.flat import Flat
 
 
@@ -22,42 +22,42 @@ def sections(flat: Flat) -> list[Section]:
     def draw_image(fig):
         ax = fig.subplots()
         low, high = np.percentile(flat.flat_map_adu, [1, 99.5])
-        shown = ax.imshow(flat.flat_map_adu, origin="lower", aspect="auto", cmap="inferno",
-                          vmin=low, vmax=high)
-        fig.colorbar(shown, ax=ax, label="ADU")
+        shown = ax.imshow(flat.flat_map_adu, origin="lower", aspect="auto", vmin=low, vmax=high)
+        fig.colorbar(shown, ax=ax, label="ADU", pad=0.02)
         for output in range(n_outputs):
             columns = _x_range(flat, output)
-            ax.plot(x[columns], flat.trace_y_pixels[output, columns], color="cyan", lw=0.5)
+            ax.plot(x[columns], flat.trace_y_pixels[output, columns], color="cyan", lw=0.4)
             ax.text(x[columns][-1] + 5, flat.trace_y_pixels[output, columns][-1], str(output),
                     color="cyan", fontsize=5, va="center")
+        ax.minorticks_off()
         ax.set(xlabel="Detector x [pixel]", ylabel="Detector y [pixel]")
 
     def draw_traces(fig):
-        axes = np.asarray(fig.subplots(6, 4)).ravel()
+        axes = panels(fig, 6, 4, "Detector x [pixel]", "Trace centre y [pixel]")
         for output, ax in enumerate(axes[:n_outputs]):
             columns = _x_range(flat, output)
-            ax.plot(x[columns], flat.trace_y_pixels[output, columns])
-            ax.set_title(f"output {output}", fontsize=6, pad=2)
-            ax.ticklabel_format(axis="y", style="plain", useOffset=False)
-        fig.supxlabel("Detector x [pixel]", fontsize=7)
-        fig.supylabel("Trace centre y [pixel]", fontsize=7)
+            ax.plot(x[columns], flat.trace_y_pixels[output, columns], color="0.15")
+            name(ax, str(output), "upper right")
+        for ax in axes[n_outputs:]:
+            ax.set_visible(False)
 
-    result = [Section("FLAT image and traces", draw_image, 5.0,
+    result = [Section("FLAT image and traces", draw_image, 4.4,
                       f"Combined flat with the {n_outputs} fitted traces and their output numbers; "
                       "colour range 1–99.5 %."),
-              Section("Trace centres", draw_traces, 7.6,
-                      "Fitted centre of each output over its fitted columns (independent y scales).")]
+              Section("Trace centres", draw_traces, 7.4,
+                      "Fitted centre of each output (number in the corner) over its fitted columns; "
+                      "common x axis, independent y scales.")]
     if flat.profile_sigma_pixels is not None:
         def draw_widths(fig):
             ax = fig.subplots()
+            colors = [f"C{t}" for t in range(4)]
             for output in range(n_outputs):
                 columns = _x_range(flat, output)
-                ax.plot(x[columns], flat.profile_sigma_pixels[output, columns], lw=0.7,
-                        color=f"C{output % 10}", label=str(output))
+                ax.plot(x[columns], flat.profile_sigma_pixels[output, columns], lw=0.5,
+                        color=colors[output % 4], alpha=0.8)
             ax.set(xlabel="Detector x [pixel]", ylabel="Profile width σ [pixel]")
-            ax.legend(ncol=12, fontsize=5, title="output", title_fontsize=6)
-        result.append(Section("Profile widths", draw_widths, 2.8,
-                              "Fitted spatial profile width of each output."))
+        result.append(Section("Profile widths", draw_widths, 2.4,
+                              "Fitted spatial profile width of every output."))
     if flat.telescope_flux_adu is not None:
         cells = [[f"{f:.4g}" for f in flat.telescope_flux_adu]]
         result.append(Section("Telescope fluxes (QC.FLATFLUX)",

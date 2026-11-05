@@ -12,9 +12,16 @@ from planetes_pipe.instrument import layout
 from planetes_pipe.io.keywords import QC_SATURATED
 from planetes_pipe.plots.pages import (
     ABCD_COLORS,
+    FLAG,
+    GRID_HEIGHT,
+    GUIDE,
+    MARK,
+    PASS,
     Section,
-    baseline_grid,
+    abcd_entries,
     baseline_name,
+    baseline_panels,
+    legend,
     table,
     table_height,
 )
@@ -94,8 +101,8 @@ def phase_residual_rad(phase_rad, opd_m, wavelength_m: float):
     return best
 
 
-BASELINE_GRID_HEIGHT = 4.2  # inches for six baseline panels on a portrait page
-VERDICT_COLORS = {"GOOD": "palegreen", "WARNING": "khaki", "BAD": "salmon"}
+VERDICT_COLORS = {"GOOD": PASS, "WARNING": "#FFF2CC", "BAD": FLAG}
+CHANNEL_COLORS = ("#0C5DA5", "#00B945", "#FF2C00")  # three sample wavelengths
 
 
 def sections(p2vm: P2VM, header=None) -> list[Section]:
@@ -110,9 +117,10 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
     def draw_verdict(fig):
         ax = fig.subplots()
         ax.axis("off")
-        ax.text(0.5, 0.5, f"P2VM overall quality: {result['verdict']}", ha="center", va="center",
-                fontsize=12, bbox={"facecolor": VERDICT_COLORS[result["verdict"]], "pad": 6})
-    out.append(Section("Quality", draw_verdict, 0.5, "GRAVITY gravi_visual rules, plus raw "
+        ax.text(0.0, 0.5, f"P2VM overall quality:  {result['verdict']}", ha="left", va="center",
+                fontsize=11, weight="bold",
+                bbox={"facecolor": VERDICT_COLORS[result["verdict"]], "edgecolor": "none", "pad": 5})
+    out.append(Section("Quality", draw_verdict, 0.4, "GRAVITY gravi_visual rules, plus raw "
                        "saturation: GOOD with no failed check, WARNING with 1–2, BAD with 3 or more."))
 
     rows = list(result["checks"])
@@ -126,7 +134,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
     checks = [["FAIL" if failed else "ok", str(detail[name])] for name, failed in result["checks"].items()]
     out.append(Section("Quality checks", lambda fig: table(
         fig, checks, ["Result", "Value"], rows,
-        shade=[((i, 0), "salmon" if f else "palegreen") for i, f in enumerate(result["checks"].values())]),
+        shade=[((i, 0), FLAG if f else PASS) for i, f in enumerate(result["checks"].values())]),
         table_height(len(rows)), "Values: outputs outside the range; coherence samples outside the "
         "range in the central band; saturated samples per raw input (QC.NSAT)."))
 
@@ -134,8 +142,8 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
     per_baseline = [[f"{100 * result['visibility'][b]:.1f} %"] + [f"{phases[b, i]:.1f}" for i in (1, 2, 3)]
                     for b in range(n)]
     out.append(Section("Per baseline", lambda fig: table(
-        fig, per_baseline, ["Visibility transmission", "C−A [deg]", "B−A [deg]", "D−A [deg]"], names,
-        shade=[((b, 0), "salmon") for b in range(n) if result["visibility"][b] < COHERENCE_RANGE[0]]),
+        fig, per_baseline, ["Vis. transm.", "C−A [deg]", "B−A [deg]", "D−A [deg]"], names,
+        shade=[((b, 0), FLAG) for b in range(n) if result["visibility"][b] < COHERENCE_RANGE[0]]),
         table_height(n), f"Central band means; visibility transmission below "
         f"{100 * COHERENCE_RANGE[0]:.0f} % shaded. Nominal phases C−A 180, B−A 90, D−A 270."))
 
@@ -145,14 +153,19 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         order = [o for b in range(n) for o in p2vm.baseline_outputs[b]]
         values = relative[order]
         ok = (values >= PHOTOMETRY_RANGE[0]) & (values <= PHOTOMETRY_RANGE[1])
-        ax.bar(range(len(order)), values, color=np.where(ok, "steelblue", "salmon"))
+        ax.bar(range(len(order)), values, 0.7, color=np.where(ok, ABCD_COLORS[0], ABCD_COLORS[3]))
         for limit in PHOTOMETRY_RANGE:
-            ax.axhline(limit, color="gray", ls="--", lw=0.7)
-        ax.set_xticks(range(len(order)), [label for _, label in outputs], rotation=90, fontsize=5)
-        ax.set(ylabel="Relative transmission", ylim=(0, max(2, values.max() * 1.1)))
-    out.append(Section("Relative photometric transmission per output", draw_relative_outputs, 2.6,
-                       f"Mean over telescopes and wavelengths / overall mean; allowed "
-                       f"{PHOTOMETRY_RANGE[0]}–{PHOTOMETRY_RANGE[1]} (outside: red)."))
+            ax.axhline(limit, **GUIDE)
+        ax.set_xticks([4 * b + 1.5 for b in range(n)], names, minor=False)
+        ax.set_xticks(range(len(order)), minor=True)
+        ax.tick_params(axis="x", which="major", length=0, top=False)
+        for b in range(1, n):
+            ax.axvline(4 * b - 0.5, color="0.85", lw=0.5)
+        ax.set(ylabel="Relative transmission", xlim=(-0.6, len(order) - 0.4),
+               ylim=(0, max(1.6, values.max() * 1.1)))
+    out.append(Section("Relative photometric transmission per output", draw_relative_outputs, 2.2,
+                       f"Mean over telescopes and wavelengths / overall mean, outputs A, C, B, D of "
+                       f"each baseline; allowed {PHOTOMETRY_RANGE[0]}–{PHOTOMETRY_RANGE[1]} (outside: red)."))
 
     def percent_cells():
         cells = []
@@ -162,30 +175,32 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         return cells
     out.append(Section("Wavelength-averaged photometric transmission (%)", lambda fig: table(
         fig, percent_cells(), [f"T{t}" for t in layout.telescopes], names,
-        shade=[((b, t), "lavender") for b, pair in enumerate(layout.baseline_pairs) for t in pair]),
+        shade=[((b, t), MARK) for b, pair in enumerate(layout.baseline_pairs) for t in pair]),
         table_height(n), "Share of each telescope in each baseline's four outputs; the baseline's "
         "two telescopes shaded, the others are cross-talk."))
 
     share = p2vm.transmission / p2vm.transmission.sum(axis=1, keepdims=True)
+    pair_entries = abcd_entries() + [("first telescope", {"color": "0.3"}),
+                                     ("second telescope", {"color": "0.3", "ls": "--"})]
     for values, title, ylabel, explanation, ylim in (
             (p2vm.transmission, "Photometric transmission vs. wavelength", "Transmission",
-             "For each telescope and wavelength the mean over the 24 outputs is 1.", None),
+             "For each telescope and wavelength the mean over the 24 outputs is 1. Solid: the "
+             "baseline's first telescope, dashed: its second.", None),
             (share, "Relative photometric transmission vs. wavelength", "Share of output flux",
-             "Each telescope / all four telescopes in the output; balanced = 0.5.", (0, 1))):
+             "Each telescope / all four telescopes in the output; balanced = 0.5. Solid: first "
+             "telescope, dashed: second.", (0, 1))):
         def draw(fig, values=values, ylabel=ylabel, ylim=ylim):
-            for b, ax in enumerate(baseline_grid(fig)):
+            axes = baseline_panels(fig, "Wavelength [nm]", ylabel, sharey=ylim is not None)
+            for b, ax in enumerate(axes):
                 t1, t2 = layout.baseline_pairs[b]
-                first, second = layout.baselines[b]
-                for o, label, color in zip(p2vm.baseline_outputs[b], layout.abcd_order, ABCD_COLORS):
-                    ax.plot(wavelength, values[o, t1], color=color, label=f"{label} T{first}")
-                    ax.plot(wavelength, values[o, t2], color=color, ls="--", label=f"{label} T{second}")
+                for o, color in zip(p2vm.baseline_outputs[b], ABCD_COLORS):
+                    ax.plot(wavelength, values[o, t1], color=color)
+                    ax.plot(wavelength, values[o, t2], color=color, ls="--")
                 if ylim:
-                    ax.axhline(0.5, color="gray", lw=0.6)
+                    ax.axhline(0.5, **GUIDE)
                     ax.set_ylim(*ylim)
-                ax.set(title=f"{baseline_name(b)}: T{first} solid, T{second} dashed",
-                       xlabel="Wavelength [nm]", ylabel=ylabel)
-            fig.axes[0].legend(ncol=2)
-        out.append(Section(title, draw, BASELINE_GRID_HEIGHT, explanation))
+            legend(fig, pair_entries)
+        out.append(Section(title, draw, GRID_HEIGHT, explanation))
 
     # Coherence (GRAVITY: coherent flux matrix, visibility transmission, coherence vs wavelength).
     def matrix_cells():
@@ -196,7 +211,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         return cells
     out.append(Section("Wavelength-averaged coherent flux transmission (%)", lambda fig: table(
         fig, matrix_cells(), names, [f"outputs of {name}" for name in names],
-        shade=[((b, b), "lavender") for b in range(n)]),
+        shade=[((b, b), MARK) for b in range(n)]),
         table_height(n), "Coherent flux of each baseline (columns) in each baseline's outputs; "
         "close to 100 on the diagonal and 0 elsewhere."))
 
@@ -206,28 +221,29 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
     def draw_visibility(fig):
         ax = fig.subplots()
         mean = np.nanmean(coherence[..., band], axis=2)
-        for i, (label, color) in enumerate(zip(layout.abcd_order, ABCD_COLORS)):
-            ax.bar(np.arange(n) + (i - 1.5) * 0.2, 100 * mean[:, i], 0.2, color=color, label=label)
-        ax.axhline(100 * COHERENCE_RANGE[0], color="gray", ls="--", lw=0.7,
-                   label=f"nominal minimum {100 * COHERENCE_RANGE[0]:.0f} %")
+        for i, color in enumerate(ABCD_COLORS):
+            ax.bar(np.arange(n) + (i - 1.5) * 0.2, 100 * mean[:, i], 0.18, color=color)
+        ax.axhline(100 * COHERENCE_RANGE[0], **GUIDE)
         ax.set_xticks(range(n), names)
+        ax.set_xticks([], minor=True)
+        ax.tick_params(axis="x", length=0, top=False)
         ax.set(ylabel="Visibility transmission [%]", ylim=(0, 110))
-        ax.legend(ncol=5)
-    out.append(Section("Wavelength-averaged visibility transmission", draw_visibility, 2.6,
+        legend(fig, abcd_entries(lw=4) + [(f"minimum {100 * COHERENCE_RANGE[0]:.0f} %", GUIDE)])
+    out.append(Section("Wavelength-averaged visibility transmission", draw_visibility, 2.2,
                        "Normalized fringe amplitude over the central band, per output; nominal "
                        f"higher than {100 * COHERENCE_RANGE[0]:.0f} %."))
 
     def draw_coherence(fig):
-        for b, ax in enumerate(baseline_grid(fig)):
-            for values, label, color in zip(coherence[b], layout.abcd_order, ABCD_COLORS):
-                ax.plot(wavelength, values, color=color, label=label)
-            ax.axvspan(wavelength[band][0], wavelength[band][-1], color="gray", alpha=0.08)
-            ax.axhline(COHERENCE_RANGE[0], color="gray", ls="--", lw=0.6)
-            ax.set(title=baseline_name(b), xlabel="Wavelength [nm]", ylabel="Normalized coherence")
-        fig.axes[0].legend()
-    out.append(Section("Coherence vs. wavelength", draw_coherence, BASELINE_GRID_HEIGHT,
-                       "Coherence / (2 √T1 √T2) of each output; shaded: the checked central band; "
-                       f"dashed: {COHERENCE_RANGE[0]}. Instrumental response, not target visibility."))
+        axes = baseline_panels(fig, "Wavelength [nm]", "Normalized coherence", sharey=True)
+        for b, ax in enumerate(axes):
+            for values, color in zip(coherence[b], ABCD_COLORS):
+                ax.plot(wavelength, values, color=color)
+            ax.axvspan(wavelength[band][0], wavelength[band][-1], color="0.5", alpha=0.08, lw=0)
+            ax.axhline(COHERENCE_RANGE[0], **GUIDE)
+        legend(fig, abcd_entries() + [(f"{COHERENCE_RANGE[0]}", GUIDE)])
+    out.append(Section("Coherence vs. wavelength", draw_coherence, GRID_HEIGHT,
+                       "Coherence / (2 √T1 √T2) of each output; shaded: the checked central band. "
+                       "Instrumental response, not target visibility."))
 
     # Phases (GRAVITY: phase table and output phases vs wavelength).
     phase_cells = [[f"{phases[b, 1]:.1f}", f"{phases[b, 2]:.1f}", f"{phases[b, 3]:.1f}",
@@ -236,9 +252,15 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         fig, phase_cells, ["C−A", "B−A", "D−A", "D−B"], names), table_height(n),
         "Central band. Nominal: C−A 180, B−A 90, D−A 270, D−B 180."))
 
-    out.append(_per_baseline(p2vm, np.rad2deg(p2vm.coherence_phase_rad) % 360,
-                             "Output phases vs. wavelength", "Phase relative to A [deg]",
-                             "Relative to output A."))
+    def draw_phases(fig):
+        axes = baseline_panels(fig, "Wavelength [nm]", "Phase relative to A [deg]", sharey=True)
+        for b, ax in enumerate(axes):
+            for o, color in zip(p2vm.baseline_outputs[b], ABCD_COLORS):
+                ax.plot(wavelength, np.rad2deg(p2vm.coherence_phase_rad[o, b]) % 360, color=color)
+        axes[0].set(ylim=(-10, 370), yticks=[0, 90, 180, 270, 360])
+        legend(fig, abcd_entries())
+    out.append(Section("Output phases vs. wavelength", draw_phases, GRID_HEIGHT,
+                       "Relative to output A; nominal C 180, B 90, D 270."))
     if p2vm.dc_term_adu is not None:
         out.append(_per_baseline(p2vm, p2vm.dc_term_adu, "c-matrix vs. wavelength", "DC level [ADU]",
                                  "DC level of each output during its baseline's scan."))
@@ -253,12 +275,11 @@ def _per_baseline(p2vm, values, title, ylabel, explanation) -> Section:
     wavelength = p2vm.wavelength_m * 1e9
 
     def draw(fig):
-        for b, ax in enumerate(baseline_grid(fig)):
-            for o, label, color in zip(p2vm.baseline_outputs[b], layout.abcd_order, ABCD_COLORS):
-                ax.plot(wavelength, values[o, b], color=color, label=label)
-            ax.set(title=baseline_name(b), xlabel="Wavelength [nm]", ylabel=ylabel)
-        fig.axes[0].legend()
-    return Section(title, draw, BASELINE_GRID_HEIGHT, explanation)
+        for b, ax in enumerate(baseline_panels(fig, "Wavelength [nm]", ylabel)):
+            for o, color in zip(p2vm.baseline_outputs[b], ABCD_COLORS):
+                ax.plot(wavelength, values[o, b], color=color)
+        legend(fig, abcd_entries())
+    return Section(title, draw, GRID_HEIGHT, explanation)
 
 
 def _scan_sections(p2vm) -> list[Section]:
@@ -267,46 +288,50 @@ def _scan_sections(p2vm) -> list[Section]:
     wavelength = p2vm.wavelength_m * 1e9
     n_wave = len(p2vm.wavelength_m)
     channels = [int(n_wave * f) for f in (0.2, 0.5, 0.8)]
+    channel_entries = [(f"{wavelength[j]:.0f} nm", {"color": c, "ls": "", "marker": "o", "ms": 3})
+                       for j, c in zip(channels, CHANNEL_COLORS)]
     if p2vm.opd_m is not None:
         def draw_delays(fig):
-            for b, ax in enumerate(baseline_grid(fig)):
-                ax.plot(p2vm.opd_m[b] * 1e6, label="OPD")
+            for b, ax in enumerate(baseline_panels(fig, "Scan frame", "Delay [µm]")):
+                ax.plot(p2vm.opd_m[b] * 1e6, color=ABCD_COLORS[0])
                 if p2vm.group_delay_m is not None:
-                    ax.plot(p2vm.group_delay_m[b] * 1e6, label="Group delay", alpha=0.7)
-                ax.set(title=baseline_name(b), xlabel="Frame", ylabel="Delay [µm]")
-            fig.axes[0].legend()
-        out.append(Section("Recovered scan delays", draw_delays, BASELINE_GRID_HEIGHT,
+                    ax.plot(p2vm.group_delay_m[b] * 1e6, color=ABCD_COLORS[3], lw=0.6)
+            entries = [("OPD", {"color": ABCD_COLORS[0]})]
+            if p2vm.group_delay_m is not None:
+                entries.append(("group delay", {"color": ABCD_COLORS[3]}))
+            legend(fig, entries)
+        out.append(Section("Recovered scan delays", draw_delays, GRID_HEIGHT,
                            "OPD of every scan frame and the group delay measured from it."))
     if p2vm.ellipse_phase_rad is None or p2vm.ellipse_amplitude is None:
         return out
     circle = np.linspace(0, 2 * np.pi, 200)
 
     def draw_circles(fig):
-        for b, ax in enumerate(baseline_grid(fig)):
-            for j, color in zip(channels, ("C0", "C2", "C3")):
+        axes = baseline_panels(fig, "(C−A) normalized", "(D−B) normalized", sharey=True)
+        for b, ax in enumerate(axes):
+            for j, color in zip(channels, CHANNEL_COLORS):
                 r, phi = p2vm.ellipse_amplitude[b, :, j], p2vm.ellipse_phase_rad[b, :, j]
-                ax.scatter(r * np.cos(phi), r * np.sin(phi), s=1.5, color=color,
-                           label=f"{wavelength[j]:.0f} nm")
-            ax.plot(np.cos(circle), np.sin(circle), color="gray", lw=0.6)
-            ax.set(title=baseline_name(b), xlabel="(C−A) normalized", ylabel="(D−B) normalized",
-                   aspect="equal", xlim=(-1.5, 1.5), ylim=(-1.5, 1.5))
-        fig.axes[0].legend()
-    out.append(Section("ABCD fringe ellipse", draw_circles, 5.0,
+                ax.scatter(r * np.cos(phi), r * np.sin(phi), s=1, color=color, linewidths=0)
+            ax.plot(np.cos(circle), np.sin(circle), color="0.3", lw=0.6)
+            ax.set_aspect("equal")
+        axes[0].set(xlim=(-1.5, 1.5), ylim=(-1.5, 1.5))
+        legend(fig, channel_entries)
+    out.append(Section("ABCD fringe ellipse", draw_circles, 4.4,
                        "Every scan frame on the fitted unit circle at three wavelengths; a perfect "
                        "fit lies on the circle, clipping or extra signal distorts it."))
     if p2vm.opd_m is not None:
         def draw_residuals(fig):
-            for b, ax in enumerate(baseline_grid(fig)):
-                for j, color in zip(channels, ("C0", "C2", "C3")):
+            axes = baseline_panels(fig, "Scan OPD [µm]", "Phase residual [deg]", sharex=False,
+                                   sharey=True)
+            for b, ax in enumerate(axes):
+                for j, color in zip(channels, CHANNEL_COLORS):
                     residual = phase_residual_rad(p2vm.ellipse_phase_rad[b, :, j], p2vm.opd_m[b],
                                                   p2vm.wavelength_m[j])
-                    ax.plot(p2vm.opd_m[b] * 1e6, np.rad2deg(residual), ".", ms=1.5, color=color,
-                            label=f"{wavelength[j]:.0f} nm")
-                ax.axhline(0, color="gray", lw=0.6)
-                ax.set(title=baseline_name(b), xlabel="Scan OPD [µm]", ylabel="Residual [deg]",
-                       ylim=(-180, 180))
-            fig.axes[0].legend()
+                    ax.plot(p2vm.opd_m[b] * 1e6, np.rad2deg(residual), ".", ms=1.2, color=color)
+                ax.axhline(0, **GUIDE)
+            axes[0].set(ylim=(-180, 180), yticks=[-180, -90, 0, 90, 180])
+            legend(fig, channel_entries)
         out.append(Section("Fringe phase residual along the scan", draw_residuals,
-                           BASELINE_GRID_HEIGHT, "Phase of every frame minus 2π·OPD/λ, wrapped; "
+                           GRID_HEIGHT, "Phase of every frame minus 2π·OPD/λ, wrapped; "
                            "structure means dispersion, OPD errors or distorted fringes."))
     return out

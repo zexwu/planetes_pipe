@@ -3,10 +3,9 @@ import numpy as np
 from matplotlib import colormaps
 
 from planetes_pipe.instrument import layout
-from planetes_pipe.plots.pages import Section, baseline_name
+from planetes_pipe.plots.pages import GRID_HEIGHT, Section, baseline_name, name, panels
 from planetes_pipe.steps.science import P2VMRed
 
-GRID_HEIGHT = 4.2
 
 
 def sections(reduced: P2VMRed, full: bool = False) -> list[Section]:
@@ -36,11 +35,7 @@ def sections(reduced: P2VMRed, full: bool = False) -> list[Section]:
 
 
 def _grid(fig, rows, columns, xlabel, ylabel, sharex=True, sharey=True):
-    axes = np.asarray(fig.subplots(rows, columns, sharex=sharex, sharey=sharey)).ravel()
-    for ax in axes:
-        ax.set(xlabel=xlabel, ylabel=ylabel)
-        ax.label_outer()
-    return axes
+    return panels(fig, rows, columns, xlabel, ylabel, sharex=sharex, sharey=sharey)
 
 
 def _baselines(fig, xlabel, ylabel, **kwargs):
@@ -48,25 +43,25 @@ def _baselines(fig, xlabel, ylabel, **kwargs):
 
 
 def _mean_label(ax, mean: float) -> None:
-    ax.text(0.5, 0.85, f"Mean: {mean:.2f}", transform=ax.transAxes, ha="center", va="center")
+    name(ax, f"mean {mean:.2f}", "upper right")
 
 
 def _flux(fig, reduced):
     mean_flux = reduced.photometric_flux_adu.mean(axis=-1)
-    axes = _grid(fig, layout.n_telescopes // 2, 2, "#Frame", "Flux [adu]")
+    axes = _grid(fig, layout.n_telescopes // 2, 2, "Frame", "Flux − mean [ADU]")
     for telescope, ax in enumerate(axes[: layout.n_telescopes]):
         mean = mean_flux[:, telescope].mean()
         ax.plot(mean_flux[:, telescope] - mean)
-        ax.set_title(f"Telescope {layout.telescopes[telescope]}")
+        name(ax, f"T{layout.telescopes[telescope]}")
         _mean_label(ax, mean)
 
 
 def _coherent_flux(fig, reduced):
     mean_coherent = abs(reduced.coherent_flux_adu.mean(axis=-1))
-    for baseline, ax in enumerate(_baselines(fig, "#Frame", "|coherent flux| [adu]")):
+    for baseline, ax in enumerate(_baselines(fig, "Frame", "|Coherent flux| − mean [ADU]")):
         mean = mean_coherent[:, baseline].mean()
         ax.plot(mean_coherent[:, baseline] - mean)
-        ax.set_title(baseline_name(baseline))
+        name(ax, baseline_name(baseline))
         _mean_label(ax, mean)
 
 
@@ -76,28 +71,28 @@ def _visibility(fig, reduced):
     for baseline, ax in enumerate(_baselines(fig, "Wavelength index", "VISAMP")):
         ax.set_prop_cycle(color=colors)
         ax.plot(visamp[:, baseline, :].T, alpha=0.3, lw=0.3)
-        ax.set_title(baseline_name(baseline))
+        name(ax, baseline_name(baseline))
         ax.set_ylim(0, 1.5)
 
 
 def _phase(fig, reduced):
     mean_phase = np.unwrap(np.angle(reduced.coherent_flux_adu.mean(axis=-1), deg=True),
                            period=360, axis=0)
-    for baseline, ax in enumerate(_baselines(fig, "#Frame", "arg(coherent flux) [deg]")):
+    for baseline, ax in enumerate(_baselines(fig, "Frame", "arg(coherent flux) [deg]")):
         ax.plot(mean_phase[:, baseline])
-        ax.set_title(baseline_name(baseline))
+        name(ax, baseline_name(baseline))
 
 
 def _group_delay(fig, reduced):
-    for baseline, ax in enumerate(_baselines(fig, "#Frame", "Group delay [m]", sharey=False)):
+    for baseline, ax in enumerate(_baselines(fig, "Frame", "Group delay [m]", sharey=False)):
         ax.plot(reduced.group_delay_m[:, baseline])
-        ax.set_title(baseline_name(baseline))
+        name(ax, baseline_name(baseline))
 
 
 def _spectral_phase(fig, reduced, frame):
     for baseline, ax in enumerate(_baselines(fig, "Wavelength index", "Differential phase [deg]")):
         ax.plot(reduced.differential_phase_deg[frame, baseline])
-        ax.set_title(baseline_name(baseline))
+        name(ax, baseline_name(baseline))
         ax.set_ylim(-10, 10)
 
 
@@ -106,5 +101,5 @@ def _phase_vs_gd(fig, reduced, channel):
                                              sharex=False)):
         ax.scatter(reduced.group_delay_m[:, baseline],
                    reduced.differential_phase_deg[:, baseline, channel], s=4, alpha=0.7)
-        ax.set_title(baseline_name(baseline))
+        name(ax, baseline_name(baseline))
         ax.set_ylim(-10, 10)
