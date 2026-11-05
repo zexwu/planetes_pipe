@@ -36,8 +36,10 @@ in-memory only. A `P2VMRed` from the live preview has no GD/phase and cannot be 
 
 ## Raw input
 
-`raw.read_raw(path, category, hdu="IMAGING_DATA_SC")` returns `Raw`: the
-memory-mapped cube as stored and its primary header. The detector setup is the
+`raw.read_raw(path, category, hdu="IMAGING_DATA_SC")` returns `Raw`: the cube as
+stored and its primary header. Plain images are memory-mapped; tile-compressed
+ones (the bench writes int16, Rice, one tile per frame) are decompressed block by
+block (`raw.CompressedCube`), so a cube is never loaded at once. The detector setup is the
 raw's DET cards as recorded (DICD §4.4.2.7): `DET.ID`, `DET.WIN1.STRX/STRY/NX/NY/
 BINX/BINY` (the window, `keywords.WINDOW`) and `DET.WIN1.DIT1`. The bench writes
 these cards directly; DARK and FLAT products carry the DET cards of their raws.

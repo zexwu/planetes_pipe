@@ -34,12 +34,40 @@ RAW_TYPES = {
 }
 
 
+class CompressedCube:
+    """A tile-compressed raw cube, decompressed only for the frames asked for.
+
+    Supports what Raw needs: len, shape, dtype, slicing (cube[start:stop],
+    cube[f, y, x]) and np.asarray (which decompresses everything). The file is
+    opened for each access, so it is never held open.
+    """
+
+    def __init__(self, path: Path, hdu: int | str, shape: tuple, dtype):
+        self.path, self.hdu, self.shape, self.dtype = Path(path), hdu, tuple(shape), dtype
+
+    def __len__(self) -> int:
+        return self.shape[0]
+
+    @property
+    def ndim(self) -> int:
+        return len(self.shape)
+
+    def __getitem__(self, key):
+        with afits.open(self.path) as hdus:
+            return hdus[self.hdu].section[key]
+
+    def __array__(self, dtype=None, copy=None):
+        data = self[:]
+        return data if dtype is None else data.astype(dtype)
+
+
 @dataclass(frozen=True, slots=True)
 class Raw:
     """One raw detector cube with its primary header.
 
-    cube is the (frame, y, x) ADU image as stored, memory-mapped by read_raw so
-    that large files are not loaded at once.
+    cube is the (frame, y, x) ADU image as stored: memory-mapped, or decompressed
+    on demand for tile-compressed files (CompressedCube), so that large files are
+    not loaded at once. Read frames through chunks().
     """
 
     cube: NDArray
@@ -87,13 +115,20 @@ class Raw:
 
 
 def read_raw(path: Path, category: str, *, hdu: int | str = "IMAGING_DATA_SC") -> Raw:
-    """Open a raw cube (memory-mapped) with its primary header.
+    """Open a raw cube with its primary header, without loading the frames.
 
     category is the input role chosen by the caller (e.g. DARK_RAW). hdu is the
-    image HDU; default IMAGING_DATA_SC, 0 for primary-HDU data. The file is read only.
+    image HDU; default IMAGING_DATA_SC, 0 for primary-HDU data. Plain images are
+    memory-mapped; tile-compressed ones (bench files, Rice) are read in blocks.
+    The file is read only.
     """
     with afits.open(path, memmap=True) as hdus:
-        return Raw(hdus[hdu].data, category, hdus[0].header.copy(), Path(path))
+        image, header = hdus[hdu], hdus[0].header.copy()
+        if isinstance(image, afits.CompImageHDU):
+            cube = CompressedCube(path, hdu, image.shape, image.section[0:1].dtype)
+        else:
+            cube = image.data
+    return Raw(cube, category, header, Path(path))
 
 
 def read_raws(paths, category: str, identities: tuple[str, ...], *,

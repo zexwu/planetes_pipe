@@ -11,7 +11,13 @@ from fixtures import RawMetadata, cards, metadata, write_raw
 
 from planetes_pipe.io import raw as raw_module
 from planetes_pipe.io.keywords import QC_SATURATED
-from planetes_pipe.io.raw import SATURATION_ADU, find_raw, read_raw, record_saturation
+from planetes_pipe.io.raw import (
+    SATURATION_ADU,
+    CompressedCube,
+    find_raw,
+    read_raw,
+    record_saturation,
+)
 from planetes_pipe.steps.dark import (
     QC_DARK_MEDIAN,
     QC_DARK_RMS,
@@ -24,6 +30,21 @@ from planetes_pipe.steps.dark import (
 
 
 class RawTests(unittest.TestCase):
+    def test_compressed_cube_reads_as_the_stored_one(self):
+        cube = np.arange(37 * 3 * 4, dtype=np.int16).reshape(37, 3, 4) % 4096
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            path = Path(tmp) / "raw.fits"
+            fits.HDUList([fits.PrimaryHDU(), fits.CompImageHDU(
+                cube, compression_type="RICE_1", name="IMAGING_DATA_SC")]).writeto(path)
+            raw = read_raw(path, "DARK_RAW")
+            self.assertIsInstance(raw.cube, CompressedCube)
+            self.assertEqual((len(raw.cube), raw.cube.shape, raw.cube.dtype), (37, (37, 3, 4), np.int16))
+            np.testing.assert_array_equal(np.concatenate(list(raw.chunks())), cube)  # 16-frame blocks
+            self.assertEqual(int(raw.cube[34, 1, 1]), int(cube[34, 1, 1]))
+            np.testing.assert_array_equal(np.asarray(raw.cube), cube)
+            np.testing.assert_allclose(raw.mean(), cube.mean(axis=0))
+            self.assertEqual(raw.saturated(), int(np.count_nonzero(cube >= SATURATION_ADU)))
+
     def test_saturated_samples_are_counted_and_recorded(self):
         cube = np.zeros((20, 2, 3), dtype=np.int16)
         cube[3, 0, 0] = cube[17, 1, 2] = SATURATION_ADU  # two clipped samples, 16-frame chunks

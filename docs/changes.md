@@ -1,3 +1,12 @@
+# PLANETES 0.23.0：读取压缩的 raw
+
+- `read_raw` 读取 tile 压缩的 raw（`CompImageHDU`）：返回 `raw.CompressedCube`，按需逐块
+  解压，与 memmap 一样不会一次读入整个 cube；普通图像仍然 memmap。旧的 int32 文件照常读取。
+- bench 写 raw 改为 int16（12 位数据可原样保存）+ 无损 Rice 压缩，每帧一个 tile：比
+  int32 小约 5 倍（768 帧的扫描约 4 GB → 0.8 GB）。test_data 处理结果与 reference 逐位相同；
+  处理时间约为未压缩时的 1.8 倍（每帧解压约 7 ms）。
+- 数值结果不变。
+
 # PLANETES 0.22.0：每种产品一个诊断 PDF
 
 - `plots.py` 拆成 `plots/` 包，与 `steps/` 一一对应：`dark`、`flat`、`wave`、`p2vm`、
