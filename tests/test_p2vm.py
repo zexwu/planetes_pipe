@@ -168,30 +168,55 @@ class P2VMTests(unittest.TestCase):
             np.testing.assert_allclose(recovered - recovered[anchor], truth - truth[anchor], atol=1e-12)
             np.testing.assert_allclose(np.exp(1j * recovered), np.exp(1j * measured), atol=1e-12)
 
+    @staticmethod
+    def write_scans(directory, recorded=None):
+        """Six scan files with a DL_SCAN table; recorded: {baseline: OPDGAIN} to write."""
+        scans = {}
+        for baseline in layout.baselines:
+            table = fits.BinTableHDU.from_columns([
+                fits.Column(name="FIRST_FRAME", format="K", array=[0, 1, 3]),
+                fits.Column(name="NFRAMES", format="K", array=[1, 2, 1]),
+                fits.Column(name="BEFORE_MM", format="D", array=[0., .02, -.04]),
+                fits.Column(name="AFTER_MM", format="D", array=[0., .04, -.02]),
+            ], name="DL_SCAN")
+            table.header["MOVINGDL"] = int(baseline[1])
+            if recorded is not None:
+                table.header["OPDGAIN"] = recorded[baseline]
+            path = Path(directory) / f"{baseline}.fits"
+            header = fits.Header()
+            write_shutters(header, tuple(str(t) in baseline for t in range(1, 5)))
+            fits.HDUList([fits.PrimaryHDU(header=header), table]).writeto(path)
+            scans[baseline] = Raw(np.zeros((1, 1, 1)), "P2VM_RAW", fits.Header(), path)
+        return scans
+
+    GAINS = {baseline: (-1 if i % 2 else 1) for i, baseline in enumerate(layout.baselines)}
+
+    def expected(self, gains):
+        return np.array([gains[b] * np.array([0., 30e-6, 30e-6, -30e-6])
+                         for b in layout.baselines])
+
     def test_explicit_scan_conversion_preserves_frame_order_units_and_sign(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-            paths = {}
-            gains = {baseline: (-1 if i % 2 else 1) for i, baseline in enumerate(layout.baselines)}
-            for baseline in layout.baselines:
-                table = fits.BinTableHDU.from_columns([
-                    fits.Column(name="FIRST_FRAME", format="K", array=[0, 1, 3]),
-                    fits.Column(name="NFRAMES", format="K", array=[1, 2, 1]),
-                    fits.Column(name="BEFORE_MM", format="D", array=[0., .02, -.04]),
-                    fits.Column(name="AFTER_MM", format="D", array=[0., .04, -.02]),
-                ], name="DL_SCAN")
-                table.header["MOVINGDL"] = int(baseline[1])
-                path = Path(directory) / f"{baseline}.fits"
-                header = fits.Header()
-                write_shutters(header, tuple(str(t) in baseline for t in range(1, 5)))
-                fits.HDUList([fits.PrimaryHDU(header=header), table]).writeto(path)
-                paths[baseline] = path
-            scans = {b: Raw(np.zeros((1, 1, 1)), "P2VM_RAW", fits.Header(), path)
-                     for b, path in paths.items()}
-            actual = read_scan_opd(scans, gains)
-            expected = np.array([gains[b] * np.array([0., 30e-6, 30e-6, -30e-6])
-                                 for b in layout.baselines])
-            np.testing.assert_allclose(actual, expected, rtol=1e-15, atol=0)
+            actual = read_scan_opd(self.write_scans(directory), self.GAINS)
+            np.testing.assert_allclose(actual, self.expected(self.GAINS), rtol=1e-15, atol=0)
 
+    def test_recorded_opd_gain_needs_no_option(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            scans = self.write_scans(directory, recorded=self.GAINS)
+            np.testing.assert_allclose(read_scan_opd(scans), self.expected(self.GAINS),
+                                       rtol=1e-15, atol=0)
+            np.testing.assert_allclose(read_scan_opd(scans, self.GAINS),
+                                       self.expected(self.GAINS), rtol=1e-15, atol=0)
+            flipped = {b: -g for b, g in self.GAINS.items()}
+            with self.assertRaisesRegex(ValueError, "records OPDGAIN"):
+                read_scan_opd(scans, flipped)
+
+    def test_no_opd_gain_warns_and_gives_no_guide(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            scans = self.write_scans(directory)
+            with self.assertLogs("planetes_pipe", "WARNING") as logs:
+                self.assertIsNone(read_scan_opd(scans))
+            self.assertIn("unwrapped from the fringes alone", logs.output[0])
 
 if __name__ == "__main__":
     unittest.main()

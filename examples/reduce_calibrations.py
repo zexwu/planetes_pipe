@@ -14,7 +14,9 @@ from planetes_pipe.steps import dark, flat, p2vm, wave
 
 RAW = Path("../../captures/2026-11-04/raw/calibration")
 OUTPUT = Path("../../captures/2026-11-04/reduced/")  # Existing products are never overwritten.
-DL_GAIN = {"43": -1, "42": -1, "41": -1, "32": 1, "31": -1, "21": -1}  # Or None.
+# OPD sign of each baseline's scan. Scans record it (DL_SCAN OPDGAIN) since 2026-11-05;
+# older ones, such as 2026-11-04, need it here or the P2VM phase unwrapping fails.
+DL_GAIN = {"43": -1, "42": -1, "41": -1, "32": 1, "31": -1, "21": -1}
 
 
 def main():

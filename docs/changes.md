@@ -1,3 +1,13 @@
+# PLANETES 0.28.0：扫描自带 OPD 符号
+
+- P2VM 扫描的每一步约 1.9 µm OPD（约 1.5 个条纹），超过半个条纹，单靠条纹相位无法解缠绕，
+  必须用延迟线读数指导。以前这需要手动传 `dl_gain`，忘了就得到错误的 P2VM 而没有提示。
+- bench 现在把每条基线的 OPD 符号写进扫描文件：DL_SCAN 头里的 `OPDGAIN`
+  （`take_p2vm(..., opd_gain=...)`，取值见 `take_p2vm_calibration.OPD_GAIN`）。
+- `p2vm.read_scan_opd` 优先用记录的 `OPDGAIN`；`dl_gain` 只给没有记录的旧扫描用，两者都有时
+  必须一致，否则报错。两者都没有时给出明确警告（并报告延迟线步长），而不是静默地继续。
+- 2026-11-05 之前的数据仍需 `dl_gain`；例子和 bench 的 `reduce_night.py` 保留它。
+
 # PLANETES 0.27.0：自动找 dark
 
 - `io.raw.find_dark(raw_file, directory)`：为一个曝光找对应的 DARK_RAW，规则与 bench 的

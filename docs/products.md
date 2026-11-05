@@ -107,7 +107,7 @@ The CPL parameter is the Python keyword with dashes, under `planetes.calib` or
 | `metrology_trace` | planetes.calib.metrology-trace | false |
 | `keep_diagnostics` | planetes.calib.keep-diagnostics | false |
 | `gd_search_min_m` / `max_m` (P2VM) | planetes.calib.gd-search-min-m / -max-m | −30e-6 / 30e-6 m |
-| `dl_gain` (P2VM) | planetes.calib.dl-gain | none (e.g. `43:-1,42:-1,41:-1,32:1,31:-1,21:-1`) |
+| `dl_gain` (P2VM) | planetes.calib.dl-gain | none: each scan's recorded DL_SCAN `OPDGAIN`; give it (e.g. `43:-1,42:-1,41:-1,32:1,31:-1,21:-1`) only for scans recorded before 2026-11-05 |
 | `gd_search_min_m` / `max_m` (science) | planetes.reduce.gd-search-min-m / -max-m | −100e-6 / 100e-6 m |
 
 A PHASE_REFERENCE in the P2VM SOF is always applied, with PHASE_DARK_CALIB if given

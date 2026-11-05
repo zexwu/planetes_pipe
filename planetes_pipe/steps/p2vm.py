@@ -868,24 +868,52 @@ def read_p2vm(path: Path) -> P2VM:
         return P2VM(**values)
 
 
-def read_scan_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float]) -> NDArray:
+def read_scan_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = None
+                  ) -> NDArray | None:
     """Per-frame scan OPD [m], (baseline, frame), from each scan's DL_SCAN table.
 
-    dl_gain converts the moving delay line's mechanical position [mm] to OPD for
-    each baseline ('43', ...), including its sign.
+    The OPD per unit travel of the moving delay line, with its sign, is the scan's
+    recorded OPDGAIN; dl_gain ({'43': -1, ...}) supplies it for scans recorded
+    without one and must agree where both exist. This guide fixes the whole number
+    of fringes when the scan phase is unwrapped: a scan step of more than half a
+    fringe cannot be unwrapped from the fringes alone. Returns None, with a warning,
+    when any scan lacks both.
     """
-    if set(dl_gain) != set(layout.baselines):
+    if dl_gain is not None and set(dl_gain) != set(layout.baselines):
         raise ValueError("dl_gain requires all six physical baselines")
-    positions = []
+    positions, missing, recorded, steps_um = [], [], 0, []
     for baseline in layout.baselines:
-        table, header = afits.getdata(scans[baseline].path, "DL_SCAN", header=True)
+        try:
+            table, header = afits.getdata(scans[baseline].path, "DL_SCAN", header=True)
+        except KeyError:
+            missing.append(baseline)
+            continue
         if header["MOVINGDL"] != int(baseline[1]):
             raise ValueError(f"DL gain assumes the second arm moves: {baseline}")
         counts = table["NFRAMES"]
         if not np.array_equal(table["FIRST_FRAME"], np.cumsum(counts) - counts):
             raise ValueError(f"Noncontiguous DL_SCAN frames: {baseline}")
-        position = np.repeat((table["BEFORE_MM"] + table["AFTER_MM"]) / 2, counts)
-        positions.append(position * 1e-3 * dl_gain[baseline])
+        position_mm = (table["BEFORE_MM"] + table["AFTER_MM"]) / 2
+        steps_um.append(np.median(np.abs(np.diff(position_mm))) * 1e3)
+        given = None if dl_gain is None else float(dl_gain[baseline])
+        gain = header.get("OPDGAIN")
+        if gain is not None and given is not None and float(gain) != given:
+            raise ValueError(f"Scan {baseline} records OPDGAIN {gain}, dl_gain gives {given}")
+        recorded += gain is not None
+        gain = given if gain is None else float(gain)
+        if gain is None:
+            missing.append(baseline)
+            continue
+        positions.append(np.repeat(position_mm, counts) * 1e-3 * gain)
+    if missing:
+        step_text = f"median delay-line step {np.median(steps_um):.2f} um; " if steps_um else ""
+        log.warning("no OPD sign for scan(s) %s (neither OPDGAIN in DL_SCAN nor dl_gain): the "
+                    "scan phase is unwrapped from the fringes alone, which is wrong if a step "
+                    "exceeds half a fringe (~0.6 um); %sthe P2VM may be invalid",
+                    ", ".join(missing), step_text)
+        return None
+    log.info("scan OPD guide from DL_SCAN: OPDGAIN recorded in %d of 6 scans%s", recorded,
+             "" if recorded == 6 else ", the rest from dl_gain")
     return np.asarray(positions)
 
 
@@ -896,8 +924,9 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
     """planetes_p2vm: four flats + six baseline scans + DARK, FLAT, WAVE -> P2VM.
 
     phase_file is an optional all-shutters-open exposure used as instrumental phase
-    reference, with phase_dark_file if its DIT differs from the scans. dl_gain
-    ({'43': gain, ...}, mm -> OPD m) guides phase unwrapping with the DL_SCAN tables.
+    reference, with phase_dark_file if its DIT differs from the scans. The scans'
+    DL_SCAN tables guide phase unwrapping with their recorded OPDGAIN; dl_gain
+    ({'43': -1, ...}) supplies it for scans recorded without one (see read_scan_opd).
     """
     dark, flat, wave = read_dark(dark_file), read_flat(flat_file), read_wave(wave_file)
     flats = read_raws(flat_files, "FLAT_RAW", layout.telescopes)
@@ -914,9 +943,7 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
         check_calibrations(phase_raw, dark=phase_dark, flat=flat)
         phase_spectra = extract_spectra(phase_raw, extractor, phase_dark)
 
-    scan_opd_m = None
-    if dl_gain is not None:
-        scan_opd_m = read_scan_opd(scans, dl_gain)
+    scan_opd_m = read_scan_opd(scans, dl_gain)  # Recorded OPDGAIN, else dl_gain.
 
     options = dict(keep_diagnostics=keep_diagnostics,
                    gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m)
