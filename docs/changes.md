@@ -1,3 +1,13 @@
+# PLANETES 0.24.0：竖版 A4 报告，版式按 GRAVITY
+
+- 诊断 PDF 改为竖版 A4，便于打印，版式按 GRAVITY `gravi_visual`：首页大标题；之后是
+  依次排下来的小节，每节有粗体标题、一行说明和内容（图或表），一页放得下就接着放；每页
+  页脚为 "Page n / N"、产品文件名与 pipeline 版本。报告第一节是产品 header 中的身份信息
+  （类别、recipe、pipeline、写出时间、DIT、raw 输入）。
+- 各模块的 `pages()` 改为 `sections()`，返回 `pages.Section`（标题、说明、高度、绘图函数）；
+  `pages.write_pdf` 负责分页。表格的行标签作为第一列，留在页边距之内。
+- 数值结果不变。
+
 # PLANETES 0.23.0：读取压缩的 raw
 
 - `read_raw` 读取 tile 压缩的 raw（`CompImageHDU`）：返回 `raw.CompressedCube`，按需逐块

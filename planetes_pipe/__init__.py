@@ -7,7 +7,7 @@
 
 import logging
 
-__version__ = "0.23.0"
+__version__ = "0.24.0"
 log = logging.getLogger("planetes_pipe")
 
 

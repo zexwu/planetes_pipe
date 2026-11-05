@@ -1,4 +1,4 @@
-"""plots/: one report per product category, the P2VM quality checks, no overwriting."""
+"""plots/: one portrait report per product category, the P2VM quality checks, no overwriting."""
 import re
 import tempfile
 import unittest
@@ -48,8 +48,9 @@ class PlotTests(unittest.TestCase):
                     self.assertGreater(page_count(pdf), 0)
                     with self.assertRaises(FileExistsError):
                         plots.report(path)
-            p2vm_pages = page_count(Path(tmp) / "x_p2vm.pdf")
-            self.assertGreaterEqual(p2vm_pages, 15)  # summary ... phase residual
+            n_sections = len(p2vm_pages.sections(self.p2vm))
+            self.assertGreaterEqual(n_sections, 15)  # quality ... phase residual, as GRAVITY + scans
+            self.assertLess(page_count(Path(tmp) / "x_p2vm.pdf"), n_sections)  # sections share pages
 
     def test_a_file_without_a_known_category_is_refused(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
@@ -74,7 +75,7 @@ class PlotTests(unittest.TestCase):
             out = plots.save_calibration_plots(
                 self.products["dark"], self.products["bad"], self.products["flat"],
                 self.products["wave"], self.p2vm, Path(tmp) / "calibration_report.pdf")
-            self.assertGreater(page_count(out), 20)
+            self.assertGreater(page_count(out), 5)
 
 
 if __name__ == "__main__":

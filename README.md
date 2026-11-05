@@ -102,8 +102,9 @@ not final calibrated OIFITS.
   then move it to `steps/extraction.py`. Numba kernels stay next to the code that calls them.
 
 Every product file gets its diagnostic PDF with `plots.report(path)` (next to it,
-`<product>.pdf`); the bench night reduction writes them automatically. The P2VM
-report starts with GRAVITY's quality checks (gravi_visual) and a GOOD/WARNING/BAD verdict.
+`<product>.pdf`); the bench night reduction writes them automatically. Reports are
+portrait A4 in GRAVITY's layout; the P2VM report starts with GRAVITY's quality checks
+(gravi_visual) and a GOOD/WARNING/BAD verdict.
 
 [Methods](docs/methods.md) · [Products and QC](docs/products.md) · [Code style](docs/code_style.md) ·
 [Changes](docs/changes.md)
