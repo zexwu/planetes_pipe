@@ -3,6 +3,7 @@ from pathlib import Path
 
 from astropy.io import fits
 
+from planetes_pipe import configure_logging
 from planetes_pipe.io.keywords import DIT, PRO_CATG
 from planetes_pipe.io.raw import read_raw
 from planetes_pipe.steps import science
@@ -13,6 +14,7 @@ OUTPUT = CALIBRATIONS.parent / "science"
 
 
 def main():
+    configure_logging()  # The library is silent unless the script asks.
     raw = read_raw(SCIENCE, "SINGLE_SCI_RAW")
     headers = {path: fits.getheader(path) for path in sorted(CALIBRATIONS.glob("*.fits"))}
 
