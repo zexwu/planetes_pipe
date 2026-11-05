@@ -8,7 +8,8 @@ Run from the `PLANETES_new` / `PLANETES_py313` workspace root.
 uv run --locked python planetes_pipe/examples/reduce_calibrations.py
 ```
 
-Set the dark, lamp-dark and lamp files at the top; flats and scans are found by header type.
+Raw files are found by header type; each dark is the one matching the exposure it
+calibrates (same detector window and DIT, same capture run, closest in time).
 Each product gets its diagnostic PDF beside it (`<product>.pdf`, from `plots.report`).
 The example detects 25 traces, excludes metrology and uses recorded DL signs.
 P2VM selects the common illuminated wavelength band and native sampling automatically.

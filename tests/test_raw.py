@@ -167,3 +167,35 @@ class RawTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FindDarkTests(unittest.TestCase):
+    """find_dark: same window and DIT, then same capture run, then closest time."""
+
+    def write(self, directory, name, kind, dit, mjd, run=None):
+        from planetes_pipe.io.keywords import DIT, DPR_TYPE, MJD_OBS, TPL_START
+        header = fits.Header()
+        DPR_TYPE.set(header, kind)
+        DIT.set(header, dit)
+        MJD_OBS.set(header, mjd)
+        if run is not None:
+            TPL_START.set(header, run)
+        path = Path(directory) / name
+        fits.PrimaryHDU(header=header).writeto(path)
+        return path
+
+    def test_matches_dit_then_run_then_time(self):
+        from planetes_pipe.io.raw import find_dark
+        second = 1 / 86400
+        with tempfile.TemporaryDirectory() as directory:
+            target = self.write(directory, "scan.fits", "P2VM", 0.006, 100.0, run="A")
+            self.write(directory, "short_close.fits", "DARK", 0.001, 100.0 + second)
+            self.write(directory, "same_dit_far.fits", "DARK", 0.006, 100.0 + 900 * second)
+            same_run = self.write(directory, "same_run.fits", "DARK", 0.006,
+                                  100.0 - 3000 * second, run="A")
+            self.assertEqual(find_dark(target, directory), same_run)
+            same_run.unlink()
+            self.assertEqual(find_dark(target, directory).name, "same_dit_far.fits")
+            lamp = self.write(directory, "lamp.fits", "WAVE,LAMP", 1.0, 100.0)
+            with self.assertRaises(LookupError):
+                find_dark(lamp, directory)

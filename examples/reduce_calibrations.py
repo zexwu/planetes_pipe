@@ -2,18 +2,17 @@
 diagnostic PDF next to each product (<product>.pdf, as plots.report writes them).
 
 Each <step>.run() is the same code as the PyEsoRex recipe planetes_<step> and
-returns {product category: written path}. Choose the inputs below; the steps
-check that each calibration matches its raw data (DIT, ROI, detector).
+returns {product category: written path}. Raw files are found by header type, and
+each dark by matching the exposure it calibrates (same window and DIT, same capture
+run, closest in time); the steps check that every calibration matches its raw data.
 """
 from pathlib import Path
 
 from planetes_pipe import configure_logging, plots
-from planetes_pipe.io.raw import find_raw
+from planetes_pipe.io.raw import find_dark, find_raw
 from planetes_pipe.steps import dark, flat, p2vm, wave
 
 RAW = Path("../../captures/2026-11-04/raw/calibration")
-DARK_RAW = RAW / "PLANETES.2026-11-04T161628.211.fits"  # Same DIT as flats and scans.
-LAMP_DARK_RAW = RAW / "PLANETES.2026-11-04T164022.435.fits"  # Same DIT as the lamp.
 OUTPUT = Path("../../captures/2026-11-04/reduced/")  # Existing products are never overwritten.
 DL_GAIN = {"43": -1, "42": -1, "41": -1, "32": 1, "31": -1, "21": -1}  # Or None.
 
@@ -24,8 +23,8 @@ def main():
     flat_raws = find_raw(RAW, "FLAT_RAW")  # Four files; identities come from shutters.
     scan_raws = find_raw(RAW, "P2VM_RAW")  # Six baseline scans.
 
-    main_dark = dark.run(DARK_RAW, output_dir=OUTPUT)
-    lamp_dark = dark.run(LAMP_DARK_RAW, output_dir=OUTPUT)
+    main_dark = dark.run(find_dark(flat_raws[0], RAW), output_dir=OUTPUT)  # Flats' and scans' DIT.
+    lamp_dark = dark.run(find_dark(lamp_raws[0], RAW), output_dir=OUTPUT)  # The lamp's DIT.
     # 25 traces, excluding the middle metrology trace.
     flat_out = flat.run(main_dark["DARK"], main_dark["BAD"], flat_raws, output_dir=OUTPUT,
                         metrology_trace=True)

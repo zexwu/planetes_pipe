@@ -1,3 +1,11 @@
+# PLANETES 0.27.0：自动找 dark
+
+- `io.raw.find_dark(raw_file, directory)`：为一个曝光找对应的 DARK_RAW，规则与 bench 的
+  night 相同：探测器窗口和 DIT 必须一致，然后优先同一次采集（TPL.START），再取 MJD-OBS
+  最近的；找不到或无法判断时抛出 LookupError。通用版本 `io.raw.closest_raw(...)`。
+- `examples/reduce_calibrations.py` 不再需要手动填 dark：flat/scan 和灯的 dark 都自动找，
+  选中的文件和时间差写入日志。
+
 # PLANETES 0.26.0：清楚的日志
 
 - 每条日志都写明时间、级别、步骤和函数：

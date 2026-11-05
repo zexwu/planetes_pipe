@@ -18,13 +18,24 @@ import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from planetes_pipe.io.keywords import DIT, DPR_TYPE, PRO_CATG, QC_SATURATED, SHUTTER, WINDOW
+from planetes_pipe.io.keywords import (
+    DIT,
+    DPR_TYPE,
+    MJD_OBS,
+    PRO_CATG,
+    QC_SATURATED,
+    SHUTTER,
+    TPL_START,
+    WINDOW,
+)
+
+log = logging.getLogger(__name__)
 
 # Raw value at which the detector's 12-bit readout clips. A clipped sample is not
 # a measurement: fringes and fluxes computed from it are biased low.
-log = logging.getLogger(__name__)
-
 SATURATION_ADU = 4095
+# A DARK must share the raw's detector window and DIT (check_calibrations).
+DARK_SETUP = (*WINDOW, DIT)
 
 # Raw SOF tag -> ESO DPR TYPE of the raw file.
 RAW_TYPES = {
@@ -160,6 +171,44 @@ def find_raw(directory: Path, category: str) -> list[Path]:
     return found
 
 
+def closest_raw(raw_file, candidates, keywords, what: str = "calibration") -> Path:
+    """The candidate raw file that best matches raw_file, by header.
+
+    Compatible first: no keyword of `keywords` differs (a value recorded on only one
+    side is not compared). Among those, prefer the exact setup, then the same capture
+    run (TPL.START), then the closest MJD-OBS. Raise LookupError if none is
+    compatible, or if several are and the times needed to choose are not recorded.
+    """
+    target = afits.getheader(raw_file)
+    wanted = [k.get(target) for k in keywords]
+    headers = {Path(c): afits.getheader(c) for c in candidates}
+    same = [c for c, h in headers.items()
+            if all(a is None or b is None or a == b
+                   for a, b in zip((k.get(h) for k in keywords), wanted))]
+    if not same:
+        raise LookupError(f"No {what} with the setup of {Path(raw_file).name}")
+    run_start = TPL_START.get(target)
+    for preferred in (lambda c: [k.get(headers[c]) for k in keywords] == wanted,
+                      lambda c: run_start is not None and TPL_START.get(headers[c]) == run_start):
+        same = [c for c in same if preferred(c)] or same
+    mjd = MJD_OBS.get(target)
+    if len(same) > 1 and (mjd is None or any(MJD_OBS.get(headers[c]) is None for c in same)):
+        raise LookupError(f"{len(same)} {what} files match {Path(raw_file).name} but MJD-OBS "
+                          f"is not recorded: {', '.join(c.name for c in same)}")
+    chosen = min(same, key=lambda c: 0.0 if mjd is None else abs(MJD_OBS.get(headers[c]) - mjd))
+    apart = ("" if mjd is None or MJD_OBS.get(headers[chosen]) is None
+             else f", {abs(MJD_OBS.get(headers[chosen]) - mjd) * 86400:.0f} s apart")
+    dit = DIT.get(headers[chosen])
+    log.info("%s for %s: %s (DIT %s%s)", what, Path(raw_file).name, chosen.name,
+             "unknown" if dit is None else f"{dit:.4g} s", apart)
+    return chosen
+
+
+def find_dark(raw_file, directory) -> Path:
+    """The DARK_RAW in directory for raw_file: same window and DIT, then same run, then closest time."""
+    return closest_raw(raw_file, find_raw(directory, "DARK_RAW"), DARK_SETUP, "DARK_RAW")
+
+
 def detector_cards(header: afits.Header) -> afits.Header:
     """The DET cards of a header, as recorded."""
     return afits.Header([card for card in header.cards if card.keyword.startswith("ESO DET ")])
@@ -182,7 +231,7 @@ def check_match(header: afits.Header, calibration: afits.Header | None, keywords
 def check_calibrations(raw: Raw, *, dark=None, flat=None) -> None:
     """A DARK must share the raw's detector window and DIT; a FLAT its window."""
     if dark is not None:
-        check_match(raw.header, dark.detector, (*WINDOW, DIT), "DARK")
+        check_match(raw.header, dark.detector, DARK_SETUP, "DARK")
     if flat is not None:
         check_match(raw.header, flat.detector, WINDOW, "FLAT")
 
