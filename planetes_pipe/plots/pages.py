@@ -203,5 +203,6 @@ def write_pdf(path, title: str, sections, footer: str = "") -> Path:
                           color="0.4", va="center")
                 section.draw(body)
             pdf.savefig(fig)
-    log.info("wrote %s (%d sections on %d pages)", path.name, sum(map(len, pages)), len(pages))
+    log.info("wrote %s (%d sections, %d page%s)", path.name, sum(map(len, pages)), len(pages),
+             "" if len(pages) == 1 else "s")
     return path

@@ -9,6 +9,7 @@ uv run --locked python planetes_pipe/examples/reduce_calibrations.py
 ```
 
 Set the dark, lamp-dark and lamp files at the top; flats and scans are found by header type.
+Each product gets its diagnostic PDF beside it (`<product>.pdf`, from `plots.report`).
 The example detects 25 traces, excludes metrology and uses recorded DL signs.
 P2VM selects the common illuminated wavelength band and native sampling automatically.
 Adjust them for your dataset. FITS filenames keep the reference raw timestamps; existing files are never overwritten.
