@@ -10,6 +10,7 @@ once per grid, one legend per section above its panels, and ruled tables without
 vertical lines. A section is drawn into a matplotlib SubFigure, without pyplot, so
 no GUI backend is involved.
 """
+import logging
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,6 +24,8 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
 from planetes_pipe.instrument import layout
+
+log = logging.getLogger(__name__)
 
 A4 = (8.27, 11.69)                         # inches, portrait
 TOP, BOTTOM, SIDE = 0.95, 0.85, 0.9        # page margins, inches (sides ~2.3 cm)
@@ -200,4 +203,5 @@ def write_pdf(path, title: str, sections, footer: str = "") -> Path:
                           color="0.4", va="center")
                 section.draw(body)
             pdf.savefig(fig)
+    log.info("wrote %s (%d sections on %d pages)", path.name, sum(map(len, pages)), len(pages))
     return path

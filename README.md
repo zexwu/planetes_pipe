@@ -31,6 +31,19 @@ uv run --locked python planetes_pipe/examples/reduce_science.py
 FLAT and P2VM raw files may be given in any order: telescope and baseline identity
 come from the recorded shutters. Raw files are read only; existing products are
 never overwritten.
+
+The library prints nothing until a script turns logging on:
+
+```python
+from planetes_pipe import configure_logging
+configure_logging()                          # console, INFO: a few summary lines per step
+configure_logging(file="cal/reduce.log")     # also a file with every DEBUG detail
+```
+
+Each line names its step and the function that wrote it, e.g.
+`11:31:15 INFO    [WAVE] wave.fit_wavelength_solution: lines matched per output: 14-18`;
+every step logs its inputs, the products it wrote and its time, or why it failed.
+
 The optional PyEsoRex route is described in [docs/eso](docs/eso/README.md).
 
 ## What is where

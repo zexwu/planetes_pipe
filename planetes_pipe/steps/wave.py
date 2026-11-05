@@ -4,6 +4,7 @@
     out = wave.run(lamp_raw, lamp_dark_path, flat_path, output_dir="calibration")  # {"WAVE": path}
 """
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,13 +16,15 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
 
-from planetes_pipe import log
 from planetes_pipe.instrument import layout
 from planetes_pipe.io import products
 from planetes_pipe.io.keywords import Keyword
 from planetes_pipe.io.raw import Raw, check_calibrations, read_raw, record_saturation
+from planetes_pipe.logs import step
 from planetes_pipe.steps.dark import Dark, read_dark
 from planetes_pipe.steps.flat import Flat, extract_sparse_spectra, read_flat
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -181,10 +184,10 @@ def fit_wavelength_solution(
     mean_matches, _ = match_lines_ransac(
         lines_m, mean_peaks, tol=3, n_iter=RANSAC_ITERATIONS
     )
-    log.info(
-        "Matched mean spectrum peaks to known lines: "
-        f"{len(mean_peaks)} peaks -> {len(mean_matches)} matches."
-    )
+    log.info("reference spectrum (outputs %d-%d): %d peaks, %d matched to %d known lines",
+             layout.n_outputs - 4, layout.n_outputs - 1, len(mean_peaks), len(mean_matches),
+             len(lines_m))
+    matched_per_output = []
 
     for output in range(layout.n_outputs):
         spec = lamp_spectra[output]
@@ -219,10 +222,8 @@ def fit_wavelength_solution(
         )
 
         both = list(set(matches[:, 0]) & set(mean_matches[:, 1]))
-        log.info(
-            f"OUTPUT {output:02d}: {len(peak_pixels)} peaks ∩ {len(lines_m)} "
-            f"known lines -> {len(both)} matched."
-        )
+        matched_per_output.append(len(both))
+        log.debug("output %2d: %d peaks, %d matched lines", output, len(peak_pixels), len(both))
 
         # line_indices: indices of the matched lines in the known line list
         # peak_indices: indices of the matched peaks in the observed spectrum
@@ -236,6 +237,8 @@ def fit_wavelength_solution(
         line_y.append(np.interp(refined_x, detector_x, y_trace[output]))
         line_wave_m.append(lines_m[line_indices])
 
+    log.info("lines matched per output: %d-%d (mean %.1f)", min(matched_per_output),
+             max(matched_per_output), np.mean(matched_per_output))
     # Fit lambda(x, y) to the matched detector coordinates.
     fit_x = np.concatenate(line_x)
     fit_y = np.concatenate(line_y)
@@ -243,25 +246,23 @@ def fit_wavelength_solution(
 
     # Fit the wl = f(x, y), using a 3rd order polynomial
     deg = SURFACE_DEGREE
-    log.info("Fitting 2D wavelength solution...")
     design = np.column_stack(_surface_terms(fit_x, fit_y, deg))
     terms = [f"x{d - i}y{i}" for d in range(deg + 1) for i in range(d + 1)]
-    log.debug("Kernel used for wavelength_map_m fit: ")
-    log.debug(", ".join(terms))
+    log.debug("surface terms: %s", ", ".join(terms))
     coeffs, _, _, _ = np.linalg.lstsq(design, fit_wave_m, rcond=None)
     residuals = fit_wave_m - design @ coeffs
     std = np.std(residuals)
-    log.info(f"Initial std dev of residuals: {std * 1e9:.2f} nm")
+    first_std = std
+    log.debug("residual std %.3f nm before rejection", std * 1e9)
     for iteration in range(3):
-        log.info(f"Performing outlier rejection [{iteration + 1}/3]")
         reject = abs(residuals) > 3 * std
         coeffs = np.linalg.lstsq(design[~reject], fit_wave_m[~reject], rcond=None)[0]
         residuals = fit_wave_m - design @ coeffs
         std = np.std(residuals[~reject])
-        log.info(
-            f"    Std dev of residuals: {std * 1e9:.2f} nm "
-            f"after rejecting {reject.sum()} outliers"
-        )
+        log.debug("rejection pass %d: %d outliers, residual std %.3f nm", iteration + 1,
+                  reject.sum(), std * 1e9)
+    log.info("wavelength fit (%d lines, degree %d): residual std %.2f -> %.2f nm after "
+             "rejecting %d", len(fit_wave_m), deg, first_std * 1e9, std * 1e9, reject.sum())
 
     # Evaluate the fitted 2-D polynomial on every detector trace.
     trace_x = np.repeat(np.arange(nx)[None, :], layout.n_outputs, axis=0)
@@ -275,8 +276,6 @@ def fit_wavelength_solution(
         fit_x_pixels=fit_x[~reject].copy(),
         fit_y_pixels=fit_y[~reject].copy(),
     )
-    log.info("Computed full wavelength map")
-    log.info("--- Step: WAVE [DONE] ---")
     return wave
 
 
@@ -409,7 +408,7 @@ def match_peaks_grid(
     # Report expensive searches without changing the requested grid.
     total_iters = len(a_grid) * len(b_grid) * len(c_grid)
     if total_iters > 2e6:
-        log.warning(f"Grid search is large ({total_iters} iterations).")
+        log.warning("grid search is large (%d iterations)", total_iters)
 
     # Choose a one-to-one matching proposal on the fixed grid.
     a_best, b_best, c_best = _grid_search_kernel(obs, mod, tol, a_grid, b_grid, c_grid)
@@ -656,6 +655,7 @@ def read_wave(path: Path) -> Wave:
         return wave
 
 
+@step("WAVE")
 def run(lamp_file, dark_file, flat_file, *, output_dir) -> dict[str, Path]:
     """planetes_wave: one WAVELAMP_RAW + its DARK + FLAT -> WAVE."""
     raw, flat = read_raw(lamp_file, "WAVELAMP_RAW"), read_flat(flat_file)

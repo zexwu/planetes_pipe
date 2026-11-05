@@ -4,6 +4,7 @@
     out = flat.run(dark_path, bad_path, flat_raws, output_dir="calibration")  # {"FLAT": path}
 """
 
+import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -15,7 +16,6 @@ from numpy.typing import NDArray
 from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, medfilt
 
-from planetes_pipe import log
 from planetes_pipe.instrument import layout
 from planetes_pipe.io import products
 from planetes_pipe.io.keywords import WINDOW, Keyword
@@ -27,7 +27,10 @@ from planetes_pipe.io.raw import (
     read_raws,
     record_saturation,
 )
+from planetes_pipe.logs import step
 from planetes_pipe.steps.dark import Bad, Dark, read_bad, read_dark
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -147,6 +150,8 @@ def make_flat(
                         aperture_width_pixels=aperture_width_pixels)
     if metrology_trace:
         keep = np.arange(25) != 12  # Middle of the 25 y-ordered traces.
+        log.info("dropped the metrology trace (12 of 25, y=%.0f); %d outputs kept",
+                 np.median(result.trace_y_pixels[12]), keep.sum())
         result = replace(result, profile_x_pixels=result.profile_x_pixels[keep],
                          profile_y_pixels=result.profile_y_pixels[keep],
                          trace_y_pixels=result.trace_y_pixels[keep],
@@ -203,7 +208,7 @@ def build_flat(
     profile = flat_map.sum(axis=1)
     thresh = np.percentile(profile, 75)
     ref_ys, props = find_peaks(profile, distance=h_half, height=thresh)
-    log.debug(f"Found {len(ref_ys)} Peaks with THRESH {thresh:.0f}...")
+    log.debug("%d profile peaks above %.0f ADU (75th percentile)", len(ref_ys), thresh)
     if len(ref_ys) < n_outputs:
         raise ValueError(
             f"Expected {n_outputs} spectral traces, found only {len(ref_ys)}"
@@ -218,9 +223,7 @@ def build_flat(
     sparse_xs = []
     sparse_ys = []
 
-    log.info("Building sparse extraction proproducts...")
     for i, ref_y in enumerate(ref_ys):
-        log.debug(f"    Tracing spectrum {i + 1}/{n_outputs} at Y={ref_y}...")
         xs = np.arange(w)
         illuminated, ref_x = _trace_illumination(flat_map, bad_map, ref_y, h_half)
         ys, ys_err, sigma = trace_spectrum(
@@ -235,10 +238,8 @@ def build_flat(
             raise ValueError(f"Trace {i}: fewer than four illuminated fitted columns")
         fit_x = xs[good]
         trace_ranges.append((fit_x[0], fit_x[-1]))
-        log.info(
-            f"    Trace {i}: x={fit_x[0]}..{fit_x[-1]}, "
-            f"{len(fit_x)} fitted columns; seed x={ref_x}"
-        )
+        log.debug("trace %2d: y=%d, x=%d..%d, %d fitted columns, seed x=%d", i, ref_y,
+                  fit_x[0], fit_x[-1], len(fit_x), ref_x)
         coeffs = np.polyfit(xs[good], ys_med[good], deg=3)
         trace_y = np.polyval(coeffs, xs)
         Y, X = np.indices((h, w))
@@ -257,6 +258,10 @@ def build_flat(
         traces.append(trace_y)
         sigmas.append(sigma)
 
+    columns = [last - first + 1 for first, last in trace_ranges]
+    log.info("%d traces at y=%d..%d, fitted over x=%d..%d (%d-%d columns each)", n_outputs,
+             ref_ys[0], ref_ys[-1], min(r[0] for r in trace_ranges),
+             max(r[1] for r in trace_ranges), min(columns), max(columns))
     width = max(map(len, sparse_xs))
     padded_x = np.full((n_outputs, width), -1, dtype=np.int64)
     padded_y = np.full_like(padded_x, -1)
@@ -587,6 +592,7 @@ def read_flat(path: Path) -> Flat:
         return flat
 
 
+@step("FLAT")
 def run(dark_file, bad_file, flat_files, *, output_dir,
         aperture_width_pixels=APERTURE_WIDTH_PIXELS, metrology_trace=False) -> dict[str, Path]:
     """planetes_flat: four FLAT_RAW (one telescope open each) + DARK + BAD -> FLAT."""

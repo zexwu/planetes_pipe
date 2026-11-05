@@ -4,6 +4,7 @@
     out = science.run(science_raw, dark, flat, wave, p2vm, output_dir="science")
 """
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -11,10 +12,10 @@ import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from planetes_pipe import log
 from planetes_pipe.instrument import layout
 from planetes_pipe.io import products
 from planetes_pipe.io.raw import Raw, check_calibrations, read_raw, record_saturation
+from planetes_pipe.logs import step
 from planetes_pipe.steps.dark import Dark, read_dark
 from planetes_pipe.steps.extraction import (
     SpectralExtractor,
@@ -25,6 +26,8 @@ from planetes_pipe.steps.extraction import (
 from planetes_pipe.steps.flat import Flat, read_flat
 from planetes_pipe.steps.p2vm import P2VM, read_p2vm
 from planetes_pipe.steps.wave import Wave, read_wave
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -142,7 +145,7 @@ def reduce_spectra(
         or spectra.shape[-1] != len(p2vm.wavelength_m)
     ):
         raise ValueError("Science spectra and P2VM output/wavelength dimensions differ")
-    log.info("Applying P2VM to extract visibility for science spectra...")
+    log.info("applying the P2VM to %d frames", spectra.shape[1])
     channels = np.einsum("box,ofx->fbx", p2vm.matrix, spectra)
     flux_adu = channels[:, :layout.n_telescopes, :]
     coherent_adu = channels[:, layout.real_slice, :] + 1j * channels[:, layout.imag_slice, :]
@@ -159,13 +162,14 @@ def reduce_spectra(
         )
 
     gd_m = np.zeros((len(coherent_adu), layout.n_baselines))
-    log.info("Computing group delay for science spectra...")
     for baseline in range(layout.n_baselines):
         gd_m[:, baseline] = estimate_group_delay(
             coherent_adu[:, baseline],
             p2vm.wavelength_m,
             search_range=(gd_search_min_m, gd_search_max_m),
         )
+    log.info("median group delay: %s", ", ".join(
+        f"{name} {np.median(gd_m[:, b]) * 1e6:+.1f} um" for b, name in enumerate(layout.baselines)))
 
     phasor = coherent_adu * np.exp(
         -2j * np.pi * gd_m[:, :, None] / p2vm.wavelength_m[None, :]
@@ -185,9 +189,6 @@ def reduce_spectra(
         differential_phase_deg=phase_deg,
         baseline_outputs=p2vm.baseline_outputs,
     )
-    log.info("Reduction for science spectra completed.")
-
-    log.info("--- Step: REDUCE science spectra [DONE] ---")
     return product
 
 
@@ -367,6 +368,7 @@ def read_reduced(path: Path) -> P2VMRed:
         )
 
 
+@step("SCIENCE")
 def run(science_file, dark_file, flat_file, wave_file, p2vm_file, *, output_dir,
         gd_search_min_m=-100e-6, gd_search_max_m=100e-6) -> dict[str, Path]:
     """planetes_reduce: one SINGLE_SCI_RAW + DARK, FLAT, WAVE, P2VM -> SINGLE_SCI_P2VMRED."""

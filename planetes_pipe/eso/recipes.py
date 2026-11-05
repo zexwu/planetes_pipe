@@ -14,6 +14,7 @@ from cpl import ui
 from cpl.core import Msg
 
 from planetes_pipe import __version__, log
+from planetes_pipe.logs import StepFormatter
 from planetes_pipe.steps import dark, flat, p2vm, science, wave
 
 AUTHOR = "PLANETES contributors"
@@ -118,7 +119,15 @@ def publish(written: dict[str, Path]):
 
 
 class _CPLHandler(logging.Handler):
-    """Forward records without applying a second terminal or file verbosity filter."""
+    """Forward records without applying a second terminal or file verbosity filter.
+
+    CPL prints the component (module.function) and the level; the message keeps the
+    step tag, as on the console.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.setFormatter(StepFormatter("[%(step)s] %(message)s"))
 
     def emit(self, record: logging.LogRecord) -> None:
         if record.levelno >= logging.ERROR:
@@ -129,7 +138,8 @@ class _CPLHandler(logging.Handler):
             send = Msg.info
         else:
             send = Msg.debug
-        send(record.funcName, self.format(record))
+        message = self.format(record)  # sets record.where
+        send(record.where, message)
 
 
 @contextmanager

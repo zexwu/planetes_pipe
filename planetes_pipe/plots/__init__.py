@@ -14,9 +14,10 @@ from pathlib import Path
 
 from astropy.io import fits
 
-from planetes_pipe import __version__, log
+from planetes_pipe import __version__
 from planetes_pipe.io.keywords import DATE, DIT, PRO_CATG, PRO_PIPELINE, PRO_RAW_NAME, PRO_RECIPE
 from planetes_pipe.plots import dark, flat, p2vm, science, wave
+from planetes_pipe.logs import running
 from planetes_pipe.plots.pages import summary_section, write_pdf
 from planetes_pipe.steps.dark import read_bad, read_dark
 from planetes_pipe.steps.flat import read_flat
@@ -48,7 +49,11 @@ def _identity(header) -> list:
 
 def report(product_file, output=None) -> Path:
     """Write the diagnostic PDF of one product file; output defaults to <product>.pdf."""
-    path = Path(product_file)
+    with running("REPORT", "plots.report"):
+        return _report(Path(product_file), output)
+
+
+def _report(path: Path, output) -> Path:
     header = fits.getheader(path)
     category = PRO_CATG.get(header)
     if category == "DARK":
@@ -82,9 +87,7 @@ def save_calibration_plots(dark_product, bad_product, flat_product, wave_product
 def save_reduction_plots(reduced, output: Path, *, object_label: str = "PLANETES",
                          full: bool = False) -> Path:
     """One PDF of per-frame science diagnostics (see science.sections)."""
-    log.info(f"--- Step: PLOTTING {object_label} ---")
-    path = write_pdf(output, f"{object_label} — Science P2VMRED Report",
-                     science.sections(reduced, full=full),
-                     footer=f"{Path(output).name}    planetes_pipe {__version__}")
-    log.info(f"--- Step: PLOTTING {object_label} [DONE] ---")
-    return path
+    with running("REPORT", "plots.save_reduction_plots"):
+        return write_pdf(output, f"{object_label} — Science P2VMRED Report",
+                         science.sections(reduced, full=full),
+                         footer=f"{Path(output).name}    planetes_pipe {__version__}")

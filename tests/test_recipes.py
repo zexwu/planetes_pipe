@@ -67,10 +67,10 @@ class ESOChainTests(unittest.TestCase):
                 timeout=60,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertNotIn("Fitting baseline", result.stdout + result.stderr)
+            self.assertNotIn("baseline 43:", result.stdout + result.stderr)
             logfile = (calibration / "pyesorex.log").read_text()
-            self.assertIn("Fitting baseline 43", logfile)
-            self.assertIn("Fitting ellipses for phase extraction", logfile)
+            self.assertIn("[P2VM] baseline 43:", logfile)
+            self.assertIn("OPD zero point from GD", logfile)
             header = fits.getheader(
                 calibration / "PLANETES.2026-02-05TUNKNOWN.0006_p2vm.fits"
             )

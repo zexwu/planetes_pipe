@@ -1,3 +1,17 @@
+# PLANETES 0.26.0：清楚的日志
+
+- 每条日志都写明时间、级别、步骤和函数：
+  `11:31:15 INFO    [WAVE] wave.fit_wavelength_solution: lines matched per output: 14-18`。
+  新模块 `planetes_pipe.logs`；每个模块用自己的 logger（`logging.getLogger(__name__)`）。
+- 每个步骤的 `run()` 由 `@logs.step(...)` 包装：开始时列出输入文件，结束时列出写出的产品和
+  用时；出错时记录哪一步、多久之后、什么错误，再抛出。报告（`plots.report`）同样标为 [REPORT]。
+- INFO 只留摘要（每步几行）：DARK 的电平和坏像素数，FLAT 的 trace 范围，WAVE 的谱线匹配和
+  拟合残差，P2VM 每条基线的 OPD/GD 范围和拟合 RMS，SCIENCE 的 group delay 中位数。逐条
+  trace、逐个 output、逐次迭代的细节改为 DEBUG。去掉 "--- Step ... [DONE] ---" 一类的行。
+- `configure_logging(level="INFO", file=None, file_level="DEBUG")`：可同时写日志文件（带毫秒）；
+  再次调用会替换原来的 handler。PyEsoRex 下 CPL 显示 module.function，消息带 [步骤]。
+- 例子脚本调用 `configure_logging()`；bench 的 `reduce_night.py` 用同一格式写 `reduce_night.log`。
+
 # PLANETES 0.25.0：简洁的科学图版式
 
 - 报告改为简洁的科学图风格：页边距加大（左右约 2.3 cm），细边框、四边朝内的刻度和次刻度，

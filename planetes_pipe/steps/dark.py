@@ -5,6 +5,7 @@
     master = dark.read_dark(out["DARK"])
 """
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -16,6 +17,9 @@ from numpy.typing import NDArray
 from planetes_pipe.io import products
 from planetes_pipe.io.keywords import NFRAMES, Keyword
 from planetes_pipe.io.raw import Raw, detector_cards, read_raw
+from planetes_pipe.logs import step
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -69,7 +73,13 @@ def make_dark_products(
 
     dark = measure_dark(raw.chunks())
     dark = replace(dark, detector=raw.detector)
-    return dark, detect_bad_pixels(dark, threshold=bad_pixel_threshold)
+    bad = detect_bad_pixels(dark, threshold=bad_pixel_threshold)
+    log.info("%d frames: median level %.2f ADU, median temporal RMS %.2f ADU", dark.n_frames,
+             np.median(dark.mean_adu), np.median(dark.temporal_rms_adu))
+    flags = bad.bad_pixel_flags
+    log.info("bad pixels (threshold %g): %d hot, %d dead, %d noisy", bad_pixel_threshold,
+             np.count_nonzero(flags & 1), np.count_nonzero(flags & 2), np.count_nonzero(flags & 4))
+    return dark, bad
 
 
 def frame_statistics(chunks: Iterable[NDArray]) -> tuple[NDArray, NDArray, int]:
@@ -242,6 +252,7 @@ def read_bad(path: Path) -> Bad:
         return Bad(products.read_image(hdus, "IMAGING_DATA_SC"))
 
 
+@step("DARK")
 def run(dark_file, *, output_dir, bad_pixel_threshold=BAD_PIXEL_THRESHOLD) -> dict[str, Path]:
     """planetes_dark: one DARK_RAW -> DARK and BAD."""
     raw = read_raw(dark_file, "DARK_RAW")

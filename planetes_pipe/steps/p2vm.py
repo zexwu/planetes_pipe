@@ -7,6 +7,7 @@ Order: data classes; wavelength grid and spectra; response fit and inverse;
 QC; FITS; run().
 """
 
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +16,6 @@ import numpy as np
 from astropy.io import fits as afits
 from numpy.typing import NDArray
 
-from planetes_pipe import log
 from planetes_pipe.instrument import layout
 from planetes_pipe.io import products
 from planetes_pipe.io.keywords import Keyword
@@ -26,6 +26,7 @@ from planetes_pipe.io.raw import (
     read_raws,
     record_saturation,
 )
+from planetes_pipe.logs import step
 from planetes_pipe.steps.dark import Dark, read_dark
 from planetes_pipe.steps.extraction import (
     SpectralExtractor,
@@ -35,6 +36,8 @@ from planetes_pipe.steps.extraction import (
 )
 from planetes_pipe.steps.flat import Flat, read_flat
 from planetes_pipe.steps.wave import Wave, read_wave
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -212,7 +215,6 @@ def fit_p2vm(
     A supplied reference adjusts instrumental phases and triggers a second
     inversion. Each wavelength's V2PM must have numerical rank 16.
     """
-    log.info("--- Step: P2VM ---")
     _check_input_axes(spectra)
     wavelength_m = spectra.wavelength_m
     if scan_opd_m is not None:
@@ -262,7 +264,6 @@ def fit_p2vm(
         coherence_phase_rad=phase_rad,
         **diagnostics,
     )
-    log.info("--- Step: P2VM [DONE] ---")
     return product
 
 
@@ -322,10 +323,8 @@ def _fit_scan_responses(
     gd_m = np.zeros((layout.n_baselines, n_frames))
 
     for baseline in range(layout.n_baselines):
-        log.info(f"Fitting baseline {layout.baselines[baseline]}...")
         baseline_spectra = spectra.baseline_spectra[baseline]
         outputs = spectra.baseline_outputs[baseline]
-        log.debug("    Fitting ellipses for phase extraction...")
         scan_phase_rad, radius = fit_abcd_ellipse(baseline_spectra[outputs])
         if scan_opd_m is not None:
             scan_phase_rad = unwrap_scan_phase(scan_phase_rad, scan_opd_m[baseline], wavelength_m)
@@ -343,6 +342,10 @@ def _fit_scan_responses(
         ) = _fit_interferometric_response(
             baseline_spectra, opd_m[baseline], wavelength_m
         )
+        log.info("baseline %s: scan OPD %+.1f..%+.1f um, GD %+.1f..%+.1f um, median fit RMS "
+                 "%.1f ADU", layout.baselines[baseline], opd_m[baseline].min() * 1e6,
+                 opd_m[baseline].max() * 1e6, gd_m[baseline].min() * 1e6,
+                 gd_m[baseline].max() * 1e6, np.median(rms_adu[outputs, baseline]))
 
     diagnostics = {}
     if keep_diagnostics:
@@ -394,7 +397,7 @@ def _estimate_scan_opd(
     )
     _, opd_zero_m = np.polyfit(gd_m, opd_m, 1)
     opd_m -= opd_zero_m
-    log.debug(f"    Removing OPD zero point {opd_zero_m:.9g} m...")
+    log.debug("OPD zero point from GD: %+.3f um", opd_zero_m * 1e6)
     return opd_m, gd_m
 
 
@@ -433,7 +436,6 @@ def _fit_interferometric_response(
     rms_adu = np.zeros_like(dc_adu)
     scan_phase_rad = 2 * np.pi * opd_m[:, None] / wavelength_m[None, :]
     design = np.ones((len(scan_phase_rad), 3))
-    log.debug("    Fitting P2VM coefficients...")
     for wave_index in range(n_wave):
         design[:, 1] = np.sin(scan_phase_rad[:, wave_index])
         design[:, 2] = np.cos(scan_phase_rad[:, wave_index])
@@ -467,7 +469,6 @@ def _estimate_transmission(telescope_spectra: NDArray) -> NDArray:
     """
     transmission = np.zeros((layout.n_outputs, layout.n_telescopes, telescope_spectra.shape[-1]))
     for telescope in range(layout.n_telescopes):
-        log.info(f"Measuring transmission for telescope {layout.telescopes[telescope]}...")
         median_spectrum = np.median(telescope_spectra[telescope], axis=1)
         transmission[:, telescope, :] = median_spectrum / median_spectrum.sum()
     return transmission
@@ -503,17 +504,15 @@ def _normalize_response_inplace(
     then divide amplitude by sqrt(P_i*P_j). A nonpositive/nonfinite photometric
     product raises ValueError. Returns None; the first three arrays are updated.
     """
-    log.info("P2VM Normalization...")
-    log.info("    Phase normalization (A=0)...")
+    log.debug("normalizing: phases to output A, transmission to a mean of 1 over the "
+              "outputs, coherence to its DC")
     for baseline in range(layout.n_baselines):
         outputs = baseline_outputs[baseline]
         a_phase_rad = phase_rad[outputs[0]]
         phase_rad[outputs] -= a_phase_rad[None, :, :]
 
-    log.info("    Transmission normalization (mean over 24 outputs -> 1)...")
     transmission /= transmission.mean(axis=0)[None, :, :]
 
-    log.info("    Coherence normalization...")
     for baseline in range(layout.n_baselines):
         telescope_1, telescope_2 = layout.baseline_pairs[baseline]
         for wave_index in range(transmission.shape[-1]):
@@ -549,7 +548,6 @@ def _invert_v2pm(v2pm_matrix: NDArray) -> NDArray:
     otherwise raise ValueError identifying the wavelength. No condition-number
     threshold or alternate regularization is introduced.
     """
-    log.info("V2PM -> P2VM")
     n_wave = v2pm_matrix.shape[-1]
     p2vm = np.zeros((layout.n_data, layout.n_outputs, n_wave))
     for wave_index in range(n_wave):
@@ -635,7 +633,7 @@ def _apply_phase_reference(
     the residual chromatic GD with T4-anchored telescope phasors, then subtract
     the integrated reference phase. The caller rebuilds and reinverts V2PM.
     """
-    log.info("Applying phase-reference correction...")
+    log.info("applying the phase reference (%d frames)", reference_spectra.shape[1])
     phase_rad = phase_rad.copy()
     channels = np.einsum("dow,ofw->fdw", p2vm, reference_spectra)
     coherent_adu = channels[:, layout.real_slice, :] + 1j * channels[:, layout.imag_slice, :]
@@ -891,6 +889,7 @@ def read_scan_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float]) -> NDArra
     return np.asarray(positions)
 
 
+@step("P2VM")
 def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
         phase_file=None, phase_dark_file=None, dl_gain=None,
         keep_diagnostics=False, gd_search_min_m=-30e-6, gd_search_max_m=30e-6) -> dict[str, Path]:

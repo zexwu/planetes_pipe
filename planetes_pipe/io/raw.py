@@ -22,6 +22,8 @@ from planetes_pipe.io.keywords import DIT, DPR_TYPE, PRO_CATG, QC_SATURATED, SHU
 
 # Raw value at which the detector's 12-bit readout clips. A clipped sample is not
 # a measurement: fringes and fluxes computed from it are biased low.
+log = logging.getLogger(__name__)
+
 SATURATION_ADU = 4095
 
 # Raw SOF tag -> ESO DPR TYPE of the raw file.
@@ -196,7 +198,7 @@ def record_saturation(header: afits.Header, raws: dict[str, Raw], pixels=None) -
         QC_SATURATED.at(label).set(header, count)
         if count:
             name = raw.path.name if raw.path else label
-            logging.getLogger("planetes_pipe").warning(
+            log.warning(
                 "%s: %d samples at the %d ADU saturation level; results from those pixels "
                 "are biased. Lower the exposure or the source.", name, count, SATURATION_ADU)
 
