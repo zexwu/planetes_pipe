@@ -12,7 +12,7 @@ from fixtures import RawMetadata, cards, write_raw
 from planetes_pipe.instrument import layout
 from planetes_pipe.io.raw import read_raws, write_shutters
 from planetes_pipe.steps.dark import Bad, Dark
-from planetes_pipe.steps.flat import build_flat, make_flat
+from planetes_pipe.steps.flat import build_flat, make_flat, trace_spectrum
 
 
 class FlatTests(unittest.TestCase):
@@ -39,6 +39,17 @@ class FlatTests(unittest.TestCase):
                 flat.trace_y_pixels[output, region], truth[output][region],
                 rtol=0, atol=0.03,
             )
+
+    def test_trace_is_followed_from_a_start_three_pixels_off(self):
+        # A lopsided profile's peak, which gives the start, can sit 2-3 pixels from
+        # its Gaussian centre; tracking must still accept the columns (2026-11-05).
+        height, width = 40, 200
+        y, x = np.indices((height, width))
+        image = 50 * np.exp(-0.5 * ((y - 20.0) / 2.5) ** 2)
+        bad = np.zeros(image.shape, dtype=np.int16)
+        centers, errors, sigma = trace_spectrum(image, bad, ref_x=100, ref_y=17, range_y=21)
+        self.assertTrue(np.isfinite(sigma).all())
+        np.testing.assert_allclose(centers, 20.0, atol=0.01)
 
     def test_flat_rejects_dark_shape_without_det_cards(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:

@@ -25,24 +25,13 @@ from planetes_pipe.plots.pages import (
     table,
     table_height,
 )
-from planetes_pipe.steps.p2vm import P2VM
+from planetes_pipe.steps.p2vm import P2VM, normalized_coherence
 
 PHOTOMETRY_RANGE = (0.7, 1.3)    # relative transmission of each output
 COHERENCE_RANGE = (0.80, 1.03)   # normalized coherence
 CENTRAL_BAND = (0.15, 0.85)      # fraction of the wavelength channels checked
 ALLOWED_OUTSIDE = 0.05           # of one spectrum's channels, over all baselines
 NOMINAL_PHASE_DEG = {"C": 180.0, "B": 90.0, "D": 270.0}  # relative to A
-
-
-def normalized_coherence(p2vm: P2VM) -> np.ndarray:
-    """Coherence / (2 sqrt(T1 T2)) of each baseline's outputs: (baseline, A/C/B/D, wavelength)."""
-    values = []
-    for b, (t1, t2) in enumerate(layout.baseline_pairs):
-        outputs = p2vm.baseline_outputs[b]
-        norm = 2 * np.sqrt(p2vm.transmission[outputs, t1] * p2vm.transmission[outputs, t2])
-        values.append(np.divide(p2vm.coherence_amplitude[outputs, b], norm,
-                                out=np.full_like(norm, np.nan), where=norm > 0))
-    return np.asarray(values)
 
 
 def relative_output_transmission(p2vm: P2VM) -> np.ndarray:

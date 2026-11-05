@@ -58,6 +58,30 @@ class P2VM:
     fit_rms_adu: NDArray | None = None  # (output, baseline, wavelength)
 
 
+def normalized_coherence(p2vm: P2VM) -> NDArray:
+    """Coherence / (2 sqrt(T1 T2)) of each baseline's outputs: (baseline, A/C/B/D, wavelength).
+
+    1 for an output that reaches full fringe contrast during the calibration scan.
+    """
+    values = []
+    for b, (t1, t2) in enumerate(layout.baseline_pairs):
+        outputs = p2vm.baseline_outputs[b]
+        norm = 2 * np.sqrt(p2vm.transmission[outputs, t1] * p2vm.transmission[outputs, t2])
+        values.append(np.divide(p2vm.coherence_amplitude[outputs, b], norm,
+                                out=np.full_like(norm, np.nan), where=norm > 0))
+    return np.asarray(values)
+
+
+def instrumental_visibility(p2vm: P2VM) -> NDArray:
+    """Fringe contrast of each baseline during the P2VM scan: (baseline, wavelength).
+
+    The mean of normalized_coherence over the four outputs. VISAMP is relative to it
+    (it is 1 for light as coherent as the calibration source), so VISAMP times this
+    is the fringe contrast of a frame.
+    """
+    return np.nanmean(normalized_coherence(p2vm), axis=1)
+
+
 @dataclass(slots=True)
 class P2VMSpectra:
     """In-memory P2VM fit inputs, not a FITS product."""
@@ -118,6 +142,12 @@ def extract_p2vm_spectra(flats: dict[str, Raw], scans: dict[str, Raw],
     return P2VMSpectra(telescope_spectra, baseline_spectra, outputs, extractor.wavelength_m)
 
 
+# A flat output counts as illuminated above this fraction of the telescope's
+# typical lit output (median of its 12 brightest); 2026-11-05 lit outputs reach
+# 0.25 of it, unlit ones 0.01.
+ILLUMINATED_FRACTION = 0.1
+
+
 def _identify_output_mapping(
     telescope_spectra: NDArray, baseline_spectra: NDArray
 ) -> dict[int, list[int]]:
@@ -138,16 +168,18 @@ def _identify_output_mapping(
 
     Notes
     -----
-    Select the 12 highest mean-flux outputs for each telescope and the four
-    highest temporal-modulation outputs for each baseline. Require the two
-    illuminated telescope sets' intersection to equal the modulated set, otherwise
-    raise ValueError. Ranking alone does not establish a signal-to-noise threshold.
+    A telescope illuminates the outputs whose mean flux exceeds ILLUMINATED_FRACTION
+    of the median of its 12 brightest (a weak output still counts; an unlit one,
+    at the noise level, does not). Each baseline modulates its four highest
+    temporal-modulation outputs. Require the two illuminated telescope sets'
+    intersection to equal the modulated set, otherwise raise ValueError.
     """
-    illuminated = {}
+    illuminated, fluxes = {}, {}
     for telescope, flux in enumerate(telescope_spectra):
         mean_flux = flux.mean(axis=(1, 2))
-        active = np.argsort(mean_flux)[-layout.n_outputs // 2 :]
-        illuminated[telescope] = np.sort(active).tolist()
+        typical = np.median(np.sort(mean_flux)[-layout.n_outputs // 2:])
+        illuminated[telescope] = np.flatnonzero(mean_flux > ILLUMINATED_FRACTION * typical).tolist()
+        fluxes[telescope] = mean_flux
 
     modulated = {}
     for baseline, flux in enumerate(baseline_spectra):
@@ -160,11 +192,14 @@ def _identify_output_mapping(
         from_flats = set(illuminated[telescope_1]) & set(illuminated[telescope_2])
         from_scan = set(modulated[baseline])
         if from_flats != from_scan:
+            shown = sorted(from_flats | from_scan)
             raise ValueError(
                 f"Output mapping mismatch for baseline {layout.baselines[baseline]}: "
                 f"{sorted(from_flats)} from flats, "
-                f"{sorted(from_scan)} from modulation"
-            )
+                f"{sorted(from_scan)} from modulation; flat flux [ADU] of outputs {shown}: "
+                + "; ".join(f"T{layout.telescopes[t]} "
+                            + ", ".join(f"{fluxes[t][o]:.0f}" for o in shown)
+                            for t in (telescope_1, telescope_2)))
         baseline_outputs[baseline] = sorted(modulated[baseline])
     return baseline_outputs
 

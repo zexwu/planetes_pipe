@@ -28,6 +28,22 @@ from planetes_pipe.steps.wave import read_wave
 
 
 class WavelengthGridTests(unittest.TestCase):
+    def test_output_mapping_counts_weak_outputs_and_names_fluxes_on_mismatch(self):
+        from planetes_pipe.steps.p2vm import _identify_output_mapping
+        rng = np.random.default_rng(5)
+        flats = rng.uniform(0, 2, (4, 24, 1, 1))  # unlit outputs at the noise level
+        scans = rng.uniform(0, 1, (6, 24, 3, 1))
+        for baseline, (t1, t2) in enumerate(layout.baseline_pairs):
+            outputs = slice(4 * baseline, 4 * baseline + 4)
+            flats[[t1, t2], outputs] = 100
+            scans[baseline, outputs] = [[0], [50], [100]]
+        flats[1, 0] = 25  # a weak but lit output of S4-S3 (2026-11-05)
+        mapping = _identify_output_mapping(flats, scans)
+        self.assertEqual(mapping, {b: list(range(4 * b, 4 * b + 4)) for b in range(6)})
+        flats[1, 0] = 1  # now unlit by T3: the baseline's outputs disagree
+        with self.assertRaisesRegex(ValueError, r"mismatch for baseline 43: .*T3 1, 100"):
+            _identify_output_mapping(flats, scans)
+
     def test_intersection_at_native_sampling_and_fits_roundtrip(self):
         *_, flat, wave = calibration_arrays(n_wave=11)
         flat.trace_x_range[:] = [1, 9]

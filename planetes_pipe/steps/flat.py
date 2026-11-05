@@ -308,6 +308,9 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
     -----
     Accept an update only if its center moves < 2 pixels and its error is < 0.5
     pixel. These criteria and the low-sample fallback are fixed bench choices.
+    ref_y need only be near the trace: the start is the background-subtracted
+    centroid at ref_x, recentred three times, since a lopsided profile's peak (where
+    ref_y usually comes from) can lie 2-3 pixels from its Gaussian center.
     """
     ny, nx = image.shape
     y_centers = np.full(nx, np.nan)
@@ -349,12 +352,30 @@ def trace_spectrum(image, bad_mask, ref_x, ref_y, range_y):
         return popt
 
     col = image[:, ref_x]
-    p0 = np.array([col.max() - np.median(col), ref_y, 3, np.median(col)])
+    p0 = np.array([col.max() - np.median(col), _seed_center(image, bad_mask, ref_x, ref_y,
+                                                            range_y), 3, np.median(col)])
 
     _scan(ref_x, nx, 1, p0)
     _scan(ref_x - 1, -1, -1, p0)
 
     return y_centers, y_errs, widths
+
+def _seed_center(image, bad_mask, x, y_start, range_y, iterations=3) -> float:
+    """Centroid of column x above its window minimum, recentring the window each time."""
+    center = float(y_start)
+    for _ in range(iterations):
+        y0 = int(max(0, round(center) - range_y // 2))
+        y1 = int(min(image.shape[0], y0 + range_y))
+        valid = bad_mask[y0:y1, x] == 0
+        if valid.sum() < 5:
+            break
+        z = image[y0:y1, x][valid]
+        z = z - z.min()
+        if not z.sum() > 0:
+            break
+        center = float(np.sum(np.arange(y0, y1)[valid] * z) / z.sum())
+    return center
+
 
 @njit(parallel=True, fastmath=True, cache=True)
 def extract_sparse_spectra(cube: NDArray, ys: NDArray, xs: NDArray) -> NDArray:
