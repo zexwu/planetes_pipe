@@ -66,6 +66,10 @@ TRACE_BACKGROUND_SIGMA = 5.0
 TRACE_SIGNAL_WINDOW = 11
 
 
+# Warn below this ratio of the weakest trace's profile prominence to the next peak's.
+TRACE_PROMINENCE_MARGIN = 3.0
+
+
 def _trace_illumination(
     image: NDArray, bad_mask: NDArray, ref_y: int, range_y: int
 ) -> tuple[NDArray, int]:
@@ -205,16 +209,25 @@ def build_flat(
     h, w = flat_map.shape
     h_half = h // n_outputs // 2
 
+    # The traces are the n_outputs most prominent peaks of the row profile. No height
+    # cut: with unequal telescope fluxes (19:1 on 2026-11-05) the traces of the faint
+    # telescopes lie below the bright ones' base, but stand well above the noise.
     profile = flat_map.sum(axis=1)
-    thresh = np.percentile(profile, 75)
-    ref_ys, props = find_peaks(profile, distance=h_half, height=thresh)
-    log.debug("%d profile peaks above %.0f ADU (75th percentile)", len(ref_ys), thresh)
+    ref_ys, props = find_peaks(profile, distance=h_half, prominence=0)
     if len(ref_ys) < n_outputs:
         raise ValueError(
             f"Expected {n_outputs} spectral traces, found only {len(ref_ys)}"
         )
+    prominence = np.sort(props["prominences"])[::-1]
+    margin = prominence[n_outputs - 1] / prominence[n_outputs] if len(ref_ys) > n_outputs \
+        else np.inf
+    log.debug("weakest trace %.0f ADU prominent, %.1f times the strongest other peak",
+              prominence[n_outputs - 1], margin)
+    if margin < TRACE_PROMINENCE_MARGIN:
+        log.warning("the weakest of %d traces is only %.1f times as prominent as the next "
+                    "profile peak; the traces may be misidentified", n_outputs, margin)
 
-    top_indices = np.argsort(props["peak_heights"])[-n_outputs:]
+    top_indices = np.argsort(props["prominences"])[-n_outputs:]
     ref_ys = np.sort(ref_ys[top_indices])
 
     traces = []

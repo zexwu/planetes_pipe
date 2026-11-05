@@ -40,6 +40,19 @@ class FlatTests(unittest.TestCase):
                 rtol=0, atol=0.03,
             )
 
+    def test_faint_telescope_traces_are_found_beside_bright_ones(self):
+        # 2026-11-05 17:02: T4 about 19 times T1, so the traces lit only by the faint
+        # telescopes lay below the profile's 75th percentile, once the detection cut.
+        height, width = 25 * 34, 120
+        y, x = np.indices((height, width))
+        image = np.random.default_rng(3).normal(0, 0.05, (height, width))
+        centres = 17 + 34 * np.arange(25)
+        for n, centre in enumerate(centres):
+            image += (1000 if n >= 9 else 40) * np.exp(-0.5 * ((y - centre) / 4.0) ** 2)
+        flat = build_flat([image] * 4, Bad(np.zeros(image.shape, dtype=np.int16)),
+                          n_outputs=25)
+        np.testing.assert_allclose(flat.trace_y_pixels[:, 60], centres, atol=0.05)
+
     def test_trace_is_followed_from_a_start_three_pixels_off(self):
         # A lopsided profile's peak, which gives the start, can sit 2-3 pixels from
         # its Gaussian centre; tracking must still accept the columns (2026-11-05).
