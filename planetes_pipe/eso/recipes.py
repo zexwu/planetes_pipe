@@ -41,6 +41,8 @@ HELP = {
     "keep_diagnostics": "Retain P2VM scan and fit diagnostics in the calibration product",
     "gd_search_min_m": "Coarse GD lower initialization [m]; Newton remains unconstrained",
     "gd_search_max_m": "Coarse GD upper initialization [m]; Newton remains unconstrained",
+    "wave_min_m": "Shortest wavelength of the P2VM band [m]; 0 keeps the whole common band",
+    "wave_max_m": "Longest wavelength of the P2VM band [m]; 1 keeps the whole common band",
     "dl_gain": "OPD per delay-line travel per baseline, e.g. 43:-1,42:-1,41:-1,32:1,31:-1,"
                "21:-1, for scans recorded without DL_SCAN OPDGAIN; must agree with it",
 }

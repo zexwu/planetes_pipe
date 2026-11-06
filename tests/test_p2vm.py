@@ -63,6 +63,17 @@ class WavelengthGridTests(unittest.TestCase):
         wave.wavelength_map_m[:] = wave.wavelength_map_m[:, ::-1]
         np.testing.assert_allclose(wavelength_grid(restored, wave), expected)
 
+    def test_wavelength_grid_can_be_limited(self):
+        flat, wave = calibration_arrays(n_wave=15)[-2:]
+        full = wavelength_grid(flat, wave)
+        low, high = full[len(full) // 4], full[3 * len(full) // 4]
+        limited = wavelength_grid(flat, wave, low, high)
+        self.assertGreaterEqual(limited.min(), low)
+        self.assertLessEqual(limited.max(), high)
+        self.assertLess(len(limited), len(full))
+        with self.assertRaisesRegex(ValueError, "no common illuminated"):
+            wavelength_grid(flat, wave, high * 2, high * 3)
+
     def test_missing_limits_do_not_use_extrapolated_band(self):
         *_, flat, wave = calibration_arrays(n_wave=11)
         flat.trace_x_range = None

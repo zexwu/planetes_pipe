@@ -1,3 +1,8 @@
+# PLANETES 0.33.0：可限制 P2VM 波段
+
+- `p2vm.run` 增加 `wave_min_m`、`wave_max_m`，限制 P2VM 的波段。默认不限制；bench 的 `reduce_night.py` 和
+  `examples/reduce_calibrations.py` 设为 1100-1270 nm，避开 SuperK 泵浦（约 1064 nm）和两端的弱光部分。
+
 # PLANETES 0.32.0：S3-S2 的方向；迹线跟踪窗口
 
 - P2VM 现在统一基线方向（`C_ij = E_i E_j*`）。扫描的 `OPDGAIN`（或 `dl_gain`）为正的基线（目前只有 S3-S2）的

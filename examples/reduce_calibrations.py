@@ -34,6 +34,7 @@ def main():
     p2vm_out = p2vm.run(main_dark["DARK"], flat_out["FLAT"], wave_out["WAVE"], flat_raws,
                         scan_raws, output_dir=OUTPUT, dl_gain=DL_GAIN,
                         gd_search_min_m=-100e-6, gd_search_max_m=100e-6,
+                        wave_min_m=1100e-9, wave_max_m=1270e-9,  # Avoids the SuperK pump, ~1064 nm.
                         keep_diagnostics=True)
     for out in (main_dark, lamp_dark, flat_out, wave_out, p2vm_out):
         for product in out.values():

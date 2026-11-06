@@ -92,18 +92,20 @@ class P2VMSpectra:
     wavelength_m: NDArray
 
 
-def wavelength_grid(flat: Flat, wave: Wave) -> NDArray:
+def wavelength_grid(flat: Flat, wave: Wave, wave_min_m: float = 0.0, wave_max_m: float = 1.0
+                    ) -> NDArray:
     """Common illuminated band, sampled at the median native pixel wavelengths.
 
     FLAT stores inclusive accepted trace-fit limits. Intersect their WAVE
     coverage, then retain the median output wavelength at each detector column.
-    This keeps native pixel sampling without a manual band or channel count.
+    This keeps native pixel sampling without a channel count. wave_min_m and
+    wave_max_m limit the band further, e.g. to leave out a source's bright line.
     """
     if flat.trace_x_range is None:
         raise ValueError("FLAT has no trace-fit limits; regenerate it before making P2VM")
     edges = np.take_along_axis(wave.wavelength_map_m, flat.trace_x_range, axis=1)
-    lower = edges.min(axis=1).max()
-    upper = edges.max(axis=1).min()
+    lower = max(edges.min(axis=1).max(), wave_min_m)
+    upper = min(edges.max(axis=1).min(), wave_max_m)
     native = np.median(wave.wavelength_map_m, axis=0)
     grid = np.sort(native[(native >= lower) & (native <= upper)])
     if len(grid) < 2:
@@ -986,20 +988,22 @@ def find_reversed_baselines(scans: dict[str, Raw], dl_gain: Mapping[str, float] 
 @step("P2VM")
 def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
         phase_file=None, phase_dark_file=None, dl_gain=None,
-        keep_diagnostics=False, gd_search_min_m=-30e-6, gd_search_max_m=30e-6) -> dict[str, Path]:
+        keep_diagnostics=False, gd_search_min_m=-30e-6, gd_search_max_m=30e-6,
+        wave_min_m=0.0, wave_max_m=1.0) -> dict[str, Path]:
     """planetes_p2vm: four flats + six baseline scans + DARK, FLAT, WAVE -> P2VM.
 
     phase_file is an optional all-shutters-open exposure used as instrumental phase
     reference, with phase_dark_file if its DIT differs from the scans. The scans'
     DL_SCAN tables guide phase unwrapping with their recorded OPDGAIN; dl_gain
     ({'43': -1, ...}) supplies it for scans recorded without one (see read_scan_opd).
+    wave_min_m and wave_max_m limit the P2VM's wavelength band; the defaults do not.
     """
     dark, flat, wave = read_dark(dark_file), read_flat(flat_file), read_wave(wave_file)
     flats = read_raws(flat_files, "FLAT_RAW", layout.telescopes)
     scans = read_raws(scan_files, "P2VM_RAW", layout.baselines)
 
     # Extract every input on the common illuminated wavelength grid.
-    extractor = prepare_extraction(flat, wave, wavelength_grid(flat, wave))
+    extractor = prepare_extraction(flat, wave, wavelength_grid(flat, wave, wave_min_m, wave_max_m))
     spectra = extract_p2vm_spectra(flats, scans, extractor, dark, flat)
 
     phase_spectra = None
@@ -1024,7 +1028,8 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
         inputs["PHASE_REFERENCE"] = [phase_file]
     if phase_dark_file is not None:
         inputs["PHASE_DARK_CALIB"] = [phase_dark_file]
-    header = products.provenance("planetes_p2vm", reference, inputs, dl_gain=dl_gain, **options)
+    header = products.provenance("planetes_p2vm", reference, inputs, dl_gain=dl_gain,
+                                    wave_min_m=wave_min_m, wave_max_m=wave_max_m, **options)
     record_saturation(header, {**{f"T{t}": raw for t, raw in flats.items()},
                                **{f"SC{b}": raw for b, raw in scans.items()}},
                       flat.extracted_pixels())
