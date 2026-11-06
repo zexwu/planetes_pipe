@@ -26,15 +26,20 @@ Subtraction only consumes mean_adu; BAD detection requires measured temporal RMS
 ## Flat and traces (`steps/flat.py`)
 
 Subtract the explicitly selected dark mean from each telescope's mean flat and average
-those four maps. Collapse along dispersion, select the strongest 24 spatial
-peaks, trace a Gaussian centroid column by column, then smooth with the retained
-median filter and cubic fit. Gaussian iteration counts and arithmetic are unchanged.
+those four maps. Collapse along dispersion and select the most prominent 24 (or 25,
+with the metrology trace) spatial peaks, whatever their height: telescope fluxes can
+differ by 19:1. Average the map over 21 columns, so faint parts can be followed, and
+trace a Gaussian centre column by column from the brightest column, starting from a
+recentred centroid. Then smooth with the retained median filter and cubic fit.
 
 The raw mean image and selected DARK must have exactly the same detector shape,
 including when DARK setup metadata is unknown; NumPy broadcasting is not accepted.
-For the cubic trace fit, the fixed bench selection uses center error < 0.5 pixel
-and columns `50 < x < nx - 50`, after a three-column median filter. These are
-existing fit/edge choices, not adaptive quality thresholds derived per exposure.
+The cubic fit uses columns with a center error < 0.5 pixel and an accepted width,
+after a three-column median filter, whose signal exceeds five background MAD sigmas in
+a window following the trace (traces are tilted, and leave any fixed strip). A
+fraction of each trace's peak is not used: the range would depend on its brightest
+feature. The fit and the saved x range cover the longest run of such columns, across
+gaps of up to 20 columns. These are fixed choices, not derived per exposure.
 
 Accept pixels under the original strict inequality
 `abs(y - trace_y) < aperture_width_pixels / 2`, excluding the explicitly selected BAD map. Sparse X/Y arrays
@@ -72,11 +77,13 @@ by the target-grid flat response to preserve the original flux scale. That
 response is `1 / interpolate(1 / detector_flat)`, not direct interpolation of the
 flat. The interpolation is pointwise in wavenumber, not an integral over bins.
 
-P2VM calibration defines its explicit target grid (default 1.15e-6–1.30e-6 m, 151
-channels). Science and live processing consume this saved grid. Every output
-must cover it fully; detector dimensions, sparse geometry and wavelength ordering
-are checked before extraction. Calibration files are selected explicitly by the caller. The target grid
-must lie within each output's wavelength coverage exactly.
+P2VM calibration defines its explicit target grid: the wavelength range covered by
+the fitted x range of every output, at the median native pixel wavelengths, limited
+further by `wave_min_m` and `wave_max_m` (the bench uses 1100-1270 nm, which leaves out
+the SuperK pump near 1064 nm and the faint band edges). Science and live processing
+consume this saved grid. Every output must cover it fully; detector dimensions, sparse
+geometry and wavelength ordering are checked before extraction. Calibration files are
+selected explicitly by the caller.
 
 File workflows receive explicit telescope/baseline path mappings. SOF shutter
 identification is performed by the recipe before calling these workflows. Each
@@ -127,6 +134,12 @@ Normalization retains its existing order and arithmetic:
    telescope/wavelength. Both divisions remain to preserve floating arithmetic.
 3. Solve transmission against each baseline's DC terms with `pinv`; divide its
    amplitude by `sqrt(P_i*P_j)`. Nonfinite/nonpositive products fail locally.
+4. Give all baselines the orientation `C_ij = E_i E_j*`, for which the OPD of baseline
+   ij falls as the delay line of its second telescope moves out (OPD gain -1). A
+   baseline whose scan records a positive gain has its response phases negated, so
+   its reduced VISDATA, GD and closure phases follow the same convention. On
+   2026-11-05 this is S3-S2 alone, whose B-A then reads 270 deg instead of 90. Without
+   it, closure phases containing that baseline do not close.
 
 V2PM has axes `(24 outputs, 16 data channels, wavelength)`: columns T4,T3,T2,T1,
 then six real and six imaginary coherent components in 43,42,41,32,31,21 order.
@@ -169,13 +182,29 @@ coherent flux yield NaN and flags. Full reduction also computes coherent-sum
 GD with Newton refinement and the original differential phase.
 
 Default coarse GD ranges are ±30e-6 m for calibration and ±100e-6 m for science,
-with the retained physical 1e-8 m step. Newton refinement is unconstrained by these
-initialization bounds. Real-time reduction can skip GD/phase diagnostics while
-sharing extraction, normalization and flags. It always receives raw unbinned
-frames. Display binning belongs to the consuming application.
+with a 1e-8 m step. Newton refinement is unconstrained by these initialization bounds.
+Real-time reduction shares extraction, normalization and flags, with a 0.5e-6 m step
+for speed. It always receives raw unbinned frames. Display binning belongs to the
+consuming application.
 
-Flux is instrumental ADU. No new uncertainty model, transfer-function correction,
-closure-phase definition or OIFITS/Phase 3 product is introduced here.
+Errors follow GRAVITY's `gravi_p2vm_reduce`. The variance of an extracted spectrum is
+its signal over the gain plus the read noise, the DARK's temporal variance summed over
+the aperture; both are scaled and resampled as the signal, neglecting resampling
+correlations. It goes through the squared P2VM inverse, neglecting correlations between
+outputs, to give FLUXERR and VISERR. CHI2 compares the outputs with the V2PM model of
+the reduced channels, with 8 degrees of freedom. SNR is
+`|sum VISDATA| / sqrt(sum |VISERR|^2)` over the unflagged wavelengths of a frame. The
+gain, 36 e-/ADU, is a photon-transfer fit to the frame differences of the 2026-11-05
+flats (34-40 across the four flats); it is a constant, not measured per exposure.
+
+Closure quantities use the bispectrum `C_ij C_jk conj(C_ik)` of telescopes i,j,k, as
+GRAVITY, in the descending telescope order 432, 431, 421, 321. T3AMP is the product of
+the three VISAMP. T3PHIERR adds the relative errors of the three coherent fluxes in
+quadrature, neglecting flux noise in the amplitudes' normalization.
+
+Flux is instrumental ADU. No transfer-function correction or OIFITS/Phase 3 product is
+introduced here. TIME assumes one frame per DIT from MJD-OBS, as the camera records no
+per-frame timestamps.
 
 ## File representations and QC
 
