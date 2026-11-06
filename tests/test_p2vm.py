@@ -18,6 +18,7 @@ from planetes_pipe.steps.p2vm import (
     build_v2pm,
     extract_p2vm_spectra,
     fit_abcd_ellipse,
+    find_reversed_baselines,
     fit_p2vm,
     read_scan_opd,
     unwrap_scan_phase,
@@ -227,12 +228,39 @@ class P2VMTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "records OPDGAIN"):
                 read_scan_opd(scans, flipped)
 
+    def test_positive_opd_gain_marks_a_reversed_baseline(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            gains = {b: (1 if b == "32" else -1) for b in layout.baselines}
+            scans = self.write_scans(directory, recorded=gains)
+            self.assertEqual(find_reversed_baselines(scans), [layout.baselines.index("32")])
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
+            scans = self.write_scans(directory)
+            self.assertEqual(find_reversed_baselines(scans), [])
+            self.assertEqual(find_reversed_baselines(scans, gains),
+                             [layout.baselines.index("32")])
+
     def test_no_opd_gain_warns_and_gives_no_guide(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             scans = self.write_scans(directory)
             with self.assertLogs("planetes_pipe", "WARNING") as logs:
                 self.assertIsNone(read_scan_opd(scans))
             self.assertIn("unwrapped from the fringes alone", logs.output[0])
+
+class ReversedBaselineTests(unittest.TestCase):
+    def test_reversing_a_baseline_conjugates_only_its_coherent_flux(self):
+        spectra = calibration_spectra(n_wave=15)
+        science = calibration_arrays(n_wave=15)[2]
+        reversed_index = layout.baselines.index("32")
+        normal = reduce_spectra(science, fit_p2vm(spectra), include_phase=False)
+        turned = reduce_spectra(science, fit_p2vm(spectra, reversed_baselines=[reversed_index]),
+                                include_phase=False)
+        others = [b for b in range(len(layout.baselines)) if b != reversed_index]
+        np.testing.assert_allclose(np.angle(turned.coherent_flux_adu[:, reversed_index]),
+                                   -np.angle(normal.coherent_flux_adu[:, reversed_index]), atol=1e-8)
+        np.testing.assert_allclose(turned.coherent_flux_adu[:, others],
+                                   normal.coherent_flux_adu[:, others], atol=1e-8)
+        np.testing.assert_allclose(turned.visibility_amplitude, normal.visibility_amplitude, atol=1e-8)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,7 @@
 """plots/: one portrait report per product category, the P2VM quality checks, no overwriting."""
 import re
 import tempfile
+from dataclasses import replace
 import unittest
 from pathlib import Path
 
@@ -51,6 +52,14 @@ class PlotTests(unittest.TestCase):
             n_sections = len(p2vm_pages.sections(self.p2vm))
             self.assertGreaterEqual(n_sections, 15)  # quality ... phase residual, as GRAVITY + scans
             self.assertLess(page_count(Path(tmp) / "x_p2vm.pdf"), n_sections)  # sections share pages
+
+    def test_output_phase_near_180_is_not_averaged_across_the_wrap(self):
+        phase = self.p2vm.coherence_phase_rad.copy()
+        output_c = self.p2vm.baseline_outputs[0][1]
+        n_wave = phase.shape[-1]
+        phase[output_c, 0] = np.pi + 0.1 * np.where(np.arange(n_wave) % 2, 1, -1)
+        phases = p2vm_pages.output_phases_deg(replace(self.p2vm, coherence_phase_rad=phase))
+        self.assertAlmostEqual(phases[0, 1], 180.0, delta=4)
 
     def test_a_file_without_a_known_category_is_refused(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:

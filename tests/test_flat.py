@@ -40,6 +40,18 @@ class FlatTests(unittest.TestCase):
                 rtol=0, atol=0.1,  # tracing averages columns: 0.07 px across this steep band edge
             )
 
+    def test_a_tilted_trace_keeps_its_range_after_leaving_the_starting_strip(self):
+        # Output 23 of 2026-11-05: 21 px of tilt carried it out of a strip fixed at its
+        # peak, and its fitted range stopped there though it stayed bright.
+        height, width = 120, 400
+        y, x = np.indices((height, width))
+        image = np.random.default_rng(1).normal(0, 0.05, (height, width))
+        trace = 80 - 0.15 * np.arange(width)
+        image += 100 * np.exp(-0.5 * ((y - trace[None]) / 2.0) ** 2)
+        image += np.where(x > 300, 100, 0) * np.exp(-0.5 * ((y - trace[None]) / 2.0) ** 2)
+        flat = build_flat([image] * 4, Bad(np.zeros(image.shape, dtype=np.int16)), n_outputs=1)
+        self.assertLess(flat.trace_x_range[0, 0], 50)
+
     def test_faint_telescope_traces_are_found_beside_bright_ones(self):
         # 2026-11-05 17:02: T4 about 19 times T1, so the traces lit only by the faint
         # telescopes lay below the profile's 75th percentile, once the detection cut.

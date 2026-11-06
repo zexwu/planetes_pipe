@@ -48,8 +48,8 @@ def central_band(p2vm: P2VM) -> slice:
 def output_phases_deg(p2vm: P2VM) -> np.ndarray:
     """Phase of each baseline's outputs relative to A over the central band: (baseline, 4)."""
     band = central_band(p2vm)
-    phases = [np.angle(np.exp(1j * p2vm.coherence_phase_rad[p2vm.baseline_outputs[b], b, band])
-                       ).mean(axis=1) for b in range(len(layout.baselines))]
+    phases = [np.angle(np.exp(1j * p2vm.coherence_phase_rad[p2vm.baseline_outputs[b], b, band]
+                              ).mean(axis=1)) for b in range(len(layout.baselines))]
     return np.rad2deg(np.asarray(phases)) % 360
 
 
@@ -257,7 +257,8 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
                     f"{(phases[b, 3] - phases[b, 2]) % 360:.1f}"] for b in range(n)]
     out.append(Section("Wavelength averaged phases of combiner outputs (degrees, A=0)", lambda fig: table(
         fig, phase_cells, ["C−A", "B−A", "D−A", "D−B"], names), table_height(n),
-        "$\\theta_{ob} - \\theta_{Ab}$ over the central band. Nominal: C−A 180, B−A 90, D−A 270, D−B 180."))
+        "$\\theta_{ob} - \\theta_{Ab}$ over the central band. Nominal: C−A 180, B−A 90, D−A 270, D−B 180; "
+        "a baseline with a reversed fringe direction (positive OPDGAIN) has B−A 270, D−A 90."))
 
     def draw_phases(fig):
         axes = baseline_panels(fig, "Wavelength [nm]", "Phase relative to A [deg]", sharey=True)

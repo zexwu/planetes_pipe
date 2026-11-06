@@ -75,26 +75,40 @@ TRACE_MAX_GAP_COLUMNS = 20
 TRACE_PROMINENCE_MARGIN = 3.0
 
 
-def _trace_illumination(
-    image: NDArray, bad_mask: NDArray, ref_y: int, range_y: int
-) -> tuple[NDArray, int]:
-    """Select bright columns from a masked spatial strip; return mask and seed x.
-
-    Signal is the spatial 90th percentile minus the median of the outer three
-    rows on each side. An 11-column median smooths only the selection signal.
-    Require five background-pixel MAD sigmas: a fraction of the trace's peak would
-    make the range depend on its brightest feature (2026-11-05: the SuperK pump).
-    This is a trace-selection threshold, not a propagated photometric S/N estimate.
-    """
+def _trace_seed(image: NDArray, bad_mask: NDArray, ref_y: int, range_y: int) -> int:
+    """The column where a trace is brightest, in a strip about ref_y: tracking starts there."""
     y0 = max(0, int(ref_y) - range_y // 2)
     strip = image[y0 : y0 + range_y].copy()
     strip[bad_mask[y0 : y0 + range_y] != 0] = np.nan
-    edges = np.concatenate((strip[:3], strip[-3:]))
-    background = np.nanmedian(edges, axis=0)
-    noise = 1.4826 * np.nanmedian(abs(edges - background))
+    background = np.nanmedian(np.concatenate((strip[:3], strip[-3:])), axis=0)
     signal = np.nan_to_num(np.nanpercentile(strip, 90, axis=0) - background)
+    return int(median_filter(signal, size=TRACE_SIGNAL_WINDOW, mode="nearest").argmax())
+
+
+def _trace_illumination(
+    image: NDArray, bad_mask: NDArray, centers: NDArray, range_y: int
+) -> NDArray:
+    """Columns where a trace stands above the background, in a window following its centre.
+
+    Signal is the spatial 90th percentile minus the median of the outer three rows on
+    each side; an 11-column median smooths only the selection signal. Require five
+    background-pixel MAD sigmas. The window follows the tracked centres: traces are
+    tilted, and leave any fixed strip. A fraction of the trace's peak is not used, as
+    the range would depend on its brightest feature (2026-11-05: the SuperK pump).
+    This is a trace-selection threshold, not a propagated photometric S/N estimate.
+    """
+    height, width = image.shape
+    columns = np.arange(width)
+    top = np.clip(np.rint(np.nan_to_num(centers)).astype(int) - range_y // 2, 0, height - range_y)
+    rows = top[:, None] + np.arange(range_y)
+    strip = image[rows, columns[:, None]].astype(float)  # (x, y in the window)
+    strip[bad_mask[rows, columns[:, None]] != 0] = np.nan
+    edges = np.concatenate((strip[:, :3], strip[:, -3:]), axis=1)
+    background = np.nanmedian(edges, axis=1)
+    noise = 1.4826 * np.nanmedian(np.abs(edges.T - background))
+    signal = np.nan_to_num(np.nanpercentile(strip, 90, axis=1) - background)
     signal = median_filter(signal, size=TRACE_SIGNAL_WINDOW, mode="nearest")
-    return signal > TRACE_BACKGROUND_SIGMA * noise, int(signal.argmax())
+    return signal > TRACE_BACKGROUND_SIGMA * noise
 
 
 def _average_columns(image: NDArray, bad_mask: NDArray) -> tuple[NDArray, NDArray]:
@@ -260,10 +274,11 @@ def build_flat(
 
     for i, ref_y in enumerate(ref_ys):
         xs = np.arange(w)
-        illuminated, ref_x = _trace_illumination(smoothed, smoothed_bad, ref_y, h_half)
+        ref_x = _trace_seed(smoothed, smoothed_bad, ref_y, h_half)
         ys, ys_err, sigma = trace_spectrum(
             smoothed, smoothed_bad, ref_x=ref_x, ref_y=ref_y, range_y=h_half
         )
+        illuminated = _trace_illumination(smoothed, smoothed_bad, ys, h_half)
 
         # Smooth isolated column fluctuations before the global cubic trace fit.
         ys_med = medfilt(ys, kernel_size=3)

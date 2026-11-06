@@ -8,7 +8,7 @@ QC; FITS; run().
 """
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -209,6 +209,7 @@ def fit_p2vm(
     *,
     phase_reference: NDArray | None = None,
     scan_opd_m: NDArray | None = None,
+    reversed_baselines: Sequence[int] = (),
     keep_diagnostics: bool = False,
     gd_search_min_m: float = -30e-6,
     gd_search_max_m: float = 30e-6,
@@ -229,6 +230,10 @@ def fit_p2vm(
         Recorded mechanical positions converted to an OPD guide [m], shaped
         (6 baselines, frame). It chooses integer phase cycles only; measured
         ellipse phase still supplies fine motion. None uses ordinary unwrap.
+    reversed_baselines : sequence of int, optional
+        Baseline indices whose fringes run opposite to the convention C_ij = E_i E_j*
+        (see find_reversed_baselines). Their response phases change sign, so the
+        reduced VISDATA, group delay and closure phases follow one convention.
     keep_diagnostics : bool, optional
         Retain scan OPD/GD, ellipse phase/radius, DC and residual RMS when True.
         This changes which arrays are returned, not the fit or inverse.
@@ -276,6 +281,10 @@ def fit_p2vm(
     _normalize_response_inplace(
         transmission, amplitude, phase_rad, dc_adu, spectra.baseline_outputs
     )
+    if len(reversed_baselines):
+        log.info("baseline orientation reversed for %s", ", ".join(
+            layout.baselines[b] for b in reversed_baselines))
+        phase_rad[:, list(reversed_baselines), :] *= -1
     p2vm = _invert_v2pm(build_v2pm(transmission, amplitude, phase_rad))
 
     # The instrumental reference changes phases, then requires a new inverse.
@@ -952,6 +961,28 @@ def read_scan_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = N
     return np.asarray(positions)
 
 
+def find_reversed_baselines(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = None
+                            ) -> list[int]:
+    """Baselines whose scan shows fringes opposite to the convention C_ij = E_i E_j*.
+
+    With that convention the OPD of baseline ij falls as the delay line of its second
+    telescope moves out: OPD gain -1. A positive recorded OPDGAIN (or dl_gain) therefore
+    means a reversed baseline, on 2026-11-05 S3-S2, whose closure phases only close once
+    corrected. A scan without a gain counts as not reversed; read_scan_opd warns about it.
+    """
+    found = []
+    for index, baseline in enumerate(layout.baselines):
+        try:
+            gain = afits.getheader(scans[baseline].path, "DL_SCAN").get("OPDGAIN")
+        except KeyError:
+            gain = None
+        if gain is None and dl_gain is not None:
+            gain = dl_gain[baseline]
+        if gain is not None and float(gain) > 0:
+            found.append(index)
+    return found
+
+
 @step("P2VM")
 def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
         phase_file=None, phase_dark_file=None, dl_gain=None,
@@ -982,7 +1013,9 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
 
     options = dict(keep_diagnostics=keep_diagnostics,
                    gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m)
-    product = fit_p2vm(spectra, phase_reference=phase_spectra, scan_opd_m=scan_opd_m, **options)
+    product = fit_p2vm(spectra, phase_reference=phase_spectra,
+                       reversed_baselines=find_reversed_baselines(scans, dl_gain),
+                       scan_opd_m=scan_opd_m, **options)
 
     reference = scans["43"].path  # Names the product and supplies its observation header.
     inputs = {"FLAT_RAW": flat_files, "P2VM_RAW": scan_files,
