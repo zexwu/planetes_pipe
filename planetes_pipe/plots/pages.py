@@ -158,6 +158,40 @@ def summary_section(path, header, rows) -> Section:
                    table_height(len(rows) - 1), "Identity of the product, from its header.")
 
 
+def _wrap(text: str, width: int = 120) -> str:
+    """Wrap an explanation at the given width without breaking a $formula$."""
+    parts = text.split("$")
+    parts[1::2] = [part.replace(" ", "\0") for part in parts[1::2]]
+    return textwrap.fill("$".join(parts), width).replace("\0", " ")
+
+
+DEFINITION_LINE = 0.2                      # one line of a definitions table, inches
+
+
+def definitions_section(rows) -> Section:
+    """How the report's quantities are defined: rows of (name, lines of definition).
+
+    Formulas are matplotlib mathtext; each line is drawn as written, so keep it short.
+    """
+    n_lines = sum(len(lines) for _, lines in rows)
+    height = DEFINITION_LINE * n_lines + 0.08
+
+    def draw(fig):
+        ax = fig.subplots()
+        ax.axis("off")
+        ax.set(xlim=(0, 1), ylim=(height, 0))
+        line = 0
+        for quantity, lines in rows:
+            y = 0.04 + DEFINITION_LINE * (line + 0.5)
+            ax.text(0, y, quantity, va="center", fontsize=7, weight="bold")
+            for offset, text in enumerate(lines):
+                ax.text(0.27, y + DEFINITION_LINE * offset, text, va="center", fontsize=7)
+            line += len(lines)
+        for y, width in ((0, 1.0), (height, 1.0)):
+            ax.plot([0, 1], [y, y], color="black", lw=width, clip_on=False)
+    return Section("Definitions", draw, height, "How the quantities in this report are computed.")
+
+
 def _pack(sections, usable: float):
     """Sections in order onto pages: a new page when the next one does not fit."""
     pages, current, used = [], [], 0.0
@@ -199,7 +233,7 @@ def write_pdf(path, title: str, sections, footer: str = "") -> Path:
             for area, section in zip(areas[1:-1], group):
                 head, body = area.subfigures(2, 1, height_ratios=[HEADING, section.height])
                 head.text(0.0, 0.7, section.title, fontsize=9.5, weight="bold", va="center")
-                head.text(0.0, 0.28, textwrap.fill(section.explanation, 120), fontsize=7,
+                head.text(0.0, 0.28, _wrap(section.explanation), fontsize=7,
                           color="0.4", va="center")
                 section.draw(body)
             pdf.savefig(fig)

@@ -1,3 +1,9 @@
+# PLANETES 0.29.2：报告说明每个量的定义
+
+- P2VM 和科学报告开头增加 Definitions 表（`pages.definitions_section`），给出透射率 T、相干度 C、
+  归一化相干度 V、VISAMP、群延迟等的公式；所有报告的小节说明也写明公式或定义。
+- 说明文字换行时不再拆开 `$公式$`。
+
 # PLANETES 0.29.1：望远镜通量悬殊时也能找到迹线
 
 - `flat.build_flat` 取行轮廓中最突出（prominence）的 24 或 25 个峰作为迹线，不再要求高于轮廓的

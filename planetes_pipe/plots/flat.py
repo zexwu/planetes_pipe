@@ -42,10 +42,10 @@ def sections(flat: Flat) -> list[Section]:
             ax.set_visible(False)
 
     result = [Section("FLAT image and traces", draw_image, 4.4,
-                      f"Combined flat with the {n_outputs} fitted traces and their output numbers; "
+                      f"Mean of the four dark-subtracted telescope flats, with the {n_outputs} fitted traces and their output numbers; "
                       "colour range 1–99.5 %."),
               Section("Trace centres", draw_traces, 7.4,
-                      "Fitted centre of each output (number in the corner) over its fitted columns; "
+                      "Cubic fit to the Gaussian centres of each output's columns (number in the corner); "
                       "common x axis, independent y scales.")]
     if flat.profile_sigma_pixels is not None:
         def draw_widths(fig):
@@ -57,11 +57,11 @@ def sections(flat: Flat) -> list[Section]:
                         color=colors[output % 4], alpha=0.8)
             ax.set(xlabel="Detector x [pixel]", ylabel="Profile width σ [pixel]")
         result.append(Section("Profile widths", draw_widths, 2.4,
-                              "Fitted spatial profile width of every output."))
+                              "$\\sigma$ of the Gaussian fitted across each output, per column."))
     if flat.telescope_flux_adu is not None:
         cells = [[f"{f:.4g}" for f in flat.telescope_flux_adu]]
         result.append(Section("Telescope fluxes (QC.FLATFLUX)",
                               lambda fig: table(fig, cells, [f"T{t}" for t in layout.telescopes],
                                                 ["ADU per DIT"]),
-                              table_height(1), "Total flux of each telescope's dark-subtracted flat."))
+                              table_height(1), "Sum of all pixels of each telescope's dark-subtracted mean flat."))
     return result

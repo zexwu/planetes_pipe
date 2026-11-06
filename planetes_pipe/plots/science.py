@@ -3,9 +3,24 @@ import numpy as np
 from matplotlib import colormaps
 
 from planetes_pipe.instrument import layout
-from planetes_pipe.plots.pages import GRID_HEIGHT, Section, baseline_name, name, panels
+from planetes_pipe.plots.pages import (
+    GRID_HEIGHT,
+    Section,
+    baseline_name,
+    definitions_section,
+    name,
+    panels,
+)
 from planetes_pipe.steps.science import P2VMRed
 
+DEFINITIONS = (
+    ("Reduction", [r"At each wavelength, $(P_t,\,C_{ij})$ = P2VM matrix $\times$ the 24 output fluxes of the frame."]),
+    ("Flux $P_t$", ["Photometric flux of telescope $t$, in ADU."]),
+    ("Coherent flux $C_{ij}$", ["Complex coherent flux of the baseline of telescopes $i,j$, in ADU."]),
+    ("VISAMP", [r"$|C_{ij}|\,/\,\sqrt{P_i P_j}$, relative to the calibration: 1 = as coherent as the P2VM source."]),
+    ("Group delay GD", [r"The delay that maximizes $|\sum_\lambda C_{ij}(\lambda)\,\exp(-2\pi i\,\mathrm{GD}/\lambda)|$."]),
+    ("Differential phase", [r"$\arg[\,C_{ij}\exp(-2\pi i\,\mathrm{GD}/\lambda)\,]$, minus its mean over wavelength."]),
+)
 
 
 def sections(reduced: P2VMRed, full: bool = False) -> list[Section]:
@@ -13,16 +28,17 @@ def sections(reduced: P2VMRed, full: bool = False) -> list[Section]:
 
     Needs a complete P2VMRed (with group delay and differential phase).
     """
-    out = [Section("Flux per telescope", lambda fig: _flux(fig, reduced), 3.4,
-                   "Wavelength-averaged flux of each frame minus its mean (printed)."),
+    out = [definitions_section(DEFINITIONS),
+           Section("Flux per telescope", lambda fig: _flux(fig, reduced), 3.4,
+                   "$\\langle P_t\\rangle_\\lambda$ of each frame minus its mean over frames (printed)."),
            Section("Coherent flux per baseline", lambda fig: _coherent_flux(fig, reduced), GRID_HEIGHT,
-                   "|Wavelength-averaged coherent flux| of each frame minus its mean (printed)."),
+                   "$|\\langle C_{ij}\\rangle_\\lambda|$ of each frame minus its mean over frames (printed)."),
            Section("VISAMP per baseline", lambda fig: _visibility(fig, reduced), GRID_HEIGHT,
-                   "Every frame against wavelength (colour: frame order); flagged samples masked."),
+                   "$|C_{ij}|\\,/\\,\\sqrt{P_i P_j}$ of every frame (colour: frame order); flagged samples masked."),
            Section("Phase per baseline", lambda fig: _phase(fig, reduced), GRID_HEIGHT,
-                   "Argument of the wavelength-averaged coherent flux, unwrapped over frames."),
+                   "$\\arg\\langle C_{ij}\\rangle_\\lambda$, unwrapped over frames."),
            Section("Group delay per baseline", lambda fig: _group_delay(fig, reduced), GRID_HEIGHT,
-                   "Group delay of every frame.")]
+                   "GD of every frame, as defined above.")]
     if full:
         n_frames, _, n_wave = reduced.differential_phase_deg.shape
         for frame in range(0, n_frames, 10):

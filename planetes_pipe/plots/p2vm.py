@@ -21,6 +21,7 @@ from planetes_pipe.plots.pages import (
     abcd_entries,
     baseline_name,
     baseline_panels,
+    definitions_section,
     legend,
     table,
     table_height,
@@ -90,6 +91,23 @@ def phase_residual_rad(phase_rad, opd_m, wavelength_m: float):
     return best
 
 
+DEFINITIONS = (
+    ("Symbols", [r"Output $o$, telescope $t$, baseline $b$ of telescopes $i,j$, wavelength $\lambda$."]),
+    (r"Transmission $T_{ot}(\lambda)$",
+     [r"$F_{ot}\,/\,\langle F_{ot}\rangle_o$, with $F_{ot}$ the median flat spectrum of telescope $t$ in output $o$.",
+      "1 = the output gets the average share of that telescope's light at that wavelength."]),
+    ("Relative transmission", [r"$\langle T_{ot}\rangle_{t,\lambda}$, per output; the mean over all outputs is 1."]),
+    ("Share of output flux", [r"$T_{ot}\,/\,\sum_t T_{ot}$."]),
+    ("Scan fit", [r"$I_o = c_{ob} + a_{ob}\cos(\phi - \theta_{ob})$ in the scan of $b$, with $\phi$ the measured fringe phase."]),
+    ("Telescope flux $P_t$", [r"From the fitted DC levels: $c_{ob} = \sum_t T_{ot}\,P_t$."]),
+    ("Coherence $C_{ob}$", [r"$a_{ob}\,/\,\sqrt{P_i P_j}$."]),
+    ("Normalized coherence $V_{ob}$",
+     [r"$C_{ob}\,/\,(2\sqrt{T_{oi}T_{oj}}) = a_{ob}\,/\,(2\sqrt{T_{oi}P_i\;T_{oj}P_j})$.",
+      "Fringe contrast of the output during the scan; 1 = full contrast."]),
+    ("Visibility transmission", [r"$V_{ob}$ averaged over the central band; per baseline also over A, C, B, D."]),
+    ("Output phase", [r"$\theta_{ob} - \theta_{Ab}$, relative to output A of the baseline."]),
+    ("Central band", [f"The middle {100 * (CENTRAL_BAND[1] - CENTRAL_BAND[0]):.0f} % of the wavelength channels."]),
+)
 VERDICT_COLORS = {"GOOD": PASS, "WARNING": "#FFF2CC", "BAD": FLAG}
 CHANNEL_COLORS = ("#0C5DA5", "#00B945", "#FF2C00")  # three sample wavelengths
 
@@ -100,7 +118,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
     wavelength = p2vm.wavelength_m * 1e9
     n = len(layout.baselines)
     names = [baseline_name(b) for b in range(n)]
-    out = []
+    out = [definitions_section(DEFINITIONS)]
 
     # Quality summary (GRAVITY: "P2VM overall quality" and its checks).
     def draw_verdict(fig):
@@ -133,7 +151,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
     out.append(Section("Per baseline", lambda fig: table(
         fig, per_baseline, ["Vis. transm.", "C−A [deg]", "B−A [deg]", "D−A [deg]"], names,
         shade=[((b, 0), FLAG) for b in range(n) if result["visibility"][b] < COHERENCE_RANGE[0]]),
-        table_height(n), f"Central band means; visibility transmission below "
+        table_height(n), f"Central band means; Vis. transm. is the visibility transmission, below "
         f"{100 * COHERENCE_RANGE[0]:.0f} % shaded. Nominal phases C−A 180, B−A 90, D−A 270."))
 
     # Photometry (GRAVITY: relative transmission per output; transmissions vs wavelength).
@@ -153,8 +171,8 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         ax.set(ylabel="Relative transmission", xlim=(-0.6, len(order) - 0.4),
                ylim=(0, max(1.6, values.max() * 1.1)))
     out.append(Section("Relative photometric transmission per output", draw_relative_outputs, 2.2,
-                       f"Mean over telescopes and wavelengths / overall mean, outputs A, C, B, D of "
-                       f"each baseline; allowed {PHOTOMETRY_RANGE[0]}–{PHOTOMETRY_RANGE[1]} (outside: red)."))
+                       f"$\\langle T_{{ot}}\\rangle_{{t,\\lambda}}$ of outputs A, C, B, D of each baseline; "
+                       f" allowed {PHOTOMETRY_RANGE[0]}–{PHOTOMETRY_RANGE[1]} (outside: red)."))
 
     def percent_cells():
         cells = []
@@ -165,7 +183,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
     out.append(Section("Wavelength-averaged photometric transmission (%)", lambda fig: table(
         fig, percent_cells(), [f"T{t}" for t in layout.telescopes], names,
         shade=[((b, t), MARK) for b, pair in enumerate(layout.baseline_pairs) for t in pair]),
-        table_height(n), "Share of each telescope in each baseline's four outputs; the baseline's "
+        table_height(n), "Share of each telescope in $\\sum T_{ot}$ over the baseline's four outputs and all wavelengths; the baseline's "
         "two telescopes shaded, the others are cross-talk."))
 
     share = p2vm.transmission / p2vm.transmission.sum(axis=1, keepdims=True)
@@ -173,10 +191,10 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
                                      ("second telescope", {"color": "0.3", "ls": "--"})]
     for values, title, ylabel, explanation, ylim in (
             (p2vm.transmission, "Photometric transmission vs. wavelength", "Transmission",
-             "For each telescope and wavelength the mean over the 24 outputs is 1. Solid: the "
+             "$T_{ot}(\\lambda)$: for each telescope and wavelength the mean over the 24 outputs is 1. Solid: the "
              "baseline's first telescope, dashed: its second.", None),
             (share, "Relative photometric transmission vs. wavelength", "Share of output flux",
-             "Each telescope / all four telescopes in the output; balanced = 0.5. Solid: first "
+             "$T_{ot}\\,/\\,\\sum_t T_{ot}$; balanced = 0.5. Solid: first "
              "telescope, dashed: second.", (0, 1))):
         def draw(fig, values=values, ylabel=ylabel, ylim=ylim):
             axes = baseline_panels(fig, "Wavelength [nm]", ylabel, sharey=ylim is not None)
@@ -201,7 +219,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
     out.append(Section("Wavelength-averaged coherent flux transmission (%)", lambda fig: table(
         fig, matrix_cells(), names, [f"outputs of {name}" for name in names],
         shade=[((b, b), MARK) for b in range(n)]),
-        table_height(n), "Coherent flux of each baseline (columns) in each baseline's outputs; "
+        table_height(n), "Share of $|C_{ob}|$: each baseline (columns) in each baseline's outputs (rows); "
         "close to 100 on the diagonal and 0 elsewhere."))
 
     coherence = normalized_coherence(p2vm)
@@ -219,7 +237,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         ax.set(ylabel="Visibility transmission [%]", ylim=(0, 110))
         legend(fig, abcd_entries(lw=4) + [(f"minimum {100 * COHERENCE_RANGE[0]:.0f} %", GUIDE)])
     out.append(Section("Wavelength-averaged visibility transmission", draw_visibility, 2.2,
-                       "Normalized fringe amplitude over the central band, per output; nominal "
+                       "$V_{ob}$ averaged over the central band, per output; nominal "
                        f"higher than {100 * COHERENCE_RANGE[0]:.0f} %."))
 
     def draw_coherence(fig):
@@ -231,7 +249,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
             ax.axhline(COHERENCE_RANGE[0], **GUIDE)
         legend(fig, abcd_entries() + [(f"{COHERENCE_RANGE[0]}", GUIDE)])
     out.append(Section("Coherence vs. wavelength", draw_coherence, GRID_HEIGHT,
-                       "Coherence / (2 √T1 √T2) of each output; shaded: the checked central band. "
+                       "$V_{ob}(\\lambda)$ of each output; shaded: the checked central band. "
                        "Instrumental response, not target visibility."))
 
     # Phases (GRAVITY: phase table and output phases vs wavelength).
@@ -239,7 +257,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
                     f"{(phases[b, 3] - phases[b, 2]) % 360:.1f}"] for b in range(n)]
     out.append(Section("Wavelength-averaged phases of the outputs (deg, A = 0)", lambda fig: table(
         fig, phase_cells, ["C−A", "B−A", "D−A", "D−B"], names), table_height(n),
-        "Central band. Nominal: C−A 180, B−A 90, D−A 270, D−B 180."))
+        "$\\theta_{ob} - \\theta_{Ab}$ over the central band. Nominal: C−A 180, B−A 90, D−A 270, D−B 180."))
 
     def draw_phases(fig):
         axes = baseline_panels(fig, "Wavelength [nm]", "Phase relative to A [deg]", sharey=True)
@@ -249,13 +267,13 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         axes[0].set(ylim=(-10, 370), yticks=[0, 90, 180, 270, 360])
         legend(fig, abcd_entries())
     out.append(Section("Output phases vs. wavelength", draw_phases, GRID_HEIGHT,
-                       "Relative to output A; nominal C 180, B 90, D 270."))
+                       "$\\theta_{ob} - \\theta_{Ab}$; nominal C 180, B 90, D 270."))
     if p2vm.dc_term_adu is not None:
         out.append(_per_baseline(p2vm, p2vm.dc_term_adu, "c-matrix vs. wavelength", "DC level [ADU]",
-                                 "DC level of each output during its baseline's scan."))
+                                 "$c_{ob}$: DC level of each output during its baseline's scan."))
     if p2vm.fit_rms_adu is not None:
         out.append(_per_baseline(p2vm, p2vm.fit_rms_adu, "Fringe-fit residual RMS", "Fit RMS [ADU]",
-                                 "RMS of the scan frames about the fitted fringe."))
+                                 "RMS of the scan frames about the fitted $c_{ob} + a_{ob}\\cos(\\phi - \\theta_{ob})$."))
     out += _scan_sections(p2vm)
     return out
 
@@ -290,7 +308,7 @@ def _scan_sections(p2vm) -> list[Section]:
                 entries.append(("group delay", {"color": ABCD_COLORS[3]}))
             legend(fig, entries)
         out.append(Section("Recovered scan delays", draw_delays, GRID_HEIGHT,
-                           "OPD of every scan frame and the group delay measured from it."))
+                           "OPD recovered from the fringe phase of every scan frame, and the group delay measured from the spectrum."))
     if p2vm.ellipse_phase_rad is None or p2vm.ellipse_amplitude is None:
         return out
     circle = np.linspace(0, 2 * np.pi, 200)

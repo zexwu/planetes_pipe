@@ -17,7 +17,7 @@ def sections(wave: Wave) -> list[Section]:
         ax.set(xlabel="Detector x [pixel]", ylabel="Wavelength [nm]")
 
     result = [Section("Wavelength solution", draw_solution, 2.6,
-                      f"Wavelength against detector column for the {n_outputs} outputs.")]
+                      f"Wavelength of each detector column from the lamp line fit, for the {n_outputs} outputs.")]
     if wave.fit_residual_m is not None:
         residual_nm = wave.fit_residual_m * 1e9
         rms = float(np.std(residual_nm, ddof=1)) if len(residual_nm) > 1 else float("nan")
@@ -36,5 +36,5 @@ def sections(wave: Wave) -> list[Section]:
             fig.colorbar(points, ax=[scatter_ax, hist_ax], label="Detector y [pixel]", pad=0.02)
 
         result.append(Section("Lamp line residuals", draw_residuals, 2.6,
-                              f"{len(residual_nm)} accepted lines; sample stdev {rms:.3f} nm."))
+                              f"Accepted lamp lines about the fitted solution: {len(residual_nm)} lines, sample stdev {rms:.3f} nm."))
     return result

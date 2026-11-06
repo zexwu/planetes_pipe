@@ -33,7 +33,7 @@ def sections(dark: Dark | None = None, bad: Bad | None = None) -> list[Section]:
 
         frames = f"{dark.n_frames} frames; " if dark.n_frames else ""
         result += [Section("DARK detector maps", draw_maps, 3.0,
-                           f"{frames}colour range 1–99 % of the pixels."),
+                           f"Per-pixel mean and standard deviation over the frames; {frames}colour range 1–99 % of the pixels."),
                    Section("DARK pixel distributions", draw_histograms, 2.0,
                            "Histograms on a logarithmic scale; red line: median.")]
     if bad is not None:
@@ -52,5 +52,6 @@ def sections(dark: Dark | None = None, bad: Bad | None = None) -> list[Section]:
         result.append(Section(
             f"BAD pixels: {np.count_nonzero(flags)} flagged", draw_bad, 4.6,
             ", ".join(f"{n} {kind}" for kind, n in counts.items())
-            + ". Hot and dead from the temporal mean, noisy from the temporal RMS."))
+            + ". With $\\tilde m,\\tilde s$ the medians of the temporal mean and RMS: hot $> \\tilde m + 5\\tilde s$, "
+            "dead $< \\tilde m - 5\\tilde s$, noisy RMS $> 5\\tilde s$ (default threshold 5)."))
     return result

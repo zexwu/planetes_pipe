@@ -7,7 +7,7 @@
 
 import logging
 
-__version__ = "0.29.1"
+__version__ = "0.29.2"
 log = logging.getLogger("planetes_pipe")
 
 from planetes_pipe.logs import configure_logging  # noqa: E402
