@@ -2,7 +2,7 @@
 import numpy as np
 
 from planetes_pipe.instrument import layout
-from planetes_pipe.plots.pages import Section, name, panels, table, table_height
+from planetes_pipe.plots.pages import Section, table, table_height
 from planetes_pipe.steps.flat import Flat
 
 
@@ -33,20 +33,19 @@ def sections(flat: Flat) -> list[Section]:
         ax.set(xlabel="Detector x [pixel]", ylabel="Detector y [pixel]")
 
     def draw_traces(fig):
-        axes = panels(fig, 6, 4, "Detector x [pixel]", "Trace centre y [pixel]")
-        for output, ax in enumerate(axes[:n_outputs]):
+        ax = fig.subplots()
+        for output in range(n_outputs):
             columns = _x_range(flat, output)
-            ax.plot(x[columns], flat.trace_y_pixels[output, columns], color="0.15")
-            name(ax, str(output), "upper right")
-        for ax in axes[n_outputs:]:
-            ax.set_visible(False)
+            trace = flat.trace_y_pixels[output, columns]
+            ax.plot(x[columns], trace - np.median(trace), color=f"C{output % 4}", lw=0.5, alpha=0.8)
+        ax.set(xlabel="Detector x [pixel]", ylabel="Trace centre − median [pixel]")
 
     result = [Section("FLAT image and traces", draw_image, 4.4,
                       f"Mean of the four dark-subtracted telescope flats, with the {n_outputs} fitted traces and their output numbers; "
                       "colour range 1–99.5 %."),
-              Section("Trace centres", draw_traces, 7.4,
-                      "Cubic fit to the Gaussian centres of each output's columns (number in the corner); "
-                      "common x axis, independent y scales.")]
+              Section("Trace centres", draw_traces, 2.4,
+                      "Cubic fit to the Gaussian centres of each output's columns, minus its median: the "
+                      "curvature and tilt of all outputs on one axis.")]
     if flat.profile_sigma_pixels is not None:
         def draw_widths(fig):
             ax = fig.subplots()

@@ -114,6 +114,22 @@ class SpectralExtractor:
         aligned *= self.resampled_flat_spectra
         return aligned
 
+    def read_variance(self, temporal_rms_adu: NDArray) -> NDArray:
+        """Read-noise variance of one extracted spectrum [ADU^2]: (output, wavelength).
+
+        The per-pixel variance summed over each aperture, scaled and resampled as
+        extract() scales the signal. Resampling correlations are neglected.
+        """
+        if temporal_rms_adu.shape != self.detector_shape:
+            raise ValueError("Dark RMS and extraction detector geometry differ")
+        summed = extract_sparse_spectra(
+            np.square(temporal_rms_adu)[None], self.profile_y_pixels, self.profile_x_pixels
+        )
+        aligned = resample_spectra(
+            summed / np.square(self.detector_flat_spectra), self.wavelength_map_m, self.wavelength_m
+        )
+        return (aligned * np.square(self.resampled_flat_spectra))[:, 0]
+
 
 def prepare_extraction(
     flat: Flat, wave: Wave, wavelength_m: NDArray
@@ -224,6 +240,7 @@ def estimate_group_delay(
     wavelength: NDArray,
     search_range: tuple[float, float] = (-30e-6, 30e-6),
     n_newton: int = 5,
+    grid_step_m: float = 1e-8,
 ) -> NDArray:
     """Locate the coherent-sum maximum and refine its optical delay with Newton steps.
 
@@ -236,11 +253,12 @@ def estimate_group_delay(
         Wavelengths in metres, matching the final axis of visdata.
     search_range : tuple of float, optional
         Coarse delay interval [lower, upper) in metres; default +/-30 micrometres.
-        The fixed grid spacing is 1e-8 m. This is an initialization interval,
-        not a bound on the returned delay.
+        This is an initialization interval, not a bound on the returned delay.
     n_newton : int, optional
         Number of unconstrained Newton updates of squared coherent-sum amplitude;
         default 5. A zero Hessian leaves that sample's current delay unchanged.
+    grid_step_m : float, optional
+        Coarse grid spacing, default 1e-8 m. Live views use a coarser grid for speed.
 
     Returns
     -------
@@ -257,7 +275,7 @@ def estimate_group_delay(
     k = -2j * np.pi / wavelength
     w = -2 * np.pi / wavelength
 
-    gd_grid = np.arange(search_range[0], search_range[1], 1e-8)
+    gd_grid = np.arange(search_range[0], search_range[1], grid_step_m)
     phasors_grid = np.exp(gd_grid[:, None] * k[None, :])
     coherence = np.abs(np.tensordot(visdata, phasors_grid, axes=([-1], [-1])))
 

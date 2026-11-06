@@ -138,6 +138,8 @@ class ESOChainTests(unittest.TestCase):
                 gd_search_max_m=1.2e-05,
             )
             for field in fields(expected):
+                if field.name == "time_s":  # added when writing, from the raw header
+                    continue
                 before, after = (
                     getattr(expected, field.name),
                     getattr(actual, field.name),

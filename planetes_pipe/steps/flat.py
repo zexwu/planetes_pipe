@@ -13,7 +13,7 @@ from astropy.io import fits as afits
 from astropy.io.fits import Header
 from numba import njit, prange
 from numpy.typing import NDArray
-from scipy.ndimage import median_filter
+from scipy.ndimage import median_filter, uniform_filter1d
 from scipy.signal import find_peaks, medfilt
 
 from planetes_pipe.instrument import layout
@@ -57,13 +57,18 @@ class Flat:
 APERTURE_WIDTH_PIXELS = 10.0
 
 
-TRACE_MIN_SIGNAL_FRACTION = 0.05
-
-
 TRACE_BACKGROUND_SIGMA = 5.0
 
 
 TRACE_SIGNAL_WINDOW = 11
+
+
+# Columns averaged before tracing, so faint parts of a trace can be followed.
+TRACE_SMOOTH_COLUMNS = 21
+
+
+# A trace's fitted range is its longest run of good columns, across gaps up to this.
+TRACE_MAX_GAP_COLUMNS = 20
 
 
 # Warn below this ratio of the weakest trace's profile prominence to the next peak's.
@@ -77,8 +82,9 @@ def _trace_illumination(
 
     Signal is the spatial 90th percentile minus the median of the outer three
     rows on each side. An 11-column median smooths only the selection signal.
-    Require both 5% of its peak and five background-pixel MAD sigmas. These are
-    trace-selection thresholds, not a propagated photometric S/N estimate.
+    Require five background-pixel MAD sigmas: a fraction of the trace's peak would
+    make the range depend on its brightest feature (2026-11-05: the SuperK pump).
+    This is a trace-selection threshold, not a propagated photometric S/N estimate.
     """
     y0 = max(0, int(ref_y) - range_y // 2)
     strip = image[y0 : y0 + range_y].copy()
@@ -88,10 +94,23 @@ def _trace_illumination(
     noise = 1.4826 * np.nanmedian(abs(edges - background))
     signal = np.nan_to_num(np.nanpercentile(strip, 90, axis=0) - background)
     signal = median_filter(signal, size=TRACE_SIGNAL_WINDOW, mode="nearest")
-    threshold = max(
-        TRACE_BACKGROUND_SIGMA * noise, TRACE_MIN_SIGNAL_FRACTION * signal.max()
-    )
-    return signal > threshold, int(signal.argmax())
+    return signal > TRACE_BACKGROUND_SIGMA * noise, int(signal.argmax())
+
+
+def _average_columns(image: NDArray, bad_mask: NDArray) -> tuple[NDArray, NDArray]:
+    """The image averaged along x over usable pixels, and the mask of pixels with none."""
+    usable = bad_mask == 0
+    weights = uniform_filter1d(usable.astype(float), TRACE_SMOOTH_COLUMNS, axis=1, mode="nearest")
+    summed = uniform_filter1d(np.where(usable, image, 0.0), TRACE_SMOOTH_COLUMNS, axis=1,
+                              mode="nearest")
+    averaged = np.divide(summed, weights, out=np.zeros_like(summed), where=weights > 0)
+    return averaged, (weights <= 0).astype(bad_mask.dtype)
+
+
+def _longest_run(columns: NDArray) -> NDArray:
+    """The longest stretch of sorted columns, with gaps up to TRACE_MAX_GAP_COLUMNS."""
+    runs = np.split(columns, np.flatnonzero(np.diff(columns) > TRACE_MAX_GAP_COLUMNS) + 1)
+    return max(runs, key=len)
 
 
 def make_flat(
@@ -194,9 +213,10 @@ def build_flat(
 
     Notes
     -----
-    Each trace starts at its brightest smoothed flat column. Fit a cubic only
-    to illuminated columns with accepted Gaussian fits and errors < 0.5 pixel;
-    see _trace_illumination for the explicit signal thresholds. Centers are
+    Traces are followed on the flat averaged over TRACE_SMOOTH_COLUMNS columns, from
+    the brightest smoothed column. Fit a cubic only to the longest run of illuminated
+    columns with accepted Gaussian fits and errors < 0.5 pixel; see
+    _trace_illumination for the explicit signal thresholds. Centers are
     median-filtered over three columns. The returned trace retains the full
     detector grid for compatibility; outside the selected region it is an
     extrapolation, not a measured trace.
@@ -230,6 +250,8 @@ def build_flat(
     top_indices = np.argsort(props["prominences"])[-n_outputs:]
     ref_ys = np.sort(ref_ys[top_indices])
 
+    smoothed, smoothed_bad = _average_columns(flat_map, bad_map)
+
     traces = []
     sigmas = []
     trace_ranges = []
@@ -238,18 +260,19 @@ def build_flat(
 
     for i, ref_y in enumerate(ref_ys):
         xs = np.arange(w)
-        illuminated, ref_x = _trace_illumination(flat_map, bad_map, ref_y, h_half)
+        illuminated, ref_x = _trace_illumination(smoothed, smoothed_bad, ref_y, h_half)
         ys, ys_err, sigma = trace_spectrum(
-            flat_map, bad_map, ref_x=ref_x, ref_y=ref_y, range_y=h_half
+            smoothed, smoothed_bad, ref_x=ref_x, ref_y=ref_y, range_y=h_half
         )
 
         # Smooth isolated column fluctuations before the global cubic trace fit.
         ys_med = medfilt(ys, kernel_size=3)
         # A rejected tracking update can retain a small error but has no sigma.
         good = illuminated & (ys_err < 0.5) & np.isfinite(sigma)
-        if good.sum() < 4:
+        fit_x = _longest_run(xs[good]) if good.any() else xs[good]
+        good = np.isin(xs, fit_x)
+        if len(fit_x) < 4:
             raise ValueError(f"Trace {i}: fewer than four illuminated fitted columns")
-        fit_x = xs[good]
         trace_ranges.append((fit_x[0], fit_x[-1]))
         log.debug("trace %2d: y=%d, x=%d..%d, %d fitted columns, seed x=%d", i, ref_y,
                   fit_x[0], fit_x[-1], len(fit_x), ref_x)

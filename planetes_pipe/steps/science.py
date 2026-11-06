@@ -25,7 +25,7 @@ from planetes_pipe.steps.extraction import (
     prepare_extraction,
 )
 from planetes_pipe.steps.flat import Flat, read_flat
-from planetes_pipe.steps.p2vm import P2VM, read_p2vm
+from planetes_pipe.steps.p2vm import P2VM, build_v2pm, read_p2vm
 from planetes_pipe.steps.wave import Wave, read_wave
 
 log = logging.getLogger(__name__)
@@ -47,6 +47,10 @@ class P2VMRed:
     baseline_outputs: dict[int, list[int]]  # baseline index -> A,C,B,D outputs
     group_delay_m: NDArray | None = None  # (frame, baseline)
     differential_phase_deg: NDArray | None = None  # (frame, baseline, wavelength)
+    flux_err_adu: NDArray | None = None  # (frame, telescope, wavelength), see propagate_errors
+    coherent_err_adu: NDArray | None = None  # complex: errors of the real and imaginary parts
+    chi2: NDArray | None = None  # reduced, of the P2VM model of the outputs: (frame, wavelength)
+    time_s: NDArray | None = None  # (frame,), since the first frame; estimated, see write_reduced
 
 
 def reduce_science(
@@ -85,16 +89,100 @@ def reduce_science(
 
     Notes
     -----
-    No temporal averaging, transfer-function calibration or uncertainty propagation
-    is performed. All frames are retained; run() writes the product.
+    No temporal averaging or transfer-function calibration is performed. Errors are
+    propagated when the DARK has a temporal RMS (see output_variance). All frames are
+    retained; run() writes the product.
     """
 
     check_calibrations(raw, dark=dark, flat=flat)
     extractor = prepare_extraction(flat, wave, p2vm.wavelength_m)
     spectra = extract_spectra(raw, extractor, dark)
+    variance = None
+    if dark.temporal_rms_adu is not None:
+        variance = output_variance(spectra, extractor.read_variance(dark.temporal_rms_adu))
     return reduce_spectra(
-        spectra, p2vm, gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m
+        spectra, p2vm, gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m,
+        spectra_variance=variance,
     )
+
+
+# Detector gain, from a photon-transfer fit to the frame differences of the 2026-11-05
+# flats (0.027 ADU^2 per ADU; 34-40 e-/ADU across the four flats). Sets the shot noise.
+GAIN_E_PER_ADU = 36.0
+
+
+def output_variance(spectra: NDArray, read_variance: NDArray) -> NDArray:
+    """Variance of extracted spectra [ADU^2]: shot noise + read noise, as spectra's shape.
+
+    spectra (output, frame, wavelength) in ADU; read_variance (output, wavelength),
+    from SpectralExtractor.read_variance. Negative signal contributes no shot noise.
+    """
+    return np.clip(spectra, 0, None) / GAIN_E_PER_ADU + read_variance[:, None, :]
+
+
+def propagate_errors(spectra, spectra_variance, channels, p2vm) -> tuple[NDArray, NDArray, NDArray]:
+    """FLUXERR, VISERR and CHI2 of a reduction, as GRAVITY's gravi_p2vm_reduce.
+
+    Output variances go through the squared P2VM inverse, neglecting correlations
+    between outputs. CHI2 compares the outputs with the V2PM model of the reduced
+    channels, with 24 outputs - 16 channels degrees of freedom; it is per frame and
+    wavelength.
+    """
+    variance = np.einsum("box,ofx->fbx", np.square(p2vm.matrix), spectra_variance)
+    errors = np.sqrt(variance)
+    flux_err = errors[:, :layout.n_telescopes, :]
+    coherent_err = errors[:, layout.real_slice, :] + 1j * errors[:, layout.imag_slice, :]
+    v2pm = build_v2pm(p2vm.transmission, p2vm.coherence_amplitude, p2vm.coherence_phase_rad)
+    model = np.einsum("obx,fbx->ofx", v2pm, channels)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        chi2 = np.nansum(np.square(model - spectra) / spectra_variance, axis=0)
+    return flux_err, coherent_err, chi2 / (layout.n_outputs - layout.n_data)
+
+
+def f1f2(product: P2VMRed) -> NDArray:
+    """F1F2: the product of the baseline's two photometric fluxes, (frame, baseline, wavelength)."""
+    pairs = np.asarray(layout.baseline_pairs)
+    return product.photometric_flux_adu[:, pairs[:, 0]] * product.photometric_flux_adu[:, pairs[:, 1]]
+
+
+def coherent_snr(product: P2VMRed) -> NDArray | None:
+    """SNR of the spectrally summed coherent flux, as GRAVITY: (frame, baseline); None without errors.
+
+    |sum VISDATA| / sqrt(sum |VISERR|^2), over the unflagged wavelengths.
+    """
+    if product.coherent_err_adu is None:
+        return None
+    good = ~product.flags
+    phasor = np.sum(np.where(good, product.coherent_flux_adu, 0), axis=2)
+    variance = np.sum(np.where(good, np.abs(product.coherent_err_adu) ** 2, 0), axis=2)
+    return np.divide(np.abs(phasor), np.sqrt(variance), out=np.full(phasor.shape, np.nan),
+                     where=variance > 0)
+
+
+TRIPLETS = ("432", "431", "421", "321")
+
+
+def closure(product: P2VMRed) -> tuple[NDArray, NDArray, NDArray]:
+    """T3AMP, T3PHI [deg] and T3PHIERR [deg, NaN without errors]: (frame, triplet, wavelength).
+
+    The bispectrum of telescopes i,j,k is C_ij C_jk conj(C_ik); T3AMP is the product
+    of the three VISAMP. As GRAVITY's OI_T3, in the telescope order of TRIPLETS.
+    """
+    n_frames, _, n_wave = product.coherent_flux_adu.shape
+    amplitude = np.zeros((n_frames, len(TRIPLETS), n_wave))
+    phase = np.zeros_like(amplitude)
+    error = np.full_like(amplitude, np.nan)
+    for t, (i, j, k) in enumerate(TRIPLETS):
+        bases = [layout.baselines.index(pair) for pair in (i + j, j + k, i + k)]
+        c12, c23, c13 = (product.coherent_flux_adu[:, b] for b in bases)
+        amplitude[:, t] = np.prod(product.visibility_amplitude[:, bases], axis=1)
+        phase[:, t] = np.angle(c12 * c23 * np.conj(c13), deg=True)
+        if product.coherent_err_adu is not None:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                ratios = [np.abs(product.coherent_err_adu[:, b]) / np.sqrt(2)
+                          / np.abs(product.coherent_flux_adu[:, b]) for b in bases]
+            error[:, t] = np.rad2deg(np.sqrt(np.sum(np.square(ratios), axis=0)))
+    return amplitude, phase, error
 
 
 def reduce_spectra(
@@ -104,6 +192,8 @@ def reduce_spectra(
     gd_search_min_m: float = -100e-6,
     gd_search_max_m: float = 100e-6,
     include_phase: bool = True,
+    spectra_variance: NDArray | None = None,
+    gd_grid_step_m: float = 1e-8,
 ) -> P2VMRed:
     """Apply the P2VM inverse and normalize the reconstructed coherent flux.
 
@@ -122,6 +212,9 @@ def reduce_spectra(
     include_phase : bool, optional
         Compute GD and differential phase when True. False returns both as None
         for live previews; these incomplete products cannot be saved as P2VMRED.
+    spectra_variance : ndarray, optional
+        Variance of spectra [ADU^2], same shape (output_variance). Adds FLUXERR,
+        VISERR and CHI2 (propagate_errors); omitted when None.
 
     Returns
     -------
@@ -151,6 +244,9 @@ def reduce_spectra(
     flux_adu = channels[:, :layout.n_telescopes, :]
     coherent_adu = channels[:, layout.real_slice, :] + 1j * channels[:, layout.imag_slice, :]
     visamp, flags = normalize_coherent_flux(coherent_adu, flux_adu)
+    flux_err = coherent_err = chi2 = None
+    if spectra_variance is not None:
+        flux_err, coherent_err, chi2 = propagate_errors(spectra, spectra_variance, channels, p2vm)
 
     if not include_phase:
         return P2VMRed(
@@ -168,6 +264,7 @@ def reduce_spectra(
             coherent_adu[:, baseline],
             p2vm.wavelength_m,
             search_range=(gd_search_min_m, gd_search_max_m),
+            grid_step_m=gd_grid_step_m,
         )
     log.info("median group delay: %s", ", ".join(
         f"{name} {np.median(gd_m[:, b]) * 1e6:+.1f} um" for b, name in enumerate(layout.baselines)))
@@ -189,6 +286,9 @@ def reduce_spectra(
         group_delay_m=gd_m,
         differential_phase_deg=phase_deg,
         baseline_outputs=p2vm.baseline_outputs,
+        flux_err_adu=flux_err,
+        coherent_err_adu=coherent_err,
+        chi2=chi2,
     )
     return product
 
@@ -281,6 +381,7 @@ class FrameReducer:
         include_phase: bool = False,
         gd_search_min_m: float = -100e-6,
         gd_search_max_m: float = 100e-6,
+        gd_grid_step_m: float = 1e-8,
     ) -> P2VMRed:
         """Reduce one raw detector frame using the prepared extraction and P2VM.
 
@@ -310,6 +411,7 @@ class FrameReducer:
             include_phase=include_phase,
             gd_search_min_m=gd_search_min_m,
             gd_search_max_m=gd_search_max_m,
+            gd_grid_step_m=gd_grid_step_m,
         )
 
 
@@ -339,9 +441,10 @@ def _oi_table(columns: list, name: str) -> afits.BinTableHDU:
 def write_reduced(path: Path, product: P2VMRed, *, header=None, start_mjd=None, dit_s=None) -> None:
     """Save per-frame observables (requires GD and differential phase); never overwrite.
 
-    OI_WAVELENGTH, OI_FLUX and OI_VIS are named and arranged as in GRAVITY's P2VMRED,
-    but are not valid OIFITS: errors, target and array data are not produced. Table
-    rows are frame-major: frame 1 telescopes (or baselines), frame 2, ...
+    OI_WAVELENGTH, OI_FLUX, OI_VIS and OI_T3 are named and arranged as in GRAVITY's
+    P2VMRED, with F1F2, SNR and CHI2; not valid OIFITS, since target and array data are
+    not produced. Error columns are written when the product has errors. Table rows are
+    frame-major: frame 1 telescopes (or baselines, triplets), frame 2, ...
     """
     if product.group_delay_m is None or product.differential_phase_deg is None:
         raise ValueError("Saved P2VMRED requires GD and differential phase")
@@ -356,21 +459,42 @@ def write_reduced(path: Path, product: P2VMRed, *, header=None, start_mjd=None, 
         products.column("STA_INDEX", np.tile(stations, nf)),
         products.column("FLUX", product.photometric_flux_adu.reshape(-1, nw), "adu"),
     ]
+    if product.flux_err_adu is not None:
+        flux += [products.column("FLUXERR", product.flux_err_adu.reshape(-1, nw), "adu"),
+                 products.column("CHI2", np.repeat(product.chi2, nt, axis=0))]
     vis = [
         products.column("FRAME", np.repeat(np.arange(1, nf + 1), nb)),
         *_time_columns(nf, nb, start_mjd, dit_s),
         products.column("STA_INDEX", np.tile(pairs, (nf, 1))),
         products.column("VISDATA", product.coherent_flux_adu.reshape(-1, nw), "adu"),
         products.column("VISAMP", product.visibility_amplitude.reshape(-1, nw)),
+        products.column("VISPHI", np.angle(product.coherent_flux_adu, deg=True).reshape(-1, nw),
+                        "deg"),
+        products.column("F1F2", f1f2(product).reshape(-1, nw), "adu2"),
         products.column("FLAG", product.flags.reshape(-1, nw)),
         products.column("GDELAY", product.group_delay_m.reshape(-1), "m"),
         products.column("DIFFPHASE", product.differential_phase_deg.reshape(-1, nw), "deg"),
     ]
+    if product.coherent_err_adu is not None:
+        vis += [products.column("VISERR", product.coherent_err_adu.reshape(-1, nw), "adu"),
+                products.column("SNR", coherent_snr(product).reshape(-1))]
+    t3_amplitude, t3_phase, t3_error = closure(product)
+    triplets = np.asarray([[int(t) for t in triplet] for triplet in TRIPLETS])
+    t3 = [
+        products.column("FRAME", np.repeat(np.arange(1, nf + 1), len(TRIPLETS))),
+        *_time_columns(nf, len(TRIPLETS), start_mjd, dit_s),
+        products.column("STA_INDEX", np.tile(triplets, (nf, 1))),
+        products.column("T3AMP", t3_amplitude.reshape(-1, nw)),
+        products.column("T3PHI", t3_phase.reshape(-1, nw), "deg"),
+    ]
+    if product.coherent_err_adu is not None:
+        t3.append(products.column("T3PHIERR", t3_error.reshape(-1, nw), "deg"))
     extensions = [
         products.detector_table(product.baseline_outputs),
         _oi_table(wavelength, "OI_WAVELENGTH"),
         _oi_table(flux, "OI_FLUX"),
         _oi_table(vis, "OI_VIS"),
+        _oi_table(t3, "OI_T3"),
     ]
     products.save_product(path, "SINGLE_SCI_P2VMRED", extensions, header=header)
 
@@ -393,6 +517,18 @@ def read_reduced(path: Path) -> P2VMRed:
         flux = products.read_column(hdus, flux_hdu, flux_column).reshape(nf, nt, nw)
         vis = {name: products.read_column(hdus, vis_hdu, name).reshape(nf, nb, -1)
                for name in ("VISDATA", "VISAMP", "FLAG", "GDELAY", "DIFFPHASE")}
+        columns = hdus[flux_hdu].columns.names
+        optional = {}
+        if "FLUXERR" in columns:
+            optional = {
+                "flux_err_adu": products.read_column(hdus, flux_hdu, "FLUXERR").reshape(nf, nt, nw),
+                "coherent_err_adu": products.read_column(hdus, vis_hdu, "VISERR").reshape(nf, nb, nw),
+                "chi2": products.read_column(hdus, flux_hdu, "CHI2")[::nt],
+            }
+        if "TIME" in columns:
+            time_s = products.read_column(hdus, flux_hdu, "TIME")[::nt] * 1e-6
+            if np.isfinite(time_s).all():
+                optional["time_s"] = time_s
         return P2VMRed(
             photometric_flux_adu=flux,
             coherent_flux_adu=vis["VISDATA"],
@@ -402,6 +538,7 @@ def read_reduced(path: Path) -> P2VMRed:
             baseline_outputs=products.baseline_outputs(hdus["IMAGING_DETECTOR_SC"].data["REGNAME"]),
             group_delay_m=vis["GDELAY"].reshape(nf, nb),
             differential_phase_deg=vis["DIFFPHASE"],
+            **optional,
         )
 
 

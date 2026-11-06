@@ -1,3 +1,15 @@
+# PLANETES 0.31.0：P2VMRED 增加误差和闭合相位；报告改用瀑布图；迹线范围
+
+- SINGLE_SCI_P2VMRED 增加 GRAVITY 的列：`FLUXERR`、`VISERR`、`CHI2`、`VISPHI`、`F1F2`、`SNR`，以及新表
+  `OI_T3`（`T3AMP`、`T3PHI`、`T3PHIERR`）。误差：输出方差 = 信号 / 增益 + DARK RMS 给出的读出噪声，经
+  P2VM² 传播，如 `gravi_p2vm_reduce`。增益 36 e-/ADU（`science.GAIN_E_PER_ADU`），由 2026-11-05 平场的
+  帧差 photon transfer 测得（34-40）。11-05 科学数据的 CHI2 中位数 0.83，帧差噪声 / 误差约 0.9。
+- 科学报告按 `gravi_visual_p2vmreduced` 重排：平均光谱、通量、相干通量和 SNR 画在一张图上（颜色区分望远镜或
+  基线）；通量、VISAMP、差分相位用瀑布图；相位和群延迟用共享时间轴的六行图；增加闭合相位和 CHI2。
+  FLAT 报告的 Trace centres 也合成一张图。
+- 迹线范围：在沿 x 平均 21 列的平场上跟踪，只用噪声阈值（不再用各迹线峰值的 5%，否则范围取决于 SuperK
+  泵浦峰），取最长的连续好列。11-05 17:02 平场的公共波段从约 272 个通道增加到 447 个（1150-1296 nm）。
+
 # PLANETES 0.30.0：报告和 P2VMRED 采用 GRAVITY 的名称
 
 - SINGLE_SCI_P2VMRED 的表改名为 GRAVITY 的 `OI_WAVELENGTH`（`EFF_WAVE`）、`OI_FLUX`（`FLUX`）、
