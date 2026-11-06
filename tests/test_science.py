@@ -11,6 +11,7 @@ from astropy.io import fits
 from fixtures import calibration_arrays, calibration_spectra
 
 from planetes_pipe.instrument import layout
+from planetes_pipe.steps.extraction import stacked_group_delay
 from planetes_pipe.steps.flat import Flat, read_flat
 from planetes_pipe.steps.p2vm import P2VM, fit_p2vm, read_p2vm
 from planetes_pipe.steps.science import (
@@ -22,6 +23,25 @@ from planetes_pipe.steps.science import (
 from planetes_pipe.steps.wave import Wave, read_wave
 
 READERS = {Flat: read_flat, Wave: read_wave, P2VM: read_p2vm}
+
+
+class StackedGroupDelayTests(unittest.TestCase):
+    WAVELENGTH = np.linspace(1.2e-6, 1.27e-6, 200)
+
+    def frames(self, delay_m, amplitude):
+        rng = np.random.default_rng(2)
+        phases = rng.uniform(0, 2 * np.pi, (32, 1))  # the fringe moves between frames
+        noise = rng.normal(size=(32, 200)) + 1j * rng.normal(size=(32, 200))
+        return amplitude * np.exp(1j * phases + 2j * np.pi * delay_m / self.WAVELENGTH) + noise
+
+    def test_finds_a_delay_through_fringe_motion_and_noise(self):
+        delay, peak = stacked_group_delay(self.frames(37.2e-6, 3.0), self.WAVELENGTH)
+        self.assertAlmostEqual(delay * 1e6, 37.2, delta=0.1)
+        self.assertGreater(peak, 20)
+
+    def test_no_fringes_give_no_clear_peak(self):
+        _, peak = stacked_group_delay(self.frames(37.2e-6, 0.0), self.WAVELENGTH)
+        self.assertLess(peak, 5)
 
 
 class ReducedProductTests(unittest.TestCase):

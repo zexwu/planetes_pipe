@@ -1,3 +1,10 @@
+# PLANETES 0.34.0：多帧群延迟
+
+- `extraction.stacked_group_delay`：把多帧的相干功率相加，得到一个群延迟和峰值高度（峰值 / 搜索范围内的中位数）。
+  11-05 的数据里，有条纹时峰值至少 25，没有条纹时最多 8。bench 的 `center_fringes.py` 使用它。
+- 群延迟和所用波段有关：去掉 1150 nm 以下的弱光通道后，17:18 文件的群延迟闭合误差从约 7 µm 降到约 2 µm。
+  科学产品里的 `GDELAY` 仍使用整个 P2VM 波段。
+
 # PLANETES 0.33.0：可限制 P2VM 波段
 
 - `p2vm.run` 增加 `wave_min_m`、`wave_max_m`，限制 P2VM 的波段。默认不限制；bench 的 `reduce_night.py` 和

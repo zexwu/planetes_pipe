@@ -235,6 +235,36 @@ def extract_spectra(raw: Raw, extractor: SpectralExtractor, dark: Dark) -> NDArr
     )
 
 
+def stacked_group_delay(
+    visdata: NDArray,
+    wavelength: NDArray,
+    search_range: tuple[float, float] = (-100e-6, 100e-6),
+    grid_step_m: float = 0.5e-6,
+) -> tuple[float, float]:
+    """One group delay from several frames, and how clearly the data show it.
+
+    Sums over frames the power of the coherent sum at each trial delay, so fringe motion
+    between frames does not cancel it. Returns the delay of the highest power [m], refined
+    by a parabola, and that power over the median power of the search range: near 1 means
+    no fringes in the range, and the delay then means nothing. On 2026-11-05 frames with
+    fringes gave at least 25, and frames without gave at most 8.
+
+    visdata is (frame, wavelength), complex; wavelength in metres. Channels are not
+    weighted: choose the channels to use beforehand.
+    """
+    grid = np.arange(search_range[0], search_range[1], grid_step_m)
+    phasors = np.exp(-2j * np.pi * grid[:, None] / wavelength[None, :])
+    power = np.sum(np.abs(visdata @ phasors.T) ** 2, axis=0)
+    best = int(np.argmax(power))
+    delay = grid[best]
+    if 0 < best < len(grid) - 1:
+        low, top, high = power[best - 1 : best + 2]
+        curvature = low - 2 * top + high
+        if curvature != 0:
+            delay = delay + 0.5 * (low - high) / curvature * grid_step_m
+    return float(delay), float(power[best] / np.median(power))
+
+
 def estimate_group_delay(
     visdata: NDArray,
     wavelength: NDArray,
