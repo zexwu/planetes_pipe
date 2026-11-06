@@ -7,8 +7,10 @@ from dataclasses import fields, replace
 from pathlib import Path
 
 import numpy as np
+from astropy.io import fits
 from fixtures import calibration_arrays, calibration_spectra
 
+from planetes_pipe.instrument import layout
 from planetes_pipe.steps.flat import Flat, read_flat
 from planetes_pipe.steps.p2vm import P2VM, fit_p2vm, read_p2vm
 from planetes_pipe.steps.science import (
@@ -30,6 +32,41 @@ class ReducedProductTests(unittest.TestCase):
         science = calibration_arrays(n_wave=15)[2]
         science[:, 0] = 0
         cls.product = reduce_spectra(science, p2vm)
+
+    def test_tables_are_named_as_gravity_with_estimated_times(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            path = Path(temporary) / "science.fits"
+            write_reduced(path, self.product, start_mjd=60000.0, dit_s=0.02)
+            with fits.open(path) as hdus:
+                self.assertEqual(hdus["OI_VIS"].header["INSNAME"], "PLANETES_SC")
+                self.assertIn("FLUX", hdus["OI_FLUX"].columns.names)
+                self.assertIn("EFF_WAVE", hdus["OI_WAVELENGTH"].columns.names)
+                vis = hdus["OI_VIS"].data
+                n_baselines = len(layout.baselines)
+                np.testing.assert_allclose(vis["TIME"][n_baselines], 0.02e6)
+                np.testing.assert_allclose(vis["MJD"][n_baselines], 60000.0 + 0.02 / 86400)
+                np.testing.assert_allclose(vis["INT_TIME"], 0.02)
+
+    def test_times_are_nan_when_the_raw_header_lacks_them(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            path = Path(temporary) / "science.fits"
+            write_reduced(path, self.product)
+            with fits.open(path) as hdus:
+                self.assertTrue(np.isnan(hdus["OI_FLUX"].data["MJD"]).all())
+
+    def test_products_with_the_old_table_names_are_still_read(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temporary:
+            new, old = Path(temporary) / "new.fits", Path(temporary) / "old.fits"
+            write_reduced(new, self.product)
+            with fits.open(new) as hdus:
+                hdus["OI_WAVELENGTH"].columns.change_name("EFF_WAVE", "WAVELENGTH")
+                hdus["OI_WAVELENGTH"].name = "PLANETES_WAVELENGTH"
+                hdus["OI_FLUX"].columns.change_name("FLUX", "FLUXDATA")
+                hdus["OI_FLUX"].name = "PLANETES_FLUX"
+                hdus["OI_VIS"].name = "PLANETES_VIS"
+                hdus.writeto(old)
+            np.testing.assert_array_equal(read_reduced(old).photometric_flux_adu,
+                                          self.product.photometric_flux_adu)
 
     def test_complex_flux_and_flags_round_trip_exactly(self):
         coherent = self.product.coherent_flux_adu.copy()

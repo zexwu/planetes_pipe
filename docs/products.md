@@ -18,7 +18,7 @@ References: [GRAVITY product codes](https://www.eso.org/observing/dfo/quality/GR
 | `steps/flat.py` | `Flat` | FLAT | `IMAGING_DETECTOR_SC`, `PLANETES_FLAT_IMAGE`, `PROFILE_PARAMS`, `PLANETES_PROFILE`, optional `PLANETES_FLAT_FLUX` |
 | `steps/wave.py` | `Wave` | WAVE | `WAVE_DATA_SC` wavelength per output and x [m]; optional `PLANETES_WAVE_FIT` |
 | `steps/p2vm.py` | `P2VM` | P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC`, `PLANETES_P2VM_INVERSE`; optional scan diagnostics |
-| `steps/science.py` | `P2VMRed` | SINGLE_SCI_P2VMRED | `PLANETES_FLUX`, `PLANETES_VIS`: per-frame flux, coherent flux, VISAMP, flags, GD [m], differential phase [deg] |
+| `steps/science.py` | `P2VMRed` | SINGLE_SCI_P2VMRED | `OI_WAVELENGTH`, `OI_FLUX`, `OI_VIS` (`INSNAME` `PLANETES_SC`), named as in GRAVITY's P2VMRED but not valid OIFITS: per-frame flux, coherent flux, VISAMP, flags, GD [m], differential phase [deg], and `TIME` [us], `MJD`, `INT_TIME` [s] estimated from MJD-OBS and DIT (one frame per DIT) |
 
 `P2VMSpectra` (P2VM fit input) and `FrameReducer` (live reduction state) are
 in-memory only. A `P2VMRed` from the live preview has no GD/phase and cannot be saved.

@@ -1,3 +1,12 @@
+# PLANETES 0.30.0：报告和 P2VMRED 采用 GRAVITY 的名称
+
+- SINGLE_SCI_P2VMRED 的表改名为 GRAVITY 的 `OI_WAVELENGTH`（`EFF_WAVE`）、`OI_FLUX`（`FLUX`）、
+  `OI_VIS`，带 `INSNAME`。新增 `TIME` [us]、`MJD`、`INT_TIME`，由原始文件的 MJD-OBS 和 DIT 估算
+  （假设每个 DIT 一帧；相机没有逐帧时间戳）。没有误差、目标和阵列数据，所以不是合法的 OIFITS。
+  `read_reduced` 仍可读取旧的 `PLANETES_*` 产品。
+- P2VM、DARK、BAD、WAVE 和科学报告的标题与说明改用 GRAVITY `gravi_visual` 的用语（只在内容相同时）；
+  BAD 报告增加 Statistics 表（超过 10000 个坏像素时标色）。
+
 # PLANETES 0.29.2：报告说明每个量的定义
 
 - P2VM 和科学报告开头增加 Definitions 表（`pages.definitions_section`），给出透射率 T、相干度 C、

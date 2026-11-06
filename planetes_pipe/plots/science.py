@@ -29,16 +29,16 @@ def sections(reduced: P2VMRed, full: bool = False) -> list[Section]:
     Needs a complete P2VMRed (with group delay and differential phase).
     """
     out = [definitions_section(DEFINITIONS),
-           Section("Flux per telescope", lambda fig: _flux(fig, reduced), 3.4,
-                   "$\\langle P_t\\rangle_\\lambda$ of each frame minus its mean over frames (printed)."),
-           Section("Coherent flux per baseline", lambda fig: _coherent_flux(fig, reduced), GRID_HEIGHT,
-                   "$|\\langle C_{ij}\\rangle_\\lambda|$ of each frame minus its mean over frames (printed)."),
-           Section("VISAMP per baseline", lambda fig: _visibility(fig, reduced), GRID_HEIGHT,
+           Section("SC flux vs. time (OI_FLUX wavelength averaged)", lambda fig: _flux(fig, reduced), 3.4,
+                   "In ADU/DIT vs. frame: $\\langle P_t\\rangle_\\lambda$ minus its mean over frames (printed)."),
+           Section("SC coherent flux vs. time (VISDATA wavelength averaged)", lambda fig: _coherent_flux(fig, reduced), GRID_HEIGHT,
+                   "In ADU/DIT vs. frame: $|\\langle C_{ij}\\rangle_\\lambda|$ minus its mean over frames (printed)."),
+           Section("SC visibility amplitude (VISAMP)", lambda fig: _visibility(fig, reduced), GRID_HEIGHT,
                    "$|C_{ij}|\\,/\\,\\sqrt{P_i P_j}$ of every frame (colour: frame order); flagged samples masked."),
-           Section("Phase per baseline", lambda fig: _phase(fig, reduced), GRID_HEIGHT,
-                   "$\\arg\\langle C_{ij}\\rangle_\\lambda$, unwrapped over frames."),
-           Section("Group delay per baseline", lambda fig: _group_delay(fig, reduced), GRID_HEIGHT,
-                   "GD of every frame, as defined above.")]
+           Section("arg(VISDATA) vs. time", lambda fig: _phase(fig, reduced), GRID_HEIGHT,
+                   "$\\arg\\langle C_{ij}\\rangle_\\lambda$ in degrees vs. frame, unwrapped over frames."),
+           Section("SC group delay vs. time (GDELAY)", lambda fig: _group_delay(fig, reduced), GRID_HEIGHT,
+                   "GD of every frame vs. frame, as defined above.")]
     if full:
         n_frames, _, n_wave = reduced.differential_phase_deg.shape
         for frame in range(0, n_frames, 10):

@@ -185,7 +185,7 @@ def definitions_section(rows) -> Section:
             y = 0.04 + DEFINITION_LINE * (line + 0.5)
             ax.text(0, y, quantity, va="center", fontsize=7, weight="bold")
             for offset, text in enumerate(lines):
-                ax.text(0.27, y + DEFINITION_LINE * offset, text, va="center", fontsize=7)
+                ax.text(0.31, y + DEFINITION_LINE * offset, text, va="center", fontsize=7)
             line += len(lines)
         for y, width in ((0, 1.0), (height, 1.0)):
             ax.plot([0, 1], [y, y], color="black", lw=width, clip_on=False)

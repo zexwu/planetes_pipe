@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 
 from planetes_pipe.instrument import layout
 from planetes_pipe.io import products
+from planetes_pipe.io.keywords import DIT, MJD_OBS
 from planetes_pipe.io.raw import Raw, check_calibrations, read_raw, record_saturation
 from planetes_pipe.logs import step
 from planetes_pipe.steps.dark import Dark, read_dark
@@ -312,10 +313,35 @@ class FrameReducer:
         )
 
 
-def write_reduced(path: Path, product: P2VMRed, *, header=None) -> None:
+INSNAME = "PLANETES_SC"
+
+
+def _time_columns(n_frames: int, n_rows_per_frame: int, start_mjd, dit_s) -> list:
+    """TIME [us since the first frame], MJD and INT_TIME [s], as GRAVITY's P2VMRED tables.
+
+    TIME assumes one frame per DIT, so it is an estimate: the camera records no
+    per-frame timestamps. Values are NaN when the raw header lacks MJD-OBS or DIT.
+    """
+    dit = np.nan if dit_s is None else float(dit_s)
+    start = np.nan if start_mjd is None else float(start_mjd)
+    time_us = np.repeat(np.arange(n_frames) * dit * 1e6, n_rows_per_frame)
+    return [products.column("TIME", time_us, "us"),
+            products.column("MJD", start + time_us / 86400e6, "d"),
+            products.column("INT_TIME", np.full(len(time_us), dit), "s")]
+
+
+def _oi_table(columns: list, name: str) -> afits.BinTableHDU:
+    table = afits.BinTableHDU.from_columns(columns, name=name)
+    table.header["INSNAME"] = (INSNAME, "Instrument name")
+    return table
+
+
+def write_reduced(path: Path, product: P2VMRed, *, header=None, start_mjd=None, dit_s=None) -> None:
     """Save per-frame observables (requires GD and differential phase); never overwrite.
 
-    Table rows are frame-major: frame 1 telescopes (or baselines), frame 2, ...
+    OI_WAVELENGTH, OI_FLUX and OI_VIS are named and arranged as in GRAVITY's P2VMRED,
+    but are not valid OIFITS: errors, target and array data are not produced. Table
+    rows are frame-major: frame 1 telescopes (or baselines), frame 2, ...
     """
     if product.group_delay_m is None or product.differential_phase_deg is None:
         raise ValueError("Saved P2VMRED requires GD and differential phase")
@@ -323,14 +349,16 @@ def write_reduced(path: Path, product: P2VMRed, *, header=None) -> None:
     nb = layout.n_baselines
     stations = np.asarray(layout.telescopes, dtype=int)
     pairs = np.asarray([[int(layout.telescopes[t]) for t in pair] for pair in layout.baseline_pairs])
-    wavelength = [products.column("WAVELENGTH", product.wavelength_m, "m")]
+    wavelength = [products.column("EFF_WAVE", product.wavelength_m, "m")]
     flux = [
         products.column("FRAME", np.repeat(np.arange(1, nf + 1), nt)),
+        *_time_columns(nf, nt, start_mjd, dit_s),
         products.column("STA_INDEX", np.tile(stations, nf)),
-        products.column("FLUXDATA", product.photometric_flux_adu.reshape(-1, nw), "adu"),
+        products.column("FLUX", product.photometric_flux_adu.reshape(-1, nw), "adu"),
     ]
     vis = [
         products.column("FRAME", np.repeat(np.arange(1, nf + 1), nb)),
+        *_time_columns(nf, nb, start_mjd, dit_s),
         products.column("STA_INDEX", np.tile(pairs, (nf, 1))),
         products.column("VISDATA", product.coherent_flux_adu.reshape(-1, nw), "adu"),
         products.column("VISAMP", product.visibility_amplitude.reshape(-1, nw)),
@@ -340,21 +368,30 @@ def write_reduced(path: Path, product: P2VMRed, *, header=None) -> None:
     ]
     extensions = [
         products.detector_table(product.baseline_outputs),
-        afits.BinTableHDU.from_columns(wavelength, name="PLANETES_WAVELENGTH"),
-        afits.BinTableHDU.from_columns(flux, name="PLANETES_FLUX"),
-        afits.BinTableHDU.from_columns(vis, name="PLANETES_VIS"),
+        _oi_table(wavelength, "OI_WAVELENGTH"),
+        _oi_table(flux, "OI_FLUX"),
+        _oi_table(vis, "OI_VIS"),
     ]
     products.save_product(path, "SINGLE_SCI_P2VMRED", extensions, header=header)
 
 
 def read_reduced(path: Path) -> P2VMRed:
-    """Read a checksummed SINGLE_SCI_P2VMRED; rows are frame-major as written."""
+    """Read a checksummed SINGLE_SCI_P2VMRED; rows are frame-major as written.
+
+    Products written before 0.30 use PLANETES_WAVELENGTH/WAVELENGTH,
+    PLANETES_FLUX/FLUXDATA and PLANETES_VIS; they are read as well.
+    """
     with products.open_product(path, "SINGLE_SCI_P2VMRED") as hdus:
-        wavelength = products.read_column(hdus, "PLANETES_WAVELENGTH", "WAVELENGTH")
+        new = "OI_VIS" in hdus
+        wave_hdu, wave_column = (("OI_WAVELENGTH", "EFF_WAVE") if new
+                                 else ("PLANETES_WAVELENGTH", "WAVELENGTH"))
+        flux_hdu, flux_column = ("OI_FLUX", "FLUX") if new else ("PLANETES_FLUX", "FLUXDATA")
+        vis_hdu = "OI_VIS" if new else "PLANETES_VIS"
+        wavelength = products.read_column(hdus, wave_hdu, wave_column)
         nt, nb, nw = layout.n_telescopes, layout.n_baselines, len(wavelength)
-        nf = len(hdus["PLANETES_FLUX"].data) // nt
-        flux = products.read_column(hdus, "PLANETES_FLUX", "FLUXDATA").reshape(nf, nt, nw)
-        vis = {name: products.read_column(hdus, "PLANETES_VIS", name).reshape(nf, nb, -1)
+        nf = len(hdus[flux_hdu].data) // nt
+        flux = products.read_column(hdus, flux_hdu, flux_column).reshape(nf, nt, nw)
+        vis = {name: products.read_column(hdus, vis_hdu, name).reshape(nf, nb, -1)
                for name in ("VISDATA", "VISAMP", "FLAG", "GDELAY", "DIFFPHASE")}
         return P2VMRed(
             photometric_flux_adu=flux,
@@ -383,5 +420,6 @@ def run(science_file, dark_file, flat_file, wave_file, p2vm_file, *, output_dir,
     header = products.provenance("planetes_reduce", science_file, inputs, **options)
     record_saturation(header, {"SCI": raw}, flat.extracted_pixels())
     path = products.product_path(output_dir, science_file, "SINGLE_SCI_P2VMRED")
-    write_reduced(path, product, header=header)
+    write_reduced(path, product, header=header, start_mjd=MJD_OBS.get(raw.header),
+                  dit_s=DIT.get(raw.header))
     return {"SINGLE_SCI_P2VMRED": path}

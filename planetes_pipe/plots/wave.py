@@ -16,7 +16,7 @@ def sections(wave: Wave) -> list[Section]:
             ax.plot(x, wave.wavelength_map_m[output] * 1e9, lw=0.5, color="0.2", alpha=0.6)
         ax.set(xlabel="Detector x [pixel]", ylabel="Wavelength [nm]")
 
-    result = [Section("Wavelength solution", draw_solution, 2.6,
+    result = [Section("SC wavelength (WAVE_DATA_SC) for each output and detector column", draw_solution, 2.6,
                       f"Wavelength of each detector column from the lamp line fit, for the {n_outputs} outputs.")]
     if wave.fit_residual_m is not None:
         residual_nm = wave.fit_residual_m * 1e9
