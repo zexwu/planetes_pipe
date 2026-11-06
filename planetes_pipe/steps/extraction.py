@@ -245,9 +245,11 @@ def stacked_group_delay(
 
     Sums over frames the power of the coherent sum at each trial delay, so fringe motion
     between frames does not cancel it. Returns the delay of the highest power [m], refined
-    by a parabola, and that power over the median power of the search range: near 1 means
-    no fringes in the range, and the delay then means nothing. On 2026-11-05 frames with
-    fringes gave at least 25, and frames without gave at most 8.
+    by a parabola, and that power over the median power of the search range: a few means
+    no fringes in the range, and the delay then means nothing. It grows with the range:
+    on 2026-11-05 frames with fringes gave at least 2000 over +-1000 um, and frames with
+    fringes outside +-100 um gave at most 8 over that range. Use a wide search range: a
+    fringe peak is narrow, so the range costs little and misses nothing.
 
     visdata is (frame, wavelength), complex; wavelength in metres. Channels are not
     weighted: choose the channels to use beforehand.

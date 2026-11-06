@@ -39,6 +39,13 @@ class StackedGroupDelayTests(unittest.TestCase):
         self.assertAlmostEqual(delay * 1e6, 37.2, delta=0.1)
         self.assertGreater(peak, 20)
 
+    def test_a_wide_search_finds_fringes_a_narrow_one_misses(self):
+        frames = self.frames(450e-6, 3.0)
+        delay, peak = stacked_group_delay(frames, self.WAVELENGTH, (-1000e-6, 1000e-6))
+        self.assertAlmostEqual(delay * 1e6, 450, delta=0.2)
+        self.assertGreater(peak, 20)
+        self.assertLess(stacked_group_delay(frames, self.WAVELENGTH)[1], 20)
+
     def test_no_fringes_give_no_clear_peak(self):
         _, peak = stacked_group_delay(self.frames(37.2e-6, 0.0), self.WAVELENGTH)
         self.assertLess(peak, 5)
