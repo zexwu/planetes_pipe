@@ -247,31 +247,17 @@ class P2VMTests(unittest.TestCase):
             short = {b: Raw(np.zeros((3, 1, 1)), r.category, r.header, r.path) for b, r in scans.items()}
             self.assertIsNone(delay_line_opd(short))
 
-    def test_recorded_opd_gain_must_agree_with_dl_gain(self):
-        gains = {b: (1 if b == "32" else -1) for b in layout.baselines}
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-            scans = self.write_scans(directory, recorded=gains)
-            self.assertEqual(find_reversed_baselines(scans, gains), [layout.baselines.index("32")])
-            with self.assertRaisesRegex(ValueError, "records OPDGAIN"):
-                find_reversed_baselines(scans, {b: -g for b, g in gains.items()})
-
     def test_positive_opd_gain_marks_a_reversed_baseline(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             gains = {b: (1 if b == "32" else -1) for b in layout.baselines}
             scans = self.write_scans(directory, recorded=gains)
             self.assertEqual(find_reversed_baselines(scans), [layout.baselines.index("32")])
-        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-            scans = self.write_scans(directory)
-            self.assertEqual(find_reversed_baselines(scans), [])
-            self.assertEqual(find_reversed_baselines(scans, gains),
-                             [layout.baselines.index("32")])
 
-    def test_no_opd_gain_warns(self):
+    def test_scans_without_opd_gain_are_refused(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             scans = self.write_scans(directory)
-            with self.assertLogs("planetes_pipe", "WARNING") as logs:
-                self.assertEqual(find_reversed_baselines(scans), [])
-            self.assertIn("no OPD sign", logs.output[0])
+            with self.assertRaisesRegex(ValueError, "before 2026-11-05 are not supported"):
+                find_reversed_baselines(scans)
 
 
 class ReversedBaselineTests(unittest.TestCase):

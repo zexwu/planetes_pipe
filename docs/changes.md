@@ -1,3 +1,11 @@
+# PLANETES 0.39.0：不再支持 2026-11-05 以前的扫描，删除 `dl_gain`
+
+- P2VM 扫描必须在 DL_SCAN 中记录 `OPDGAIN`（2026-11-05 起 `take_p2vm_calibration` 都会写入）。
+  `find_reversed_baselines` 对缺少它的扫描报错，不再警告后当作未反向。
+- 删除 `p2vm.run`、`find_reversed_baselines`、`delay_line_opd` 的 `dl_gain` 和 PyEsoRex 参数
+  `planetes.calib.dl-gain`。较早的数据（如 2026-02-05 的 test_data）不再支持。
+- 数值结果不变（11-06 的 P2VM 与 0.38.0 逐位相同，见下）。
+
 # PLANETES 0.38.0：报告页边距变窄，密集的点画成图像
 
 - 所有报告（`plots.pages`）的页边距从 2.3 cm（顶 2.4 cm、底 2.2 cm）改为两侧约 1.1 cm、顶 1.5 cm、底 1.4 cm；

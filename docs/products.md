@@ -107,7 +107,6 @@ The CPL parameter is the Python keyword with dashes, under `planetes.calib` or
 | `metrology_trace` | planetes.calib.metrology-trace | false |
 | `keep_diagnostics` | planetes.calib.keep-diagnostics | false |
 | `gd_search_min_m` / `max_m` (P2VM) | planetes.calib.gd-search-min-m / -max-m | −30e-6 / 30e-6 m |
-| `dl_gain` (P2VM) | planetes.calib.dl-gain | none: each scan's recorded DL_SCAN `OPDGAIN`, which sets only the baseline's orientation; give it (e.g. `43:-1,42:-1,41:-1,32:1,31:-1,21:-1`) only for scans recorded before 2026-11-05 |
 | `wave_min_m` / `wave_max_m` (P2VM) | planetes.calib.wave-min-m / -max-m | 0 / 1 m: the whole common band |
 | `gd_search_min_m` / `max_m` (science) | planetes.reduce.gd-search-min-m / -max-m | −1000e-6 / 1000e-6 m: where the fringes are found, per 64 frames |
 

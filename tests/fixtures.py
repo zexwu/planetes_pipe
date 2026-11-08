@@ -126,7 +126,19 @@ def write_raw(path: Path, cube, physical: RawMetadata):
     write_shutters(header, physical.shutters)
     image = fits.ImageHDU(cube, name="IMAGING_DATA_SC")
     image.header["BUNIT"] = "adu"
-    fits.HDUList([fits.PrimaryHDU(header=header), image]).writeto(path, checksum=True)
+    hdus = [fits.PrimaryHDU(header=header), image]
+    if physical.category == "P2VM_RAW":  # Scans record their baseline's OPD sign.
+        moving = 1 + min(n for n, opened in enumerate(physical.shutters) if opened)  # "43" -> 3
+        scan = fits.BinTableHDU.from_columns([
+            fits.Column(name="FIRST_FRAME", format="K", array=[0]),
+            fits.Column(name="NFRAMES", format="K", array=[len(cube)]),
+            fits.Column(name="BEFORE_MM", format="D", array=[0.0]),
+            fits.Column(name="AFTER_MM", format="D", array=[0.0]),
+        ], name="DL_SCAN")
+        scan.header["MOVINGDL"] = moving
+        scan.header["OPDGAIN"] = -1.0  # None of the synthetic baselines is reversed.
+        hdus.append(scan)
+    fits.HDUList(hdus).writeto(path, checksum=True)
 
 
 def input_rows(paths):

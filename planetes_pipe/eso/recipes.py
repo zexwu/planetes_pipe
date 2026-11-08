@@ -43,8 +43,6 @@ HELP = {
     "gd_search_max_m": "Upper edge of the GD search [m] (science: where fringes are found)",
     "wave_min_m": "Shortest wavelength of the P2VM band [m]; 0 keeps the whole common band",
     "wave_max_m": "Longest wavelength of the P2VM band [m]; 1 keeps the whole common band",
-    "dl_gain": "OPD sign per baseline (baseline orientation), e.g. 43:-1,42:-1,41:-1,32:1,"
-               "31:-1,21:-1, for scans recorded without DL_SCAN OPDGAIN; must agree with it",
 }
 
 
@@ -71,13 +69,6 @@ def run_options(run, values: dict) -> dict:
     """Keyword arguments for run() from {option name: value}."""
     return {name: values[name.replace("_", "-")]
             for name in signature(run).parameters if name in HELP}
-
-
-def _gain(text: str) -> dict[str, float] | None:
-    """'43:-1,42:-1,...' -> {'43': -1.0, ...}; empty -> None."""
-    if not text:
-        return None
-    return {key.strip(): float(value) for key, value in (i.split(":") for i in text.split(","))}
 
 
 # ---------------------------------------------------------------- SOF and products
@@ -240,7 +231,6 @@ class PlanetesP2VM(ui.PyRecipe):
         sof = read_sof(frameset, {"DARK": 1, "FLAT": 1, "WAVE": 1, "FLAT_RAW": 4, "P2VM_RAW": 6},
                        optional=("PHASE_REFERENCE", "PHASE_DARK_CALIB"))
         options = run_options(p2vm.run, values)
-        options["dl_gain"] = _gain(values["dl-gain"])
         if "PHASE_REFERENCE" in sof:
             options["phase_file"] = sof["PHASE_REFERENCE"][0]
         if "PHASE_DARK_CALIB" in sof:

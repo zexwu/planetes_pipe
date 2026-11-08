@@ -910,11 +910,10 @@ def read_p2vm(path: Path) -> P2VM:
         return P2VM(**values)
 
 
-def delay_line_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = None
-                   ) -> NDArray | None:
+def delay_line_opd(scans: dict[str, Raw]) -> NDArray | None:
     """The scans' OPD as the delay line records it [m], (baseline, frame), for comparison.
 
-    DL_SCAN position (mean of BEFORE_MM and AFTER_MM) times OPDGAIN, else dl_gain; its
+    DL_SCAN position (mean of BEFORE_MM and AFTER_MM) times OPDGAIN; its
     zero is the delay line's. The fit does not use it (scan_group_delay): it shows how
     far the delay line is from where it says, e.g. its backlash. A row is NaN for a scan
     without DL_SCAN, gain or matching frame count; None when no scan has one.
@@ -928,7 +927,7 @@ def delay_line_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = 
         except KeyError:
             rows.append(row)
             continue
-        gain = header.get("OPDGAIN", None if dl_gain is None else dl_gain[baseline])
+        gain = header.get("OPDGAIN")
         counts = table["NFRAMES"]
         if gain is not None and counts.sum() == n_frames and np.array_equal(
                 table["FIRST_FRAME"], np.cumsum(counts) - counts):
@@ -939,15 +938,14 @@ def delay_line_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = 
     return None if np.isnan(rows).all() else rows
 
 
-def find_reversed_baselines(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = None
-                            ) -> list[int]:
+def find_reversed_baselines(scans: dict[str, Raw]) -> list[int]:
     """Baselines whose scan shows fringes opposite to the convention C_ij = E_i E_j*.
 
     With that convention the OPD of baseline ij falls as the delay line of its second
-    telescope moves out: OPD gain -1. A positive recorded OPDGAIN (or dl_gain, for scans
-    recorded without one; both must agree) therefore means a reversed baseline, on
-    2026-11-05 S3-S2, whose closure phases only close once corrected. A scan with
-    neither counts as not reversed, with a warning.
+    telescope moves out: OPD gain -1. A positive recorded OPDGAIN therefore means a
+    reversed baseline, on 2026-11-05 S3-S2, whose closure phases only close once
+    corrected. Every scan must record it (DL_SCAN OPDGAIN, written since 2026-11-05);
+    older scans are not supported.
     """
     found, missing = [], []
     for index, baseline in enumerate(layout.baselines):
@@ -957,33 +955,27 @@ def find_reversed_baselines(scans: dict[str, Raw], dl_gain: Mapping[str, float] 
             header = {}
         if header.get("MOVINGDL", int(baseline[1])) != int(baseline[1]):
             raise ValueError(f"OPD gain assumes the second arm moves: {baseline}")
-        recorded = header.get("OPDGAIN")
-        given = None if dl_gain is None else dl_gain[baseline]
-        if recorded is not None and given is not None and float(recorded) != float(given):
-            raise ValueError(f"Scan {baseline} records OPDGAIN {recorded}, dl_gain gives {given}")
-        gain = recorded if recorded is not None else given
+        gain = header.get("OPDGAIN")
         if gain is None:
             missing.append(baseline)
         elif float(gain) > 0:
             found.append(index)
     if missing:
-        log.warning("no OPD sign for scan(s) %s (neither OPDGAIN in DL_SCAN nor dl_gain): "
-                    "taken as not reversed; a reversed baseline's closure phases will not "
-                    "close", ", ".join(missing))
+        raise ValueError(f"scan(s) {', '.join(missing)} record no OPD sign (DL_SCAN OPDGAIN); "
+                         "scans taken before 2026-11-05 are not supported")
     return found
 
 
 @step("P2VM")
 def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
-        phase_file=None, phase_dark_file=None, dl_gain=None,
+        phase_file=None, phase_dark_file=None,
         keep_diagnostics=False, gd_search_min_m=-30e-6, gd_search_max_m=30e-6,
         wave_min_m=0.0, wave_max_m=1.0) -> dict[str, Path]:
     """planetes_p2vm: four flats + six baseline scans + DARK, FLAT, WAVE -> P2VM.
 
     phase_file is an optional all-shutters-open exposure used as instrumental phase
-    reference, with phase_dark_file if its DIT differs from the scans. The scans'
-    The scans' recorded OPDGAIN gives each baseline's orientation; dl_gain
-    ({'43': -1, ...}) supplies it for scans recorded without one (find_reversed_baselines).
+    reference, with phase_dark_file if its DIT differs from the scans. Each scan's
+    recorded OPDGAIN gives its baseline's orientation (find_reversed_baselines).
     wave_min_m and wave_max_m limit the P2VM's wavelength band; the defaults do not.
     """
     dark, flat, wave = read_dark(dark_file), read_flat(flat_file), read_wave(wave_file)
@@ -1004,10 +996,10 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
     options = dict(keep_diagnostics=keep_diagnostics,
                    gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m)
     product = fit_p2vm(spectra, phase_reference=phase_spectra,
-                       reversed_baselines=find_reversed_baselines(scans, dl_gain),
+                       reversed_baselines=find_reversed_baselines(scans),
                        **options)
     if keep_diagnostics:
-        product.delay_line_opd_m = delay_line_opd(scans, dl_gain)
+        product.delay_line_opd_m = delay_line_opd(scans)
 
     reference = scans["43"].path  # Names the product and supplies its observation header.
     inputs = {"FLAT_RAW": flat_files, "P2VM_RAW": scan_files,
@@ -1016,7 +1008,7 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
         inputs["PHASE_REFERENCE"] = [phase_file]
     if phase_dark_file is not None:
         inputs["PHASE_DARK_CALIB"] = [phase_dark_file]
-    header = products.provenance("planetes_p2vm", reference, inputs, dl_gain=dl_gain,
+    header = products.provenance("planetes_p2vm", reference, inputs,
                                     wave_min_m=wave_min_m, wave_max_m=wave_max_m, **options)
     record_saturation(header, {**{f"T{t}": raw for t, raw in flats.items()},
                                **{f"SC{b}": raw for b, raw in scans.items()}},
