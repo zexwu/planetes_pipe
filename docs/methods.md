@@ -193,8 +193,15 @@ The science GD is tracked (`extraction.tracked_group_delay`): each block of 64 f
 finds its fringe over ±1000e-6 m by the summed coherent power of its frames
 (`stacked_group_delay`), and each frame is then searched within ±50e-6 m of it with a
 1e-8 m step and Newton refinement. A block whose peak is below 20 times the median
-power has no fringe in the range; the reduction warns. The phase reference of the P2VM
-keeps a single ±30e-6 m search.
+power has no fringe in the range; the reduction warns. With at least 64 frames showing
+fringes, the dispersion of the data is then removed and every frame searched again, twice
+(`dispersion_phase`: the frames, shifted by their GD and mean phase, are summed, and the
+phase of the sum is fitted with a 4th-order polynomial in wavenumber whose constant and
+linear terms are dropped). Dispersion flattens the top of the delay peak, and the GD of a
+noisy frame slides along it: on the bench, baselines with a 5-11 rad bow scattered by
+0.5-1.1 um per frame, and by 0.01-0.05 um once it was removed. Without a linear term the
+GD keeps its meaning (the group delay at the mean wavenumber). The phase reference of the
+P2VM keeps a single ±30e-6 m search.
 Real-time reduction shares extraction, normalization and flags, with a 0.5e-6 m step
 for speed. It always receives raw unbinned frames. Display binning belongs to the
 consuming application.

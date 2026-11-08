@@ -351,15 +351,57 @@ def tracked_group_delay(
     a narrow one misses fringes beyond it: on 2026-11-06T175510 T4 was at -300 um and
     a +-100 um search returned delays scattered over it, with VISAMP 0.8.
 
+    With at least GD_BLOCK_FRAMES frames showing fringes, the frames are then estimated
+    again with the dispersion of the data (dispersion_phase) removed, DISPERSION_PASSES
+    times. Dispersion bends
+    the phase in wavenumber and flattens the top of the delay peak, so the GD of a frame
+    slides along it with the noise: on 2026-11-05 baseline 41 (11 rad of bow) the GD
+    scattered 1.1 um from frame to frame, and 0.04 um once the bow was removed. The
+    dispersion phase has no linear term, so the GD keeps its meaning.
+
     Also returns each frame's block peak ratio (stacked_group_delay): below
     NO_FRINGE_PEAK the block shows no fringe in the range and its GD means nothing.
     """
     gd_m = np.empty(len(visdata))
     peak = np.empty(len(visdata))
+    blocks = []
     for start in range(0, len(visdata), GD_BLOCK_FRAMES):
         rows = slice(start, start + GD_BLOCK_FRAMES)
         centre, peak[rows] = stacked_group_delay(visdata[rows], wavelength, search_range)
-        gd_m[rows] = estimate_group_delay(
-            visdata[rows], wavelength, search_range=(centre - GD_SPAN_M, centre + GD_SPAN_M),
-            grid_step_m=grid_step_m)
+        blocks.append((rows, (centre - GD_SPAN_M, centre + GD_SPAN_M)))
+        gd_m[rows] = estimate_group_delay(visdata[rows], wavelength, search_range=blocks[-1][1],
+                                          grid_step_m=grid_step_m)
+    fringes = peak >= NO_FRINGE_PEAK
+    if fringes.sum() >= GD_BLOCK_FRAMES:
+        for _ in range(DISPERSION_PASSES):
+            flat = visdata * np.exp(-1j * dispersion_phase(visdata[fringes], wavelength,
+                                                           gd_m[fringes]))[None, :]
+            for rows, span in blocks:
+                gd_m[rows] = estimate_group_delay(flat[rows], wavelength, search_range=span,
+                                                  grid_step_m=grid_step_m)
     return gd_m, peak
+
+
+DISPERSION_ORDER = 4  # polynomial in wavenumber; the bench bow is mostly quadratic
+# The first dispersion fit uses the blurred GDs, which wash out the band edges: on a
+# simulated 11 rad bow it left 0.3 rad and moved the GD 0.8 um; a second pass leaves
+# 0.01 rad and 0.03 um, and a third changes nothing.
+DISPERSION_PASSES = 2
+
+
+def dispersion_phase(visdata: NDArray, wavelength: NDArray, gd_m: NDArray) -> NDArray:
+    """Phase across the band common to all frames beyond their GD [rad]: (wavelength,).
+
+    Each frame is shifted by its GD and its mean phase, the frames are summed, and the
+    unwrapped phase of the sum is fitted with a DISPERSION_ORDER polynomial in wavenumber
+    whose constant and linear terms are dropped. visdata is (frame, wavelength).
+    """
+    sigma = 1 / wavelength
+    aligned = visdata * np.exp(-2j * np.pi * gd_m[:, None] * sigma[None, :])
+    aligned *= np.exp(-1j * np.angle(aligned.sum(axis=1)))[:, None]
+    total = aligned.sum(axis=0)
+    x = (sigma - sigma.mean()) / np.ptp(sigma)
+    coef = np.polynomial.polynomial.polyfit(x, np.unwrap(np.angle(total)), DISPERSION_ORDER,
+                                            w=np.abs(total))
+    coef[:2] = 0
+    return np.polynomial.polynomial.polyval(x, coef)

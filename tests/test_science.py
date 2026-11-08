@@ -14,6 +14,7 @@ from planetes_pipe.instrument import layout
 from planetes_pipe.steps.extraction import (
     GD_BLOCK_FRAMES,
     NO_FRINGE_PEAK,
+    estimate_group_delay,
     stacked_group_delay,
     tracked_group_delay,
 )
@@ -60,6 +61,23 @@ class StackedGroupDelayTests(unittest.TestCase):
         gd, peak = tracked_group_delay(frames, self.WAVELENGTH)
         np.testing.assert_allclose(gd, delay, atol=1.5e-6)  # noise-limited, 70 nm band
         self.assertTrue(np.all(peak > NO_FRINGE_PEAK))
+
+    def test_tracking_removes_the_dispersion_that_blurs_the_delay(self):
+        rng = np.random.default_rng(4)
+        wavelength = np.linspace(1.1e-6, 1.27e-6, 300)
+        sigma = 1 / wavelength
+        x = (sigma - sigma.mean()) / np.ptp(sigma)
+        bow = -44 * x**2  # 11 rad from band centre to edge, as baseline 41 on 2026-11-05
+        n = 2 * GD_BLOCK_FRAMES
+        delay = 668e-6 + np.linspace(0, 2e-6, n)
+        noise = rng.normal(size=(n, 300)) + 1j * rng.normal(size=(n, 300))
+        frames = 1.5 * np.exp(2j * np.pi * delay[:, None] * sigma + 1j * bow) + noise
+        blurred = estimate_group_delay(frames, wavelength, (delay[0] - 30e-6, delay[0] + 30e-6))
+        gd, _ = tracked_group_delay(frames, wavelength)
+        scatter = np.std(gd - delay - np.mean(gd - delay))
+        self.assertGreater(np.std(blurred - delay), 5 * scatter)
+        self.assertLess(scatter, 0.2e-6)  # 0.18 um without the bow at this noise
+        self.assertLess(abs(np.mean(gd - delay)), 0.1e-6)  # the bow has no linear part
 
     def test_no_fringes_give_no_clear_peak(self):
         _, peak = stacked_group_delay(self.frames(37.2e-6, 0.0), self.WAVELENGTH)
