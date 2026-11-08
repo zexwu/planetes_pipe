@@ -126,8 +126,8 @@ From the workspace root, check changes with:
 
 ```powershell
 uv run --locked python -m unittest discover -s planetes_pipe/tests -v
-uv run --locked python -m unittest discover -s bench/tests -v
+uv run --locked --group test pytest planetes_bench/tests
 ```
 
-Keep the sibling bench compatible when changing public APIs or product formats.
+Keep the sibling planetes_bench compatible when changing public APIs or product formats.
 `build/` is disposable setuptools output, not source or a runtime dependency.

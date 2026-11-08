@@ -8,22 +8,29 @@ run, closest in time); the steps check that every calibration matches its raw da
 """
 from pathlib import Path
 
+from astropy.io import fits
+
 from planetes_pipe import configure_logging, plots
+from planetes_pipe.io.keywords import TPL_START
 from planetes_pipe.io.raw import find_dark, find_raw
 from planetes_pipe.steps import dark, flat, p2vm, wave
 
-RAW = Path("../../captures/2026-11-04/raw/calibration")
-OUTPUT = Path("../../captures/2026-11-04/reduced/")  # Existing products are never overwritten.
-# OPD sign of each baseline's scan. Scans record it (DL_SCAN OPDGAIN) since 2026-11-05;
-# older ones, such as 2026-11-04, need it here or a reversed baseline goes uncorrected.
-DL_GAIN = {"43": -1, "42": -1, "41": -1, "32": 1, "31": -1, "21": -1}
+RAW = Path("../../data/2026-11-06/raw/calibration")  # The reference night (workspace README).
+OUTPUT = Path("../../data/2026-11-06/example_calibrations/")  # Never overwritten.
+# 2026-11-06 has two calibration runs, TPL.START 16:40:23 and 17:15:27; this reduces the
+# second, which the science exposures used. The lamp is a run of its own.
+RUN = "2026-11-06T17:15:27"
+
+
+def in_run(paths):
+    return [path for path in paths if TPL_START.get(fits.getheader(path)) == RUN]
 
 
 def main():
     configure_logging()  # The library is silent unless the script asks.
     lamp_raws = find_raw(RAW, "WAVELAMP_RAW")
-    flat_raws = find_raw(RAW, "FLAT_RAW")  # Four files; identities come from shutters.
-    scan_raws = find_raw(RAW, "P2VM_RAW")  # Six baseline scans.
+    flat_raws = in_run(find_raw(RAW, "FLAT_RAW"))  # Four files; identities come from shutters.
+    scan_raws = in_run(find_raw(RAW, "P2VM_RAW"))  # Six baseline scans.
 
     main_dark = dark.run(find_dark(flat_raws[0], RAW), output_dir=OUTPUT)  # Flats' and scans' DIT.
     lamp_dark = dark.run(find_dark(lamp_raws[0], RAW), output_dir=OUTPUT)  # The lamp's DIT.
@@ -32,7 +39,7 @@ def main():
                         metrology_trace=True)
     wave_out = wave.run(lamp_raws[0], lamp_dark["DARK"], flat_out["FLAT"], output_dir=OUTPUT)
     p2vm_out = p2vm.run(main_dark["DARK"], flat_out["FLAT"], wave_out["WAVE"], flat_raws,
-                        scan_raws, output_dir=OUTPUT, dl_gain=DL_GAIN,
+                        scan_raws, output_dir=OUTPUT,  # Scans record their OPD sign.
                         gd_search_min_m=-100e-6, gd_search_max_m=100e-6,
                         wave_min_m=1100e-9, wave_max_m=1270e-9,  # Avoids the SuperK pump, ~1064 nm.
                         keep_diagnostics=True)

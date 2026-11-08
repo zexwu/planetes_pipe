@@ -26,9 +26,7 @@ science exposure. Products are identified by FITS category, not their filenames.
 Existing outputs are never overwritten.
 
 To reduce a whole night of bench captures, with inputs matched automatically by
-header (setup, capture run, time), use `bench/scripts/reduce_night.py` instead.
+header (setup, capture run, time), use `planetes_bench/scripts/reduce_night.py` instead.
 
-The old 2026-02-05 dataset has missing calibration exposure metadata and uses
-its own explicit selections in `../../test_data/reduce.py`.
 Both scripts call each step's `run()`, the same code as the optional
 [PyEsoRex route](../docs/eso/README.md); SOF files are only needed there.

@@ -22,8 +22,9 @@ The first column is a file path; the second is the recipe's input role. Shutter
 identity still comes from the FITS header. Python examples do not need SOFs.
 
 Each recipe's inputs (tag and count) are listed in `planetes_pipe/eso/recipes.py`
-and [products.md](../products.md). Ready-to-run SOFs for the 2026-02-05 bench data
-are in the workspace at `test_data/sof/`.
+and [products.md](../products.md). `planetes_bench/scripts/reduce_night.py` writes
+each step's SOF next to its products (`<reference>_planetes_<step>.sof`), e.g. in the
+workspace's `data/2026-11-06/reduced/`; they run as they are.
 
 For example, with CPL/PyCPL/PyEsoRex installed, run in a fresh output directory:
 
