@@ -4,7 +4,7 @@ As GRAVITY's reports (gravi_visual): a title on the first page, then sections fl
 down the pages, each a bold heading, a short explanation and its content (plots or
 a table); "Page n / N" and the product file at the foot of every page.
 
-The style is a plain scientific one: generous margins, thin frames, inward ticks on
+The style is a plain scientific one: narrow margins, thin frames, inward ticks on
 all sides, shared axes with tick labels only on the outer panels and axis labels
 once per grid, one legend per section above its panels, and ruled tables without
 vertical lines. A section is drawn into a matplotlib SubFigure, without pyplot, so
@@ -21,6 +21,7 @@ from cycler import cycler
 from matplotlib import rc_context
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
+from matplotlib.collections import Collection
 from matplotlib.lines import Line2D
 
 from planetes_pipe.instrument import layout
@@ -28,8 +29,15 @@ from planetes_pipe.instrument import layout
 log = logging.getLogger(__name__)
 
 A4 = (8.27, 11.69)                         # inches, portrait
-TOP, BOTTOM, SIDE = 0.95, 0.85, 0.9        # page margins, inches (sides ~2.3 cm)
-HEADING = 0.45                             # a section's title and explanation, inches
+TOP, BOTTOM, SIDE = 0.6, 0.55, 0.45        # page margins, inches (sides ~1.1 cm)
+TITLE_Y, FOOT_Y = 0.38, 0.3               # first-page title and footer, inches from the edge
+# Dense plots are drawn as images in the PDF: point sets (markers, one per frame) above
+# RASTER_MARKERS points, lines above RASTER_POINTS (spectra, ~520 points, stay vector). One
+# vector path per point made a report ~0.7 MB. RASTER_DPI is matplotlib's default figure dpi,
+# at which the waterfall images were always resampled.
+RASTER_MARKERS, RASTER_POINTS, RASTER_DPI = 100, 600, 100
+TITLE_HEIGHT, LINE_HEIGHT = 0.27, 0.14     # a section's title, and each line of its explanation, inches
+WRAP = 150                                 # characters per explanation line
 GRID_HEIGHT = 3.9                          # six baseline panels, inches
 # Colours of the A, C, B, D outputs (in that order), then of other series.
 ABCD_COLORS = ("#0C5DA5", "#FF9500", "#00B945", "#FF2C00")
@@ -158,45 +166,24 @@ def summary_section(path, header, rows) -> Section:
                    table_height(len(rows) - 1), "Identity of the product, from its header.")
 
 
-def _wrap(text: str, width: int = 120) -> str:
+def _wrap(text: str, width: int = WRAP) -> str:
     """Wrap an explanation at the given width without breaking a $formula$."""
     parts = text.split("$")
     parts[1::2] = [part.replace(" ", "\0") for part in parts[1::2]]
     return textwrap.fill("$".join(parts), width).replace("\0", " ")
 
 
-DEFINITION_LINE = 0.2                      # one line of a definitions table, inches
-
-
-def definitions_section(rows) -> Section:
-    """How the report's quantities are defined: rows of (name, lines of definition).
-
-    Formulas are matplotlib mathtext; each line is drawn as written, so keep it short.
-    """
-    n_lines = sum(len(lines) for _, lines in rows)
-    height = DEFINITION_LINE * n_lines + 0.08
-
-    def draw(fig):
-        ax = fig.subplots()
-        ax.axis("off")
-        ax.set(xlim=(0, 1), ylim=(height, 0))
-        line = 0
-        for quantity, lines in rows:
-            y = 0.04 + DEFINITION_LINE * (line + 0.5)
-            ax.text(0, y, quantity, va="center", fontsize=7, weight="bold")
-            for offset, text in enumerate(lines):
-                ax.text(0.31, y + DEFINITION_LINE * offset, text, va="center", fontsize=7)
-            line += len(lines)
-        for y, width in ((0, 1.0), (height, 1.0)):
-            ax.plot([0, 1], [y, y], color="black", lw=width, clip_on=False)
-    return Section("Definitions", draw, height, "How the quantities in this report are computed.")
+def _heading(section) -> float:
+    """Height [inches] of a section's title and its wrapped explanation."""
+    lines = len(_wrap(section.explanation).splitlines()) if section.explanation else 0
+    return TITLE_HEIGHT + LINE_HEIGHT * lines + 0.04
 
 
 def _pack(sections, usable: float):
     """Sections in order onto pages: a new page when the next one does not fit."""
     pages, current, used = [], [], 0.0
     for section in sections:
-        need = HEADING + section.height
+        need = _heading(section) + section.height
         if current and used + need > usable:
             pages.append(current)
             current, used = [], 0.0
@@ -207,6 +194,18 @@ def _pack(sections, usable: float):
     return pages
 
 
+def _rasterize_dense(fig) -> None:
+    """Draw dense point sets and lines as images (RASTER_MARKERS, RASTER_POINTS)."""
+    for artist in fig.findobj(lambda a: isinstance(a, (Line2D, Collection))):
+        if isinstance(artist, Line2D):
+            n_points = len(artist.get_xdata())
+            markers = artist.get_marker() not in (None, "", "None", " ") and artist.get_linestyle() == "None"
+        else:
+            n_points, markers = len(artist.get_offsets()), True
+        if n_points > (RASTER_MARKERS if markers else RASTER_POINTS):
+            artist.set_rasterized(True)
+
+
 def write_pdf(path, title: str, sections, footer: str = "") -> Path:
     """Write the sections as a portrait A4 PDF; never overwrites."""
     path = Path(path)
@@ -215,28 +214,31 @@ def write_pdf(path, title: str, sections, footer: str = "") -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     usable = A4[1] - TOP - BOTTOM
     pages = _pack(list(sections), usable)
-    foot = 0.5 / A4[1]
+    foot = FOOT_Y / A4[1]
     with rc_context(STYLE), PdfPages(path) as pdf:
         for number, group in enumerate(pages, 1):
             fig = Figure(figsize=A4, layout="constrained")
             fig.get_layout_engine().set(w_pad=0.03, h_pad=0.03, hspace=0.03, wspace=0.03)
             if number == 1:
-                fig.text(0.5, 1 - 0.55 / A4[1], title, ha="center", va="center", fontsize=12,
+                fig.text(0.5, 1 - TITLE_Y / A4[1], title, ha="center", va="center", fontsize=12,
                          weight="bold")
             fig.text(SIDE / A4[0], foot, footer, fontsize=6.5, color="0.4")
             fig.text(1 - SIDE / A4[0], foot, f"Page {number} / {len(pages)}", fontsize=6.5,
                      color="0.4", ha="right")
             content = fig.subfigures(1, 3, width_ratios=[SIDE, A4[0] - 2 * SIDE, SIDE])[1]
-            heights = [HEADING + s.height for s in group]
+            heights = [_heading(s) + s.height for s in group]
             ratios = [TOP, *heights, max(usable - sum(heights), 0.01) + BOTTOM]
             areas = content.subfigures(len(ratios), 1, height_ratios=ratios)
             for area, section in zip(areas[1:-1], group):
-                head, body = area.subfigures(2, 1, height_ratios=[HEADING, section.height])
-                head.text(0.0, 0.7, section.title, fontsize=9.5, weight="bold", va="center")
-                head.text(0.0, 0.28, _wrap(section.explanation), fontsize=7,
-                          color="0.4", va="center")
+                heading = _heading(section)
+                head, body = area.subfigures(2, 1, height_ratios=[heading, section.height])
+                head.text(0.0, 1 - 0.13 / heading, section.title, fontsize=9.5, weight="bold",
+                          va="center")
+                head.text(0.0, 1 - TITLE_HEIGHT / heading, _wrap(section.explanation), fontsize=7,
+                          color="0.4", va="top", linespacing=1.5)
                 section.draw(body)
-            pdf.savefig(fig)
+            _rasterize_dense(fig)
+            pdf.savefig(fig, dpi=RASTER_DPI)
     log.info("wrote %s (%d sections, %d page%s)", path.name, sum(map(len, pages)), len(pages),
              "" if len(pages) == 1 else "s")
     return path

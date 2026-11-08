@@ -15,7 +15,6 @@ from planetes_pipe.plots.pages import (
     FLAG,
     GUIDE,
     Section,
-    definitions_section,
     legend,
     table,
     table_height,
@@ -33,17 +32,6 @@ from planetes_pipe.steps.wave import (
 ACCEPTED = {"color": "0.25", "ls": "", "marker": ".", "ms": 3}
 REJECTED = {"color": "#FF2C00", "ls": "", "marker": "o", "ms": 4, "mfc": "none", "mew": 0.7}
 OUTPUT_CMAP = "viridis"  # outputs coloured by index, bottom of the detector first
-
-DEFINITIONS = (
-    ("Residual", ["Laboratory minus fitted wavelength of a lamp line in one output."]),
-    ("Fit", [rf"$\lambda(x, y)$: one polynomial of total degree {SURFACE_DEGREE} over the detector, "
-             "y on each output's trace.",
-             r"Lines beyond 3$\sigma$ are rejected, three times; $\sigma$ is the accepted residuals' stdev."]),
-    ("Dispersion", [r"$d\lambda/dx$ of each output's solution."]),
-    ("Deviation", [r"$\lambda_o(x) - \mathrm{median}_o\,\lambda_o(x)$: how the solution of output $o$ "
-                   "differs from the others' at one column."]),
-)
-
 
 def _lines(wave: Wave):
     """Every fitted line: residual [nm], x, y, laboratory wavelength [nm], output, rejected."""
@@ -112,7 +100,6 @@ def sections(wave: Wave, header=None) -> list[Section]:
                                             [label for label, _ in rows], shade=shade),
                           table_height(len(rows) - 1),
                           "The solution's coverage and dispersion, and how well the lamp lines fit it."))
-    result.append(definitions_section(DEFINITIONS))
 
     if wave.lamp_image_adu is not None:
         def draw_image(fig):
@@ -192,8 +179,8 @@ def sections(wave: Wave, header=None) -> list[Section]:
         _output_colorbar(fig, list(axes), n_outputs)
     result.append(Section("Wavelength solution (WAVE_DATA_SC), dispersion and spread across outputs",
                           draw_solution, 2.6,
-                          f"Wavelength of each detector column for the {n_outputs} outputs, its "
-                          "derivative, and its difference from the median output."))
+                          f"$\\lambda_o(x)$ of each detector column for the {n_outputs} outputs, the dispersion $d\\lambda/dx$, and "
+                          "the deviation $\\lambda_o(x) - \\mathrm{median}_o\\,\\lambda_o(x)$ from the other outputs."))
 
     if not has_lines:
         return result
@@ -234,9 +221,9 @@ def sections(wave: Wave, header=None) -> list[Section]:
         hist_ax.set(xlabel="Lines")
         fig.colorbar(points, ax=[scatter_ax, hist_ax], label="Detector y [pixel]", pad=0.02)
     result.append(Section("Line residuals along the dispersion", draw_along_x, 2.6,
-                          f"Every fitted line, {int((~rejected).sum())} accepted (sample stdev "
-                          f"{rms:.3f} nm) and {int(rejected.sum())} rejected (red; clipped to "
-                          "the axis); a trend in x is a missing polynomial term."))
+                          f"Residual = laboratory − fitted wavelength; fit $\\lambda(x, y)$: one polynomial of total degree "
+                          f"{SURFACE_DEGREE}, lines beyond 3$\\sigma$ rejected three times. {int((~rejected).sum())} accepted "
+                          f"(stdev {rms:.3f} nm), {int(rejected.sum())} rejected (red, clipped to the axis); a trend in x is a missing term."))
 
     def draw_across_y(fig):
         ax = fig.subplots()

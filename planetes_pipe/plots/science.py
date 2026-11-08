@@ -17,7 +17,6 @@ from planetes_pipe.plots.pages import (
     GRID_HEIGHT,
     Section,
     baseline_name,
-    definitions_section,
     legend,
     name,
     panels,
@@ -27,31 +26,16 @@ from planetes_pipe.steps.science import GAIN_E_PER_ADU, TRIPLETS, P2VMRed, closu
 STACK_HEIGHT = 4.4                       # six rows sharing a time axis, inches
 WATERFALL_HEIGHT = 4.2
 
-DEFINITIONS = (
-    ("Reduction", [r"At each wavelength, $(P_t,\,C_{ij})$ = P2VM matrix $\times$ the 24 output fluxes of the frame."]),
-    ("Flux $P_t$ (FLUX)", ["Photometric flux of telescope $t$, in ADU/DIT."]),
-    ("Coherent flux $C_{ij}$ (VISDATA)", ["Complex coherent flux of the baseline of telescopes $i,j$, in ADU/DIT."]),
-    ("VISAMP", [r"$|C_{ij}|\,/\,\sqrt{P_i P_j}$, relative to the calibration: 1 = as coherent as the P2VM source."]),
-    ("F1F2", [r"$P_i P_j$, in the product."]),
-    ("Group delay GD (GDELAY)", [r"The delay that maximizes $|\sum_\lambda C_{ij}(\lambda)\,\exp(-2\pi i\,\mathrm{GD}/\lambda)|$."]),
-    ("Differential phase", [r"$\arg[\,C_{ij}\exp(-2\pi i\,\mathrm{GD}/\lambda)\,]$, minus its mean over wavelength."]),
-    ("Closure phase (T3PHI)", [r"$\arg(C_{ij}\,C_{jk}\,C_{ik}^{*})$ of telescopes $i,j,k$."]),
-    ("Errors (FLUXERR, VISERR)",
-     [rf"Output variance: signal / gain + read noise from the DARK RMS (gain {GAIN_E_PER_ADU:.0f} e$^-$/ADU), through P2VM$^2$."]),
-    ("SNR", [r"$|\sum_\lambda C_{ij}|\,/\,\sqrt{\sum_\lambda |\sigma_{C_{ij}}|^2}$ of the frame."]),
-    ("CHI2", ["Reduced $\\chi^2$ of the outputs against the P2VM model of the reduced channels."]),
-)
-
-
 def sections(reduced: P2VMRed, full: bool = False) -> list[Section]:
     """Sections for one P2VMRED; full=True adds differential phase every 10th frame and channel.
 
     Needs a complete P2VMRed (with group delay and differential phase).
     """
     unit = "s" if reduced.time_s is not None else "frame"
-    out = [definitions_section(DEFINITIONS),
+    out = [
            Section("SC Average spectrum (OI_FLUX)", lambda fig: _spectrum(fig, reduced), 2.4,
-                   "In ADU/DIT vs. wavelength, averaged over frames."),
+                   r"$(P_t,\,C_{ij})$ = P2VM matrix $\times$ the 24 output fluxes, per wavelength and frame; "
+                   r"$P_t$, the flux of telescope $t$, in ADU/DIT averaged over frames."),
            Section("SC flux vs. time (OI_FLUX wavelength averaged)", lambda fig: _flux(fig, reduced), 2.4,
                    f"In ADU/DIT vs. {unit}."),
            Section("SC flux waterfall per telescope (OI_FLUX)", lambda fig: _flux_waterfall(fig, reduced),
@@ -59,26 +43,30 @@ def sections(reduced: P2VMRed, full: bool = False) -> list[Section]:
                    "and is printed; same colour scale for all telescopes."),
            Section("SC coherent flux vs. time (VISDATA wavelength averaged)",
                    lambda fig: _coherent_flux(fig, reduced), 2.4,
-                   f"$|\\langle C_{{ij}}\\rangle_\\lambda|$ in ADU/DIT vs. {unit}."),
+                   f"$|\\langle C_{{ij}}\\rangle_\\lambda|$, $C_{{ij}}$ the complex coherent flux of telescopes $i,j$, in ADU/DIT vs. {unit}."),
            ]
     if reduced.coherent_err_adu is not None:
         out.append(Section("SC coherent flux SNR vs. time (OI_VIS/SNR)", lambda fig: _snr(fig, reduced), 2.4,
-                           f"SNR of each frame vs. {unit}."))
+                           rf"$|\sum C_{{ij}}|/\sqrt{{\sum|\sigma_C|^2}}$ over wavelength, vs. {unit}; $\sigma_C$ from the output variance "
+                           rf"(signal / gain + DARK read noise, gain {GAIN_E_PER_ADU:.0f} e$^-$/ADU) through P2VM$^2$."))
     out += [Section("SC visibility amplitude waterfall (VISAMP)", lambda fig: _visibility(fig, reduced),
-                    WATERFALL_HEIGHT, "$|C_{ij}|\\,/\\,\\sqrt{P_i P_j}$; flagged samples masked."),
+                    WATERFALL_HEIGHT, "$|C_{ij}|\\,/\\,\\sqrt{P_i P_j}$, relative to the calibration: 1 = as coherent as the P2VM source; flagged samples masked."),
             Section("SC visibility amplitude vs. wavelength (VISAMP averaged over frames)",
                     lambda fig: _mean_visibility(fig, reduced), 2.4, "Unflagged frames."),
             Section("arg(VISDATA) vs. time", lambda fig: _phase(fig, reduced), STACK_HEIGHT,
                     f"$\\arg\\langle C_{{ij}}\\rangle_\\lambda$ in degrees vs. {unit}, unwrapped; each row has its own scale."),
             Section("SC group delay vs. time (GDELAY)", lambda fig: _group_delay(fig, reduced), STACK_HEIGHT,
-                    f"GD in $\\mu$m vs. {unit}; each row has its own scale."),
+                    f"GD maximizes $|\\langle C_{{ij}}\\,e^{{-iD}}\\,e^{{-2\\pi i\\,\\mathrm{{GD}}/\\lambda}}\\rangle_\\lambda|$, $D$ the file's dispersion; "
+                    f"in $\\mu$m vs. {unit}; each row has its own scale."),
             Section("SC differential phase waterfall (DIFFPHASE)", lambda fig: _phase_waterfall(fig, reduced),
-                    WATERFALL_HEIGHT, "In degrees; colour range 1–99 %, symmetric about zero."),
+                    WATERFALL_HEIGHT, r"$\arg[C_{ij}\,e^{-2\pi i\,\mathrm{GD}/\lambda}]$ minus its mean over wavelength, in degrees; "
+                    "colour range 1–99 %, symmetric about zero."),
             Section("SC closure phase vs. time (OI_T3 wavelength averaged)", lambda fig: _closure(fig, reduced),
-                    2.4, f"Circular mean of T3PHI over wavelength, in degrees vs. {unit}.")]
+                    2.4, f"$\\arg(C_{{ij}}\\,C_{{jk}}\\,C_{{ik}}^*)$, circular mean over wavelength, in degrees vs. {unit}.")]
     if reduced.chi2 is not None:
         out.append(Section("SC reduced chi2 vs. wavelength (CHI2)", lambda fig: _chi2(fig, reduced), 2.0,
-                           "Median over frames; about 1 when the P2VM model and noise model describe the outputs."))
+                           "Reduced $\\chi^2$ of the 24 outputs against the P2VM model, median over frames; about 1 when the P2VM "
+                           "and noise models describe the outputs."))
     if full:
         n_frames, _, n_wave = reduced.differential_phase_deg.shape
         for frame in range(0, n_frames, 10):
