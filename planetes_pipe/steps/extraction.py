@@ -382,7 +382,11 @@ def tracked_group_delay(
     return gd_m, peak
 
 
-DISPERSION_ORDER = 4  # polynomial in wavenumber; the bench bow is mostly quadratic
+# Highest order of the dispersion polynomial in wavenumber. On 2026-11-06 the per-channel
+# residual (deg) fell 2 -> 3 on every baseline (S3-S1 1.99 -> 0.62: third-order dispersion is
+# real), 3 -> 4 on S3-S2 only (1.30 -> 0.99), and by < 0.1 beyond: what is left is a static
+# ~20 nm ripple on the T4 baselines and noise, which a higher order would start to absorb.
+DISPERSION_ORDER = 4
 # The first dispersion fit uses the blurred GDs, which wash out the band edges: on a
 # simulated 11 rad bow it left 0.3 rad and moved the GD 0.8 um; a second pass leaves
 # 0.01 rad and 0.03 um, and a third changes nothing.

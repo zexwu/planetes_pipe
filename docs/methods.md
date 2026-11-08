@@ -196,7 +196,8 @@ finds its fringe over ±1000e-6 m by the summed coherent power of its frames
 power has no fringe in the range; the reduction warns. With at least 64 frames showing
 fringes, the dispersion of the data is then removed and every frame searched again, twice
 (`dispersion_phase`: the frames, shifted by their GD and mean phase, are summed, and the
-phase of the sum is fitted with a 4th-order polynomial in wavenumber whose constant and
+phase of the sum is fitted with a 4th-order polynomial in wavenumber (on 2026-11-06 order 3 was
+needed on every baseline, order 4 on S3-S2 only, higher orders gained < 0.1°) whose constant and
 linear terms are dropped). Dispersion flattens the top of the delay peak, and the GD of a
 noisy frame slides along it: on the bench, baselines with a 5-11 rad bow scattered by
 0.5-1.1 um per frame, and by 0.01-0.05 um once it was removed. Without a linear term the
