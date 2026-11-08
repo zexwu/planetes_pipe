@@ -43,8 +43,8 @@ HELP = {
     "gd_search_max_m": "Coarse GD upper initialization [m]; Newton remains unconstrained",
     "wave_min_m": "Shortest wavelength of the P2VM band [m]; 0 keeps the whole common band",
     "wave_max_m": "Longest wavelength of the P2VM band [m]; 1 keeps the whole common band",
-    "dl_gain": "OPD per delay-line travel per baseline, e.g. 43:-1,42:-1,41:-1,32:1,31:-1,"
-               "21:-1, for scans recorded without DL_SCAN OPDGAIN; must agree with it",
+    "dl_gain": "OPD sign per baseline (baseline orientation), e.g. 43:-1,42:-1,41:-1,32:1,"
+               "31:-1,21:-1, for scans recorded without DL_SCAN OPDGAIN; must agree with it",
 }
 
 

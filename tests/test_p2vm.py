@@ -16,11 +16,12 @@ from planetes_pipe.steps.extraction import extract_spectra, prepare_extraction
 from planetes_pipe.steps.flat import read_flat, write_flat
 from planetes_pipe.steps.p2vm import (
     build_v2pm,
+    delay_line_opd,
     extract_p2vm_spectra,
     fit_abcd_ellipse,
     find_reversed_baselines,
     fit_p2vm,
-    read_scan_opd,
+    scan_group_delay,
     unwrap_scan_phase,
     wavelength_grid,
 )
@@ -196,6 +197,22 @@ class P2VMTests(unittest.TestCase):
             np.testing.assert_allclose(recovered - recovered[anchor], truth - truth[anchor], atol=1e-12)
             np.testing.assert_allclose(np.exp(1j * recovered), np.exp(1j * measured), atol=1e-12)
 
+    def test_scan_group_delay_fixes_whole_fringes_without_a_guide(self):
+        # Steps of several fringes, as on the bench, defeat unwrapping along the frames;
+        # the instrumental phase varies smoothly across the band.
+        wavelength = np.linspace(1.10e-6, 1.27e-6, 201)
+        position = np.repeat(np.interp(np.arange(65), [0, 16, 32, 48, 64],
+                                       [0, 30e-6, 0, -30e-6, 0]), 4)
+        opd = -2 * position + 20e-6
+        instrumental = 0.3 + 4.0 * ((wavelength - 1.18e-6) / 0.1e-6) ** 2
+        truth = 2 * np.pi * opd[:, None] / wavelength + instrumental
+        measured = np.unwrap(np.angle(np.exp(1j * truth)), axis=0)
+        anchor = len(opd) // 2
+        self.assertGreater(np.abs(measured - truth - (measured - truth)[anchor]).max(), 1.0)
+        gd = scan_group_delay(measured, np.ones_like(measured), wavelength)
+        recovered = unwrap_scan_phase(measured, gd, wavelength)
+        np.testing.assert_allclose(recovered - recovered[anchor], truth - truth[anchor], atol=1e-9)
+
     @staticmethod
     def write_scans(directory, recorded=None):
         """Six scan files with a DL_SCAN table; recorded: {baseline: OPDGAIN} to write."""
@@ -217,27 +234,26 @@ class P2VMTests(unittest.TestCase):
             scans[baseline] = Raw(np.zeros((1, 1, 1)), "P2VM_RAW", fits.Header(), path)
         return scans
 
-    GAINS = {baseline: (-1 if i % 2 else 1) for i, baseline in enumerate(layout.baselines)}
-
-    def expected(self, gains):
-        return np.array([gains[b] * np.array([0., 30e-6, 30e-6, -30e-6])
-                         for b in layout.baselines])
-
-    def test_explicit_scan_conversion_preserves_frame_order_units_and_sign(self):
+    def test_delay_line_opd_is_position_times_gain_per_frame(self):
+        gains = {b: (1 if b == "32" else -1) for b in layout.baselines}
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-            actual = read_scan_opd(self.write_scans(directory), self.GAINS)
-            np.testing.assert_allclose(actual, self.expected(self.GAINS), rtol=1e-15, atol=0)
+            scans = self.write_scans(directory, recorded=gains)
+            scans = {b: Raw(np.zeros((4, 1, 1)), r.category, r.header, r.path) for b, r in scans.items()}
+            opd = delay_line_opd(scans)
+            for b, baseline in enumerate(layout.baselines):
+                np.testing.assert_allclose(opd[b], gains[baseline] * np.array([0., 30e-6, 30e-6, -30e-6]),
+                                           rtol=1e-12, atol=1e-18)
+            # A frame count that DL_SCAN does not describe gives no comparison.
+            short = {b: Raw(np.zeros((3, 1, 1)), r.category, r.header, r.path) for b, r in scans.items()}
+            self.assertIsNone(delay_line_opd(short))
 
-    def test_recorded_opd_gain_needs_no_option(self):
+    def test_recorded_opd_gain_must_agree_with_dl_gain(self):
+        gains = {b: (1 if b == "32" else -1) for b in layout.baselines}
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
-            scans = self.write_scans(directory, recorded=self.GAINS)
-            np.testing.assert_allclose(read_scan_opd(scans), self.expected(self.GAINS),
-                                       rtol=1e-15, atol=0)
-            np.testing.assert_allclose(read_scan_opd(scans, self.GAINS),
-                                       self.expected(self.GAINS), rtol=1e-15, atol=0)
-            flipped = {b: -g for b, g in self.GAINS.items()}
+            scans = self.write_scans(directory, recorded=gains)
+            self.assertEqual(find_reversed_baselines(scans, gains), [layout.baselines.index("32")])
             with self.assertRaisesRegex(ValueError, "records OPDGAIN"):
-                read_scan_opd(scans, flipped)
+                find_reversed_baselines(scans, {b: -g for b, g in gains.items()})
 
     def test_positive_opd_gain_marks_a_reversed_baseline(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
@@ -250,12 +266,13 @@ class P2VMTests(unittest.TestCase):
             self.assertEqual(find_reversed_baselines(scans, gains),
                              [layout.baselines.index("32")])
 
-    def test_no_opd_gain_warns_and_gives_no_guide(self):
+    def test_no_opd_gain_warns(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             scans = self.write_scans(directory)
             with self.assertLogs("planetes_pipe", "WARNING") as logs:
-                self.assertIsNone(read_scan_opd(scans))
-            self.assertIn("unwrapped from the fringes alone", logs.output[0])
+                self.assertEqual(find_reversed_baselines(scans), [])
+            self.assertIn("no OPD sign", logs.output[0])
+
 
 class ReversedBaselineTests(unittest.TestCase):
     def test_reversing_a_baseline_conjugates_only_its_coherent_flux(self):

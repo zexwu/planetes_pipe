@@ -33,6 +33,7 @@ from planetes_pipe.steps.extraction import (
     estimate_group_delay,
     extract_spectra,
     prepare_extraction,
+    stacked_group_delay,
 )
 from planetes_pipe.steps.flat import Flat, read_flat
 from planetes_pipe.steps.wave import Wave, read_wave
@@ -56,6 +57,7 @@ class P2VM:
     ellipse_amplitude: NDArray | None = None  # (baseline, frame, wavelength)
     dc_term_adu: NDArray | None = None  # (output, baseline, wavelength)
     fit_rms_adu: NDArray | None = None  # (output, baseline, wavelength)
+    delay_line_opd_m: NDArray | None = None  # (baseline, frame), recorded; not used in the fit
 
 
 def normalized_coherence(p2vm: P2VM) -> NDArray:
@@ -210,7 +212,6 @@ def fit_p2vm(
     spectra: P2VMSpectra,
     *,
     phase_reference: NDArray | None = None,
-    scan_opd_m: NDArray | None = None,
     reversed_baselines: Sequence[int] = (),
     keep_diagnostics: bool = False,
     gd_search_min_m: float = -30e-6,
@@ -228,10 +229,6 @@ def fit_p2vm(
         Already dark-subtracted reference spectra (24, frame, wavelength) in ADU,
         on the same grid. None skips instrumental phase correction. File and DARK
         selection belong to the caller; this is not astronomical calibration.
-    scan_opd_m : ndarray or None, optional
-        Recorded mechanical positions converted to an OPD guide [m], shaped
-        (6 baselines, frame). It chooses integer phase cycles only; measured
-        ellipse phase still supplies fine motion. None uses ordinary unwrap.
     reversed_baselines : sequence of int, optional
         Baseline indices whose fringes run opposite to the convention C_ij = E_i E_j*
         (see find_reversed_baselines). Their response phases change sign, so the
@@ -240,8 +237,8 @@ def fit_p2vm(
         Retain scan OPD/GD, ellipse phase/radius, DC and residual RMS when True.
         This changes which arrays are returned, not the fit or inverse.
     gd_search_min_m, gd_search_max_m : float, optional
-        Coarse GD initialization interval in metres, default +/-30e-6.
-        Newton refinement is unconstrained; see estimate_group_delay.
+        Coarse GD initialization interval of the phase reference in metres, default
+        +/-30e-6; see estimate_group_delay. The scans need none (scan_group_delay).
 
     Returns
     -------
@@ -259,11 +256,6 @@ def fit_p2vm(
     """
     _check_input_axes(spectra)
     wavelength_m = spectra.wavelength_m
-    if scan_opd_m is not None:
-        scan_opd_m = np.asarray(scan_opd_m, dtype=float)
-        if (scan_opd_m.shape != (layout.n_baselines, spectra.baseline_spectra.shape[2])
-                or not np.isfinite(scan_opd_m).all()):
-            raise ValueError("scan_opd_m must be finite with shape (baseline, frame)")
     if phase_reference is not None and (
         phase_reference.ndim != 3
         or phase_reference.shape[0] != layout.n_outputs
@@ -275,7 +267,7 @@ def fit_p2vm(
 
     # Scans: ABCD ellipse -> OPD/GD -> sinusoidal response of all 24 outputs.
     amplitude, phase_rad, dc_adu, diagnostics = _fit_scan_responses(
-        spectra, search_range, keep_diagnostics=keep_diagnostics, scan_opd_m=scan_opd_m
+        spectra, keep_diagnostics=keep_diagnostics
     )
 
     # Telescope flats supply the photometric scale for the fitted response.
@@ -333,8 +325,7 @@ def _check_input_axes(spectra: P2VMSpectra) -> None:
 
 
 def _fit_scan_responses(
-    spectra: P2VMSpectra, search_range: tuple[float, float], *, keep_diagnostics: bool,
-    scan_opd_m: NDArray | None = None,
+    spectra: P2VMSpectra, *, keep_diagnostics: bool,
 ) -> tuple[NDArray, NDArray, NDArray, dict[str, NDArray]]:
     """Fit each baseline scan from ABCD phase through OPD to all-output response.
 
@@ -343,8 +334,6 @@ def _fit_scan_responses(
     spectra : P2VMSpectra
         ADU scans (6 baselines, 24 outputs, frame, wavelength), physical output
         assignments and wavelength grid [m]. Telescope spectra are unused here.
-    search_range : tuple of float
-        Coarse GD initialization interval in metres; Newton is unconstrained.
     keep_diagnostics : bool
         Retain the scan/intermediate arrays when True; fitting is unchanged.
 
@@ -372,14 +361,14 @@ def _fit_scan_responses(
         baseline_spectra = spectra.baseline_spectra[baseline]
         outputs = spectra.baseline_outputs[baseline]
         scan_phase_rad, radius = fit_abcd_ellipse(baseline_spectra[outputs])
-        if scan_opd_m is not None:
-            scan_phase_rad = unwrap_scan_phase(scan_phase_rad, scan_opd_m[baseline], wavelength_m)
+        # The fringes alone give each frame's OPD: the group delay its whole number of
+        # fringes, the phase the rest.
+        gd_m[baseline] = scan_group_delay(scan_phase_rad, radius, wavelength_m)
+        scan_phase_rad = unwrap_scan_phase(scan_phase_rad, gd_m[baseline], wavelength_m)
         if keep_diagnostics:
             scan_phases.append(scan_phase_rad)
             scan_radii.append(radius)
-        opd_m[baseline], gd_m[baseline] = _estimate_scan_opd(
-            scan_phase_rad, radius, wavelength_m, search_range
-        )
+        opd_m[baseline] = _scan_opd(scan_phase_rad, gd_m[baseline], wavelength_m)
         (
             amplitude[:, baseline, :],
             phase_rad[:, baseline, :],
@@ -388,10 +377,12 @@ def _fit_scan_responses(
         ) = _fit_interferometric_response(
             baseline_spectra, opd_m[baseline], wavelength_m
         )
-        log.info("baseline %s: scan OPD %+.1f..%+.1f um, GD %+.1f..%+.1f um, median fit RMS "
-                 "%.1f ADU", layout.baselines[baseline], opd_m[baseline].min() * 1e6,
-                 opd_m[baseline].max() * 1e6, gd_m[baseline].min() * 1e6,
-                 gd_m[baseline].max() * 1e6, np.median(rms_adu[outputs, baseline]))
+        log.info("baseline %s: scan OPD %+.1f..%+.1f um, GD %+.1f..%+.1f um (GD - OPD rms "
+                 "%.2f um), median fit RMS %.1f ADU", layout.baselines[baseline],
+                 opd_m[baseline].min() * 1e6, opd_m[baseline].max() * 1e6,
+                 gd_m[baseline].min() * 1e6, gd_m[baseline].max() * 1e6,
+                 np.std(gd_m[baseline] - opd_m[baseline]) * 1e6,
+                 np.median(rms_adu[outputs, baseline]))
 
     diagnostics = {}
     if keep_diagnostics:
@@ -406,45 +397,19 @@ def _fit_scan_responses(
     return amplitude, phase_rad, dc_adu, diagnostics
 
 
-def _estimate_scan_opd(
-    phase_rad: NDArray,
-    radius: NDArray,
-    wavelength_m: NDArray,
-    search_range: tuple[float, float],
-) -> tuple[NDArray, NDArray]:
-    """Convert the ellipse phase to scan OPD and determine its zero point from GD.
+def _scan_opd(phase_rad: NDArray, gd_m: NDArray, wavelength_m: NDArray) -> NDArray:
+    """Scan OPD [m] per frame: the mean phase * wavelength / (2*pi) of the central half-band.
 
-    Parameters
-    ----------
-    phase_rad, radius : ndarray, shape (frame, wavelength)
-        Unwrapped ellipse phase [rad] and dimensionless unit-circle radius.
-    wavelength_m : ndarray, shape (wavelength,)
-        Scan wavelength grid in metres.
-    search_range : tuple of float
-        Coarse GD initialization interval in metres.
-
-    Returns
-    -------
-    opd_m, gd_m : ndarray, shape (frame,)
-        Optical path and group delay in metres, using the ellipse phase sign.
-
-    Notes
-    -----
-    Use the central half-band to average phase * wavelength / (2*pi) and to
-    estimate GD from radius * exp(1j*phase). Fit OPD versus GD and subtract only
-    the intercept from OPD; the fitted slope is not applied as a rescaling.
+    phase_rad (frame, wavelength) has its whole fringes from the group delay gd_m
+    (frame,), [m]. The OPD's zero is the intercept of its linear fit against the group
+    delay; the fitted slope is not applied as a rescaling.
     """
-    phasor = radius * np.exp(1j * phase_rad)
     n_wave = len(wavelength_m)
-    start, end = n_wave // 4, (n_wave * 3) // 4
-    opd_m = np.mean((phase_rad * wavelength_m)[:, start:end] / 2 / np.pi, axis=1)
-    gd_m = estimate_group_delay(
-        phasor[:, start:end], wavelength_m[start:end], search_range=search_range
-    )
+    middle = slice(n_wave // 4, (3 * n_wave) // 4)
+    opd_m = np.mean((phase_rad * wavelength_m)[:, middle] / 2 / np.pi, axis=1)
     _, opd_zero_m = np.polyfit(gd_m, opd_m, 1)
-    opd_m -= opd_zero_m
     log.debug("OPD zero point from GD: %+.3f um", opd_zero_m * 1e6)
-    return opd_m, gd_m
+    return opd_m - opd_zero_m
 
 
 def _fit_interferometric_response(
@@ -826,8 +791,38 @@ def fit_abcd_ellipse(spec: NDArray) -> tuple[NDArray, NDArray]:
     return phase_rad, radius
 
 
+SCAN_SPAN_M = 150e-6  # group delays searched in each scan frame, about the scan's centre
+
+
+def scan_group_delay(phase_rad: NDArray, radius: NDArray, wavelength_m: NDArray,
+                     span_m: float = SCAN_SPAN_M) -> NDArray:
+    """Group delay [m] of each scan frame, from its fringes alone: (frame,).
+
+    The group delay follows from how the phase changes across the band, not from the
+    phase itself, so it does not depend on the whole fringes, and it fixes them for
+    unwrap_scan_phase. A scan step spans several fringes, so they cannot come from
+    the previous frame, and the delay line's recorded position was wrong by up to 9
+    fringes on 2026-11-06 (backlash); the P2VM then lost contrast at the band edges
+    (0.14-0.4) and science VISAMP reached 2-5 there. The group delay alone is not
+    precise enough for the OPD (0.04-0.12 um per frame against the phase's few nm).
+
+    phase_rad and radius are the ellipse phase and radius (frame, wavelength); the
+    central half of the band is used, as for the OPD. The scan's centre is found over
+    +-1000 um from all frames together (stacked_group_delay), then each frame within
+    span_m of it.
+    """
+    n_wave = len(wavelength_m)
+    middle = slice(n_wave // 4, (3 * n_wave) // 4)
+    wavelength = wavelength_m[middle]
+    phasor = radius[:, middle] * np.exp(1j * phase_rad[:, middle])
+    centre_m, _ = stacked_group_delay(phasor, wavelength, (-1000e-6, 1000e-6))
+    return estimate_group_delay(phasor, wavelength,
+                                search_range=(centre_m - span_m, centre_m + span_m),
+                                grid_step_m=1e-7)
+
+
 def unwrap_scan_phase(phase_rad: NDArray, scan_opd_m: NDArray, wavelength_m: NDArray) -> NDArray:
-    """Resolve integer cycles using an OPD guide; preserve measured fine phase.
+    """Resolve integer cycles using an OPD guide (scan_group_delay); preserve measured fine phase.
 
     Anchor at the middle frame and refine five times using the central half of
     the wavelength grid. No frame/channel rejection, weights or fine-phase
@@ -870,6 +865,7 @@ _IMAGES = [
     ("ellipse_phase_rad", "PLANETES_ELLIPSE_PHASE", "rad"),
     ("ellipse_amplitude", "PLANETES_ELLIPSE_AMPLITUDE", ""),
     ("fit_rms_adu", "PLANETES_P2VM_FIT_RMS", "adu"),
+    ("delay_line_opd_m", "PLANETES_DL_OPD", "m"),
 ]
 
 
@@ -914,53 +910,33 @@ def read_p2vm(path: Path) -> P2VM:
         return P2VM(**values)
 
 
-def read_scan_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = None
-                  ) -> NDArray | None:
-    """Per-frame scan OPD [m], (baseline, frame), from each scan's DL_SCAN table.
+def delay_line_opd(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = None
+                   ) -> NDArray | None:
+    """The scans' OPD as the delay line records it [m], (baseline, frame), for comparison.
 
-    The OPD per unit travel of the moving delay line, with its sign, is the scan's
-    recorded OPDGAIN; dl_gain ({'43': -1, ...}) supplies it for scans recorded
-    without one and must agree where both exist. This guide fixes the whole number
-    of fringes when the scan phase is unwrapped: a scan step of more than half a
-    fringe cannot be unwrapped from the fringes alone. Returns None, with a warning,
-    when any scan lacks both.
+    DL_SCAN position (mean of BEFORE_MM and AFTER_MM) times OPDGAIN, else dl_gain; its
+    zero is the delay line's. The fit does not use it (scan_group_delay): it shows how
+    far the delay line is from where it says, e.g. its backlash. A row is NaN for a scan
+    without DL_SCAN, gain or matching frame count; None when no scan has one.
     """
-    if dl_gain is not None and set(dl_gain) != set(layout.baselines):
-        raise ValueError("dl_gain requires all six physical baselines")
-    positions, missing, recorded, steps_um = [], [], 0, []
+    rows = []
     for baseline in layout.baselines:
+        n_frames = scans[baseline].cube.shape[0]
+        row = np.full(n_frames, np.nan)
         try:
             table, header = afits.getdata(scans[baseline].path, "DL_SCAN", header=True)
         except KeyError:
-            missing.append(baseline)
+            rows.append(row)
             continue
-        if header["MOVINGDL"] != int(baseline[1]):
-            raise ValueError(f"DL gain assumes the second arm moves: {baseline}")
+        gain = header.get("OPDGAIN", None if dl_gain is None else dl_gain[baseline])
         counts = table["NFRAMES"]
-        if not np.array_equal(table["FIRST_FRAME"], np.cumsum(counts) - counts):
-            raise ValueError(f"Noncontiguous DL_SCAN frames: {baseline}")
-        position_mm = (table["BEFORE_MM"] + table["AFTER_MM"]) / 2
-        steps_um.append(np.median(np.abs(np.diff(position_mm))) * 1e3)
-        given = None if dl_gain is None else float(dl_gain[baseline])
-        gain = header.get("OPDGAIN")
-        if gain is not None and given is not None and float(gain) != given:
-            raise ValueError(f"Scan {baseline} records OPDGAIN {gain}, dl_gain gives {given}")
-        recorded += gain is not None
-        gain = given if gain is None else float(gain)
-        if gain is None:
-            missing.append(baseline)
-            continue
-        positions.append(np.repeat(position_mm, counts) * 1e-3 * gain)
-    if missing:
-        step_text = f"median delay-line step {np.median(steps_um):.2f} um; " if steps_um else ""
-        log.warning("no OPD sign for scan(s) %s (neither OPDGAIN in DL_SCAN nor dl_gain): the "
-                    "scan phase is unwrapped from the fringes alone, which is wrong if a step "
-                    "exceeds half a fringe (~0.6 um); %sthe P2VM may be invalid",
-                    ", ".join(missing), step_text)
-        return None
-    log.info("scan OPD guide from DL_SCAN: OPDGAIN recorded in %d of 6 scans%s", recorded,
-             "" if recorded == 6 else ", the rest from dl_gain")
-    return np.asarray(positions)
+        if gain is not None and counts.sum() == n_frames and np.array_equal(
+                table["FIRST_FRAME"], np.cumsum(counts) - counts):
+            position_mm = (table["BEFORE_MM"] + table["AFTER_MM"]) / 2
+            row = np.repeat(position_mm, counts) * 1e-3 * float(gain)
+        rows.append(row)
+    rows = np.asarray(rows)
+    return None if np.isnan(rows).all() else rows
 
 
 def find_reversed_baselines(scans: dict[str, Raw], dl_gain: Mapping[str, float] | None = None
@@ -968,20 +944,32 @@ def find_reversed_baselines(scans: dict[str, Raw], dl_gain: Mapping[str, float] 
     """Baselines whose scan shows fringes opposite to the convention C_ij = E_i E_j*.
 
     With that convention the OPD of baseline ij falls as the delay line of its second
-    telescope moves out: OPD gain -1. A positive recorded OPDGAIN (or dl_gain) therefore
-    means a reversed baseline, on 2026-11-05 S3-S2, whose closure phases only close once
-    corrected. A scan without a gain counts as not reversed; read_scan_opd warns about it.
+    telescope moves out: OPD gain -1. A positive recorded OPDGAIN (or dl_gain, for scans
+    recorded without one; both must agree) therefore means a reversed baseline, on
+    2026-11-05 S3-S2, whose closure phases only close once corrected. A scan with
+    neither counts as not reversed, with a warning.
     """
-    found = []
+    found, missing = [], []
     for index, baseline in enumerate(layout.baselines):
         try:
-            gain = afits.getheader(scans[baseline].path, "DL_SCAN").get("OPDGAIN")
+            header = afits.getheader(scans[baseline].path, "DL_SCAN")
         except KeyError:
-            gain = None
-        if gain is None and dl_gain is not None:
-            gain = dl_gain[baseline]
-        if gain is not None and float(gain) > 0:
+            header = {}
+        if header.get("MOVINGDL", int(baseline[1])) != int(baseline[1]):
+            raise ValueError(f"OPD gain assumes the second arm moves: {baseline}")
+        recorded = header.get("OPDGAIN")
+        given = None if dl_gain is None else dl_gain[baseline]
+        if recorded is not None and given is not None and float(recorded) != float(given):
+            raise ValueError(f"Scan {baseline} records OPDGAIN {recorded}, dl_gain gives {given}")
+        gain = recorded if recorded is not None else given
+        if gain is None:
+            missing.append(baseline)
+        elif float(gain) > 0:
             found.append(index)
+    if missing:
+        log.warning("no OPD sign for scan(s) %s (neither OPDGAIN in DL_SCAN nor dl_gain): "
+                    "taken as not reversed; a reversed baseline's closure phases will not "
+                    "close", ", ".join(missing))
     return found
 
 
@@ -994,8 +982,8 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
 
     phase_file is an optional all-shutters-open exposure used as instrumental phase
     reference, with phase_dark_file if its DIT differs from the scans. The scans'
-    DL_SCAN tables guide phase unwrapping with their recorded OPDGAIN; dl_gain
-    ({'43': -1, ...}) supplies it for scans recorded without one (see read_scan_opd).
+    The scans' recorded OPDGAIN gives each baseline's orientation; dl_gain
+    ({'43': -1, ...}) supplies it for scans recorded without one (find_reversed_baselines).
     wave_min_m and wave_max_m limit the P2VM's wavelength band; the defaults do not.
     """
     dark, flat, wave = read_dark(dark_file), read_flat(flat_file), read_wave(wave_file)
@@ -1013,13 +1001,13 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
         check_calibrations(phase_raw, dark=phase_dark, flat=flat)
         phase_spectra = extract_spectra(phase_raw, extractor, phase_dark)
 
-    scan_opd_m = read_scan_opd(scans, dl_gain)  # Recorded OPDGAIN, else dl_gain.
-
     options = dict(keep_diagnostics=keep_diagnostics,
                    gd_search_min_m=gd_search_min_m, gd_search_max_m=gd_search_max_m)
     product = fit_p2vm(spectra, phase_reference=phase_spectra,
                        reversed_baselines=find_reversed_baselines(scans, dl_gain),
-                       scan_opd_m=scan_opd_m, **options)
+                       **options)
+    if keep_diagnostics:
+        product.delay_line_opd_m = delay_line_opd(scans, dl_gain)
 
     reference = scans["43"].path  # Names the product and supplies its observation header.
     inputs = {"FLAT_RAW": flat_files, "P2VM_RAW": scan_files,

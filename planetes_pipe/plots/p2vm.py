@@ -23,6 +23,7 @@ from planetes_pipe.plots.pages import (
     baseline_panels,
     definitions_section,
     legend,
+    name,
     table,
     table_height,
 )
@@ -106,10 +107,27 @@ DEFINITIONS = (
       "Flux-normalized fringe amplitude (fringe contrast) during the scan; 1 = full contrast."]),
     ("Visibility transmission", [r"$V_{ob}$ averaged over the central band; the instrumental transfer function of the visibility."]),
     ("Output phase", [r"$\theta_{ob} - \theta_{Ab}$, relative to output A of the baseline."]),
+    ("Delay-line OPD", [r"DL_SCAN position $\times$ OPDGAIN, shifted to the fringe OPD; shown for comparison, not used in the fit.",
+                        "Its error: the delay-line OPD minus the fringe OPD; gain: the slope of one against the other."]),
     ("Central band", [f"The middle {100 * (CENTRAL_BAND[1] - CENTRAL_BAND[0]):.0f} % of the wavelength channels."]),
 )
 VERDICT_COLORS = {"GOOD": PASS, "WARNING": "#FFF2CC", "BAD": FLAG}
 CHANNEL_COLORS = ("#0C5DA5", "#00B945", "#FF2C00")  # three sample wavelengths
+
+
+def delay_line_error_m(p2vm: P2VM) -> np.ndarray | None:
+    """Recorded delay-line OPD minus the fringe OPD [m], median removed: (baseline, frame)."""
+    if p2vm.delay_line_opd_m is None or p2vm.opd_m is None:
+        return None
+    error = p2vm.delay_line_opd_m - p2vm.opd_m
+    return error - np.nanmedian(error, axis=1, keepdims=True)
+
+
+def delay_line_gain(p2vm: P2VM, baseline: int) -> float:
+    """Slope of the recorded delay-line OPD against the fringe OPD; 1 = right gain."""
+    recorded, fringe = p2vm.delay_line_opd_m[baseline], p2vm.opd_m[baseline]
+    ok = np.isfinite(recorded)
+    return float(np.polyfit(fringe[ok], recorded[ok], 1)[0]) if ok.sum() > 1 else np.nan
 
 
 def sections(p2vm: P2VM, header=None) -> list[Section]:
@@ -298,18 +316,49 @@ def _scan_sections(p2vm) -> list[Section]:
     channels = [int(n_wave * f) for f in (0.2, 0.5, 0.8)]
     channel_entries = [(f"{wavelength[j]:.0f} nm", {"color": c, "ls": "", "marker": "o", "ms": 3})
                        for j, c in zip(channels, CHANNEL_COLORS)]
+    error = delay_line_error_m(p2vm)
     if p2vm.opd_m is not None:
+        recorded_style = {"color": "0.35", "lw": 0.8, "ls": "--"}
+
         def draw_delays(fig):
             for b, ax in enumerate(baseline_panels(fig, "Scan frame", "Delay [µm]")):
                 ax.plot(p2vm.opd_m[b] * 1e6, color=ABCD_COLORS[0])
                 if p2vm.group_delay_m is not None:
                     ax.plot(p2vm.group_delay_m[b] * 1e6, color=ABCD_COLORS[3], lw=0.6)
+                if error is not None:
+                    ax.plot((p2vm.opd_m[b] + error[b]) * 1e6, **recorded_style)
             entries = [("OPD", {"color": ABCD_COLORS[0]})]
             if p2vm.group_delay_m is not None:
                 entries.append(("group delay", {"color": ABCD_COLORS[3]}))
+            if error is not None:
+                entries.append(("delay-line OPD", recorded_style))
             legend(fig, entries)
         out.append(Section("Recovered scan delays", draw_delays, GRID_HEIGHT,
-                           "OPD recovered from the fringe phase of every scan frame, and the group delay measured from the spectrum."))
+                           "OPD from the fringe phase of every scan frame, its whole fringes from "
+                           "the group delay of its spectrum; the delay line's recorded OPD, "
+                           "shifted onto it, for comparison."))
+    if error is not None:
+        half_fringe_um = 0.5e6 / np.mean(1 / p2vm.wavelength_m)
+
+        def draw_error(fig):
+            for b, ax in enumerate(baseline_panels(fig, "Scan frame", "Delay-line error [µm]")):
+                if np.isnan(error[b]).all():
+                    name(ax, "no DL_SCAN", "lower right")
+                    continue
+                ax.plot(error[b] * 1e6, color=ABCD_COLORS[0], lw=0.8)
+                ax.axhline(0, **GUIDE)
+                for sign in (-1, 1):
+                    ax.axhline(sign * half_fringe_um, **{**GUIDE, "color": ABCD_COLORS[3]})
+                um = np.abs(error[b]) * 1e6
+                ax.set_title(f"gain {delay_line_gain(p2vm, b):.3f} · rms "
+                             f"{np.nanstd(error[b]) * 1e6:.1f} · max {np.nanmax(um):.1f} µm",
+                             fontsize=6.5, loc="right", pad=2)
+            legend(fig, [("delay-line OPD − fringe OPD", {"color": ABCD_COLORS[0]}),
+                         ("± half a fringe", {**GUIDE, "color": ABCD_COLORS[3]})])
+        out.append(Section("Delay-line OPD error", draw_error, GRID_HEIGHT,
+                           "Recorded minus fringe OPD, offset removed: delay-line gain (trend), "
+                           "backlash (steps) and bench OPD drift. Past half a fringe, the "
+                           "recorded OPD alone picks the wrong fringe."))
     if p2vm.ellipse_phase_rad is None or p2vm.ellipse_amplitude is None:
         return out
     circle = np.linspace(0, 2 * np.pi, 200)

@@ -27,6 +27,10 @@ class PlotTests(unittest.TestCase):
         values = calibration_arrays(n_wave=15)
         flat, wave = values[-2:]
         cls.p2vm = fit_p2vm(calibration_spectra(n_wave=15), keep_diagnostics=True)
+        # A delay line 1 % off in gain with 3 um of backlash; one scan without DL_SCAN.
+        turns = np.sign(np.gradient(cls.p2vm.opd_m, axis=1))
+        cls.p2vm.delay_line_opd_m = 1.01 * cls.p2vm.opd_m + 3e-6 * turns + 5e-3
+        cls.p2vm.delay_line_opd_m[2] = np.nan
         flags = np.zeros((24, 15), dtype=np.uint8)
         flags[3, 4], flags[5, 6], flags[7, 8] = 1, 2, 4
         cls.products = {

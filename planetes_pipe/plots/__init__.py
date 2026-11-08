@@ -63,7 +63,7 @@ def _report(path: Path, output) -> Path:
     elif category == "FLAT":
         body = flat.sections(read_flat(path))
     elif category == "WAVE":
-        body = wave.sections(read_wave(path))
+        body = wave.sections(read_wave(path), header)
     elif category == "P2VM":
         body = p2vm.sections(read_p2vm(path), header)
     elif category == "SINGLE_SCI_P2VMRED":

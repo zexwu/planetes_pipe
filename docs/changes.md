@@ -1,3 +1,26 @@
+# PLANETES 0.35.0：扫描 OPD 只由条纹决定
+
+- P2VM 扫描每帧的 OPD 现在只由条纹决定，不再使用延迟线记录的位置。每帧的整数条纹数由群延迟确定
+  （`p2vm.scan_group_delay`：先用 `stacked_group_delay` 在 ±1000 µm 内由所有帧求出扫描中心，再在每帧中心
+  ±150 µm 内搜索）。群延迟取决于相位随波长的变化，与整数条纹无关。一个条纹以内的位置仍由相位决定：
+  群延迟每帧精度为 0.04-0.12 µm，相位为 nm 量级。
+- 以前整数条纹数由延迟线位置（`DL_SCAN` × `OPDGAIN`）决定。扫描每步跨好几个条纹，延迟线的回差超过半个条纹，
+  2026-11-06 的扫描有 63-89% 的帧差了 1-9 个条纹。OPD 在波段中心是对的，在两端不对，P2VM 的 contrast 在两端
+  降到 0.14-0.4，科学数据的 VISAMP 在两端达到 2-5（中心约 1.05）。现在 11-06 17:18 P2VM 的 GD − OPD rms 从
+  1.4-4.5 µm 降到 0.04-0.12 µm，contrast 在整个波段是平的，17:40 科学数据的 VISAMP 为 1.00-1.02。
+- `OPDGAIN` / `dl_gain` 现在只决定基线方向（`find_reversed_baselines`，两者须一致，都没有时给出警告）。
+  删除 `read_scan_opd` 和 `fit_p2vm` 的 `scan_opd_m`；`gd_search_min_m`、`gd_search_max_m` 只用于相位参考。
+- 延迟线记录的 OPD 仍保存在 P2VM（`PLANETES_DL_OPD`，`keep_diagnostics` 时），只用于对比。P2VM 报告的
+  "Recovered scan delays" 把它叠加在条纹 OPD 上；新的 "Delay-line OPD error" 页画出两者之差，标出 gain、rms、
+  最大误差和 ± 半个条纹。
+- WAVE 报告增加内容（参考最早 `recipes/wave.py` 的诊断图）：汇总表（覆盖波段、色散、参考谱线数、拟合/剔除的谱线、
+  残差的 nm 和像素值、每个 output 的谱线数、灯的饱和）；灯的图像，标出接受和剔除的谱线；所有 output 的灯光谱画在
+  各自的波长解上，标出参考谱线是否被使用；波长解、色散 dλ/dx、与各 output 中位数之差；每个 output 的谱线数；
+  残差随 x、随 y 的分布（含剔除的谱线）；每条参考谱线的残差。为此 WAVE 产品保存了所有拟合的谱线（含剔除的，
+  `PLANETES_WAVE_FIT` 增加 `WAVELENGTH`、`OUTPUT`、`REJECTED` 列）、`PLANETES_LAMP_SPECTRA` 和
+  `PLANETES_LAMP_IMAGE`。`fit_residual_m` 等字段现在包含剔除的谱线，QC 只用接受的（`wave.accepted_residual_m`）。
+- **0.35.0 以前的 P2VM 都需要重做**，用它们处理的科学数据也要重做。
+
 # PLANETES 0.34.0：多帧群延迟
 
 - `extraction.stacked_group_delay`：把多帧的相干功率相加，得到一个群延迟和峰值高度（峰值 / 搜索范围内的中位数）。

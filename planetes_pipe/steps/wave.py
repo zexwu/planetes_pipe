@@ -32,9 +32,23 @@ class Wave:
     """Wavelength solution in metres for each detector output."""
 
     wavelength_map_m: NDArray  # (output, x)
-    fit_residual_m: NDArray | None = None
+    # Every fitted lamp line, accepted or rejected (fit_rejected; None: all accepted).
+    fit_residual_m: NDArray | None = None  # laboratory minus fitted wavelength
     fit_x_pixels: NDArray | None = None
     fit_y_pixels: NDArray | None = None
+    fit_wavelength_m: NDArray | None = None  # laboratory wavelength
+    fit_output: NDArray | None = None
+    fit_rejected: NDArray | None = None
+    # Diagnostics for the report.
+    lamp_spectra_adu: NDArray | None = None  # (output, x), extracted
+    lamp_image_adu: NDArray | None = None  # (y, x), mean lamp minus its dark
+
+
+def accepted_residual_m(wave: Wave) -> NDArray | None:
+    """Residuals of the lines the fit kept."""
+    if wave.fit_residual_m is None or wave.fit_rejected is None:
+        return wave.fit_residual_m
+    return wave.fit_residual_m[~wave.fit_rejected]
 
 
 # Laboratory wavelengths [m], retaining the original float64 reference values.
@@ -112,7 +126,9 @@ def make_wave(raw: Raw, dark: Dark, flat: Flat) -> Wave:
     if image.shape != dark.mean_adu.shape or image.shape != flat.flat_map_adu.shape:
         raise ValueError("Lamp/dark/flat detector shapes differ")
     image = image - dark.mean_adu
-    return fit_wavelength_solution(image, flat, REFERENCE_WAVELENGTH_M)
+    wave = fit_wavelength_solution(image, flat, REFERENCE_WAVELENGTH_M)
+    wave.lamp_image_adu = image.astype(np.float32)
+    return wave
 
 
 def _peak_threshold(spectrum: NDArray) -> np.floating[Any]:
@@ -175,6 +191,7 @@ def fit_wavelength_solution(
     line_x = []
     line_y = []
     line_wave_m = []
+    line_output = []
     # Fixed bench reference quartet; no automatic S/N-based output selection.
     mean_spectrum = lamp_spectra[-4:].mean(axis=0)
 
@@ -236,6 +253,7 @@ def fit_wavelength_solution(
         line_x.append(refined_x)
         line_y.append(np.interp(refined_x, detector_x, y_trace[output]))
         line_wave_m.append(lines_m[line_indices])
+        line_output.append(np.full(len(refined_x), output))
 
     log.info("lines matched per output: %d-%d (mean %.1f)", min(matched_per_output),
              max(matched_per_output), np.mean(matched_per_output))
@@ -272,9 +290,13 @@ def fit_wavelength_solution(
 
     wave = Wave(
         wavelength_map_m=wave_map_m,
-        fit_residual_m=residuals[~reject].copy(),
-        fit_x_pixels=fit_x[~reject].copy(),
-        fit_y_pixels=fit_y[~reject].copy(),
+        fit_residual_m=residuals,
+        fit_x_pixels=fit_x,
+        fit_y_pixels=fit_y,
+        fit_wavelength_m=fit_wave_m,
+        fit_output=np.concatenate(line_output),
+        fit_rejected=reject,
+        lamp_spectra_adu=lamp_spectra,
     )
     return wave
 
@@ -610,8 +632,8 @@ QC_WAVE_LINES = Keyword("QC.NWAVE.SC", "Number of accepted lamp fit residuals")
 
 
 def qc(product: Wave) -> dict[Keyword, float | None]:
-    """Common wavelength coverage and lamp-residual sample stdev (ddof=1), metres."""
-    residual = product.fit_residual_m
+    """Common wavelength coverage and accepted lamp-residual sample stdev (ddof=1), metres."""
+    residual = accepted_residual_m(product)
     n = 0 if residual is None else residual.size
     low = float(np.max(np.min(product.wavelength_map_m, axis=1)))
     high = float(np.min(np.max(product.wavelength_map_m, axis=1)))
@@ -622,6 +644,12 @@ def qc(product: Wave) -> dict[Keyword, float | None]:
         QC_WAVE_RMS: std,
         QC_WAVE_LINES: n,
     }
+
+
+_IMAGES = [
+    ("lamp_spectra_adu", "PLANETES_LAMP_SPECTRA", "adu"),
+    ("lamp_image_adu", "PLANETES_LAMP_IMAGE", "adu"),
+]
 
 
 def write_wave(path: Path, product: Wave, *, header=None) -> None:
@@ -638,7 +666,16 @@ def write_wave(path: Path, product: Wave, *, header=None) -> None:
             products.column("X", product.fit_x_pixels, "pixel"),
             products.column("Y", product.fit_y_pixels, "pixel"),
         ]
+        for name, values, unit in (("WAVELENGTH", product.fit_wavelength_m, "m"),
+                                   ("OUTPUT", product.fit_output, ""),
+                                   ("REJECTED", product.fit_rejected, "")):
+            if values is not None:
+                if name != "WAVELENGTH":
+                    values = np.asarray(values, dtype=np.int64)
+                fit.append(products.column(name, values, unit))
         extensions.append(afits.BinTableHDU.from_columns(fit, name="PLANETES_WAVE_FIT"))
+    extensions += [products.image_hdu(ext, getattr(product, name), unit)
+                   for name, ext, unit in _IMAGES if getattr(product, name) is not None]
     products.save_product(path, "WAVE", extensions, header=header, qc=qc(product))
 
 
@@ -652,6 +689,16 @@ def read_wave(path: Path) -> Wave:
             wave.fit_residual_m = products.read_column(hdus, "PLANETES_WAVE_FIT", "RESIDUAL")
             wave.fit_x_pixels = products.read_column(hdus, "PLANETES_WAVE_FIT", "X")
             wave.fit_y_pixels = products.read_column(hdus, "PLANETES_WAVE_FIT", "Y")
+            names = hdus["PLANETES_WAVE_FIT"].columns.names
+            for field, column in (("fit_wavelength_m", "WAVELENGTH"), ("fit_output", "OUTPUT"),
+                                  ("fit_rejected", "REJECTED")):
+                if column in names:
+                    setattr(wave, field, products.read_column(hdus, "PLANETES_WAVE_FIT", column))
+            if wave.fit_rejected is not None:
+                wave.fit_rejected = wave.fit_rejected.astype(bool)
+        for name, ext, _ in _IMAGES:
+            if ext in hdus:
+                setattr(wave, name, products.read_image(hdus, ext))
         return wave
 
 

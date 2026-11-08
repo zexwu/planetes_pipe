@@ -90,6 +90,19 @@ class WaveTests(unittest.TestCase):
             np.testing.assert_allclose(
                 loaded.wavelength_map_m, truth_m, rtol=0, atol=2e-12
             )
+            # The report's diagnostics: every fitted line with its output and laboratory
+            # wavelength, the lamp spectra and the lamp image.
+            n_lines = len(wave.fit_residual_m)
+            for field in ("fit_x_pixels", "fit_y_pixels", "fit_wavelength_m", "fit_output",
+                          "fit_rejected"):
+                self.assertEqual(len(getattr(loaded, field)), n_lines, field)
+            self.assertEqual(loaded.fit_rejected.dtype, bool)
+            np.testing.assert_array_equal(loaded.fit_output, wave.fit_output)
+            self.assertEqual(loaded.lamp_spectra_adu.shape, (24, width))
+            self.assertEqual(loaded.lamp_image_adu.shape, lamp_image.shape)
+            np.testing.assert_allclose(loaded.fit_wavelength_m - loaded.fit_residual_m,
+                                       wave.fit_wavelength_m - wave.fit_residual_m, rtol=0,
+                                       atol=1e-18)
 
     def test_grid_line_matching_is_one_to_one(self) -> None:
         theoretical = np.array([0.0, 0.15, 1.0, 2.0])

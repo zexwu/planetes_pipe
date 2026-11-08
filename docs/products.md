@@ -16,8 +16,8 @@ References: [GRAVITY product codes](https://www.eso.org/observing/dfo/quality/GR
 | `steps/dark.py` | `Dark` | DARK | `IMAGING_DATA_SC` mean [ADU], `IMAGING_ERR_SC` temporal RMS [ADU]; `NFRAMES` |
 | `steps/dark.py` | `Bad` | BAD | `IMAGING_DATA_SC` bit flags: hot 1, dead 2, noisy 4 |
 | `steps/flat.py` | `Flat` | FLAT | `IMAGING_DETECTOR_SC`, `PLANETES_FLAT_IMAGE`, `PROFILE_PARAMS`, `PLANETES_PROFILE`, optional `PLANETES_FLAT_FLUX` |
-| `steps/wave.py` | `Wave` | WAVE | `WAVE_DATA_SC` wavelength per output and x [m]; optional `PLANETES_WAVE_FIT` |
-| `steps/p2vm.py` | `P2VM` | P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC`, `PLANETES_P2VM_INVERSE`; optional scan diagnostics |
+| `steps/wave.py` | `Wave` | WAVE | `WAVE_DATA_SC` wavelength per output and x [m]; optional `PLANETES_WAVE_FIT` (every fitted lamp line: `RESIDUAL`, `X`, `Y`, laboratory `WAVELENGTH`, `OUTPUT`, `REJECTED`), `PLANETES_LAMP_SPECTRA` (output, x) and `PLANETES_LAMP_IMAGE` (dark-subtracted mean lamp) for the report |
+| `steps/p2vm.py` | `P2VM` | P2VM | `IMAGING_DETECTOR_SC`, `PLANETES_WAVELENGTH`, `P2VM_SC`, `PLANETES_P2VM_INVERSE`; optional scan diagnostics, with `PLANETES_DL_OPD`, the delay line's recorded OPD (for comparison only) |
 | `steps/science.py` | `P2VMRed` | SINGLE_SCI_P2VMRED | `OI_WAVELENGTH`, `OI_FLUX`, `OI_VIS`, `OI_T3` (`INSNAME` `PLANETES_SC`), named as in GRAVITY's P2VMRED but not valid OIFITS: per-frame `FLUX`, `FLUXERR`, `CHI2`, `VISDATA`, `VISERR`, `VISAMP`, `VISPHI` [deg], `F1F2`, `SNR`, `FLAG`, `GDELAY` [m], `DIFFPHASE` [deg], `T3AMP`, `T3PHI`, `T3PHIERR` [deg], and `TIME` [us], `MJD`, `INT_TIME` [s] estimated from MJD-OBS and DIT (one frame per DIT) |
 
 `P2VMSpectra` (P2VM fit input) and `FrameReducer` (live reduction state) are
@@ -107,7 +107,7 @@ The CPL parameter is the Python keyword with dashes, under `planetes.calib` or
 | `metrology_trace` | planetes.calib.metrology-trace | false |
 | `keep_diagnostics` | planetes.calib.keep-diagnostics | false |
 | `gd_search_min_m` / `max_m` (P2VM) | planetes.calib.gd-search-min-m / -max-m | −30e-6 / 30e-6 m |
-| `dl_gain` (P2VM) | planetes.calib.dl-gain | none: each scan's recorded DL_SCAN `OPDGAIN`; give it (e.g. `43:-1,42:-1,41:-1,32:1,31:-1,21:-1`) only for scans recorded before 2026-11-05 |
+| `dl_gain` (P2VM) | planetes.calib.dl-gain | none: each scan's recorded DL_SCAN `OPDGAIN`, which sets only the baseline's orientation; give it (e.g. `43:-1,42:-1,41:-1,32:1,31:-1,21:-1`) only for scans recorded before 2026-11-05 |
 | `wave_min_m` / `wave_max_m` (P2VM) | planetes.calib.wave-min-m / -max-m | 0 / 1 m: the whole common band |
 | `gd_search_min_m` / `max_m` (science) | planetes.reduce.gd-search-min-m / -max-m | −100e-6 / 100e-6 m |
 

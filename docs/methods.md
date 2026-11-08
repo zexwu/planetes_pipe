@@ -114,10 +114,18 @@ existing name `ellipse_amplitude`.
 For each physical baseline, the four outputs are A,C,B,D. At each wavelength fit
 `X=C-A`, `Y=D-B` with the same pseudoinverse and a unit right-hand side. The old
 `envs` argument was always one and was not residual weighting; it is removed.
-Unwrap `atan2(Y_fit,X_fit)` along frames. For ideal intensities
-`I_q=c+A*cos(phi+[0,pi,pi/2,3*pi/2]_q)`, this ellipse phase decreases with phi.
-Use the central half-band to form the mean `phase*lambda/(2*pi)` scan OPD and
-coherent-sum GD. Remove the intercept of the linear OPD-versus-GD fit. Both use m.
+The ellipse phase is `atan2(Y_fit,X_fit)`. For ideal intensities
+`I_q=c+A*cos(phi+[0,pi,pi/2,3*pi/2]_q)`, it decreases with phi. The fringes alone
+give each frame's OPD; the delay line's recorded position is not used. On the central
+half-band, the coherent-sum GD of `radius*exp(1j*phase)` (`scan_group_delay`: the
+scan's centre from all frames over +-1000 um, then each frame within 150 um of it)
+does not depend on whole fringes, and fixes them (`unwrap_scan_phase`, relative to
+the middle frame). The OPD is then the mean `phase*lambda/(2*pi)`, precise to nm where
+the GD is precise to 0.04-0.12 um. Remove the intercept of the linear OPD-versus-GD
+fit. Both use m. A scan step spans several fringes, so unwrapping along frames fails,
+and the recorded position is wrong by up to 9 fringes (backlash, 2026-11-06). With
+`keep_diagnostics`, the P2VM keeps that recorded OPD (`delay_line_opd`) and its report
+plots it against the fringe OPD, so the delay line's gain and backlash can be judged.
 
 Fit all 24 outputs, including cross-talk, as `c+a*cos(phi)+b*sin(phi)` with
 `phi=2*pi*OPD/lambda`. The design columns remain `(1,sin(phi),cos(phi))`.
