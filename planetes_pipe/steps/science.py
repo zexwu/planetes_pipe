@@ -20,9 +20,10 @@ from planetes_pipe.logs import step
 from planetes_pipe.steps.dark import Dark, read_dark
 from planetes_pipe.steps.extraction import (
     SpectralExtractor,
-    estimate_group_delay,
+    NO_FRINGE_PEAK,
     extract_spectra,
     prepare_extraction,
+    tracked_group_delay,
 )
 from planetes_pipe.steps.flat import Flat, read_flat
 from planetes_pipe.steps.p2vm import P2VM, build_v2pm, read_p2vm
@@ -60,8 +61,8 @@ def reduce_science(
     wave: Wave,
     p2vm: P2VM,
     *,
-    gd_search_min_m: float = -100e-6,
-    gd_search_max_m: float = 100e-6,
+    gd_search_min_m: float = -1000e-6,
+    gd_search_max_m: float = 1000e-6,
 ) -> P2VMRed:
     """Extract all science frames and compute instrumental interferometric observables.
 
@@ -189,8 +190,8 @@ def reduce_spectra(
     spectra: NDArray,
     p2vm: P2VM,
     *,
-    gd_search_min_m: float = -100e-6,
-    gd_search_max_m: float = 100e-6,
+    gd_search_min_m: float = -1000e-6,
+    gd_search_max_m: float = 1000e-6,
     include_phase: bool = True,
     spectra_variance: NDArray | None = None,
     gd_grid_step_m: float = 1e-8,
@@ -207,8 +208,9 @@ def reduce_spectra(
         Inverse shaped (16 data channels, 24 outputs, wavelength), ordered as
         T4,T3,T2,T1, six real coherent channels, then six imaginary channels.
     gd_search_min_m, gd_search_max_m : float, optional
-        Coarse GD initialization interval [min, max) in metres. Newton refinement
-        can leave the interval. Ignored when include_phase is False.
+        Interval [min, max) in metres in which each block of frames finds its fringe
+        (extraction.tracked_group_delay); each frame is then refined within
+        extraction.GD_SPAN_M of it. Ignored when include_phase is False.
     include_phase : bool, optional
         Compute GD and differential phase when True. False returns both as None
         for live previews; these incomplete products cannot be saved as P2VMRED.
@@ -260,12 +262,17 @@ def reduce_spectra(
 
     gd_m = np.zeros((len(coherent_adu), layout.n_baselines))
     for baseline in range(layout.n_baselines):
-        gd_m[:, baseline] = estimate_group_delay(
+        gd_m[:, baseline], peak = tracked_group_delay(
             coherent_adu[:, baseline],
             p2vm.wavelength_m,
             search_range=(gd_search_min_m, gd_search_max_m),
             grid_step_m=gd_grid_step_m,
         )
+        lost = peak < NO_FRINGE_PEAK
+        if lost.any() and len(lost) > 1:  # a single (live) frame is not judged
+            log.warning("baseline %s: no fringe within %+.0f..%+.0f um in %d of %d frames; "
+                        "their GD and phase mean nothing", layout.baselines[baseline],
+                        gd_search_min_m * 1e6, gd_search_max_m * 1e6, lost.sum(), len(lost))
     log.info("median group delay: %s", ", ".join(
         f"{name} {np.median(gd_m[:, b]) * 1e6:+.1f} um" for b, name in enumerate(layout.baselines)))
 
@@ -379,8 +386,8 @@ class FrameReducer:
         *,
         dark: Dark,
         include_phase: bool = False,
-        gd_search_min_m: float = -100e-6,
-        gd_search_max_m: float = 100e-6,
+        gd_search_min_m: float = -1000e-6,
+        gd_search_max_m: float = 1000e-6,
         gd_grid_step_m: float = 1e-8,
     ) -> P2VMRed:
         """Reduce one raw detector frame using the prepared extraction and P2VM.
@@ -394,8 +401,8 @@ class FrameReducer:
         include_phase : bool, optional
             False by default for previews. True also computes GD and differential phase.
         gd_search_min_m, gd_search_max_m : float, optional
-            Coarse GD interval in metres, used only with include_phase=True.
-            Newton refinement may leave these initialization bounds.
+            Fringe search interval in metres (reduce_spectra), used only with
+            include_phase=True.
 
         Returns
         -------
@@ -544,7 +551,7 @@ def read_reduced(path: Path) -> P2VMRed:
 
 @step("SCIENCE")
 def run(science_file, dark_file, flat_file, wave_file, p2vm_file, *, output_dir,
-        gd_search_min_m=-100e-6, gd_search_max_m=100e-6) -> dict[str, Path]:
+        gd_search_min_m=-1000e-6, gd_search_max_m=1000e-6) -> dict[str, Path]:
     """planetes_reduce: one SINGLE_SCI_RAW + DARK, FLAT, WAVE, P2VM -> SINGLE_SCI_P2VMRED."""
     raw = read_raw(science_file, "SINGLE_SCI_RAW")
     dark, flat, wave = read_dark(dark_file), read_flat(flat_file), read_wave(wave_file)

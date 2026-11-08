@@ -189,8 +189,12 @@ invalid-data rule: nonpositive/nonfinite photometric products or nonfinite
 coherent flux yield NaN and flags. Full reduction also computes coherent-sum
 GD with Newton refinement and the original differential phase.
 
-Default coarse GD ranges are ±30e-6 m for calibration and ±100e-6 m for science,
-with a 1e-8 m step. Newton refinement is unconstrained by these initialization bounds.
+The science GD is tracked (`extraction.tracked_group_delay`): each block of 64 frames
+finds its fringe over ±1000e-6 m by the summed coherent power of its frames
+(`stacked_group_delay`), and each frame is then searched within ±50e-6 m of it with a
+1e-8 m step and Newton refinement. A block whose peak is below 20 times the median
+power has no fringe in the range; the reduction warns. The phase reference of the P2VM
+keeps a single ±30e-6 m search.
 Real-time reduction shares extraction, normalization and flags, with a 0.5e-6 m step
 for speed. It always receives raw unbinned frames. Display binning belongs to the
 consuming application.

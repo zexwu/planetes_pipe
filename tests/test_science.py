@@ -11,7 +11,12 @@ from astropy.io import fits
 from fixtures import calibration_arrays, calibration_spectra
 
 from planetes_pipe.instrument import layout
-from planetes_pipe.steps.extraction import stacked_group_delay
+from planetes_pipe.steps.extraction import (
+    GD_BLOCK_FRAMES,
+    NO_FRINGE_PEAK,
+    stacked_group_delay,
+    tracked_group_delay,
+)
 from planetes_pipe.steps.flat import Flat, read_flat
 from planetes_pipe.steps.p2vm import P2VM, fit_p2vm, read_p2vm
 from planetes_pipe.steps.science import (
@@ -45,6 +50,16 @@ class StackedGroupDelayTests(unittest.TestCase):
         self.assertAlmostEqual(delay * 1e6, 450, delta=0.2)
         self.assertGreater(peak, 20)
         self.assertLess(stacked_group_delay(frames, self.WAVELENGTH)[1], 20)
+
+    def test_tracked_delay_follows_a_drifting_fringe_far_from_zero(self):
+        rng = np.random.default_rng(3)
+        n = 2 * GD_BLOCK_FRAMES + 5
+        delay = np.linspace(-310e-6, -290e-6, n)  # beyond the old +-100 um search
+        noise = rng.normal(size=(n, 200)) + 1j * rng.normal(size=(n, 200))
+        frames = 3.0 * np.exp(2j * np.pi * delay[:, None] / self.WAVELENGTH) + noise
+        gd, peak = tracked_group_delay(frames, self.WAVELENGTH)
+        np.testing.assert_allclose(gd, delay, atol=1.5e-6)  # noise-limited, 70 nm band
+        self.assertTrue(np.all(peak > NO_FRINGE_PEAK))
 
     def test_no_fringes_give_no_clear_peak(self):
         _, peak = stacked_group_delay(self.frames(37.2e-6, 0.0), self.WAVELENGTH)

@@ -330,3 +330,36 @@ def estimate_group_delay(
         gd_current = gd_current - difference
 
     return gd_current
+
+
+GD_BLOCK_FRAMES = 64  # frames sharing one fringe search; the bench OPD drifts ~1 um/s
+GD_SPAN_M = 50e-6  # each frame's search about its block's fringe
+NO_FRINGE_PEAK = 20.0  # stacked_group_delay peak ratio; fringes give thousands, none < 10
+
+
+def tracked_group_delay(
+    visdata: NDArray,
+    wavelength: NDArray,
+    search_range: tuple[float, float] = (-1000e-6, 1000e-6),
+    grid_step_m: float = 1e-8,
+) -> tuple[NDArray, NDArray]:
+    """Per-frame GD [m] found wherever the fringes are in search_range: (frame,), and peak.
+
+    Each block of GD_BLOCK_FRAMES frames finds its fringe with stacked_group_delay over
+    search_range; each frame is then estimated (estimate_group_delay) within GD_SPAN_M
+    of it. A single-frame search over the whole range at this precision is costly, and
+    a narrow one misses fringes beyond it: on 2026-11-06T175510 T4 was at -300 um and
+    a +-100 um search returned delays scattered over it, with VISAMP 0.8.
+
+    Also returns each frame's block peak ratio (stacked_group_delay): below
+    NO_FRINGE_PEAK the block shows no fringe in the range and its GD means nothing.
+    """
+    gd_m = np.empty(len(visdata))
+    peak = np.empty(len(visdata))
+    for start in range(0, len(visdata), GD_BLOCK_FRAMES):
+        rows = slice(start, start + GD_BLOCK_FRAMES)
+        centre, peak[rows] = stacked_group_delay(visdata[rows], wavelength, search_range)
+        gd_m[rows] = estimate_group_delay(
+            visdata[rows], wavelength, search_range=(centre - GD_SPAN_M, centre + GD_SPAN_M),
+            grid_step_m=grid_step_m)
+    return gd_m, peak

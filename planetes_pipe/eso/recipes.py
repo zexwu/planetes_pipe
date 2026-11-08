@@ -39,8 +39,8 @@ HELP = {
     "aperture_width_pixels": "Full extraction aperture in detector pixels",
     "metrology_trace": "Detect 25 traces and omit the middle metrology trace",
     "keep_diagnostics": "Retain P2VM scan and fit diagnostics in the calibration product",
-    "gd_search_min_m": "Coarse GD lower initialization [m]; Newton remains unconstrained",
-    "gd_search_max_m": "Coarse GD upper initialization [m]; Newton remains unconstrained",
+    "gd_search_min_m": "Lower edge of the GD search [m] (science: where fringes are found)",
+    "gd_search_max_m": "Upper edge of the GD search [m] (science: where fringes are found)",
     "wave_min_m": "Shortest wavelength of the P2VM band [m]; 0 keeps the whole common band",
     "wave_max_m": "Longest wavelength of the P2VM band [m]; 1 keeps the whole common band",
     "dl_gain": "OPD sign per baseline (baseline orientation), e.g. 43:-1,42:-1,41:-1,32:1,"
