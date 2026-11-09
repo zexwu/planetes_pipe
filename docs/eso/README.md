@@ -23,7 +23,8 @@ identity still comes from the FITS header. Python examples do not need SOFs.
 
 Each recipe's inputs (tag and count) are listed in `planetes_pipe/eso/recipes.py`
 and [products.md](../products.md). `planetes_bench/scripts/reduce_night.py` writes
-each step's SOF next to its products (`<reference>_planetes_<step>.sof`), e.g. in the
+each step's SOF next to its products, named as its product (`<reference>_dark.sof`,
+`_flat.sof`, `_wave.sof`, `_p2vm.sof`, `_singlescip2vmred.sof`), e.g. in the
 workspace's `data/2026-11-06/reduced/`; they run as they are.
 
 For example, with CPL/PyCPL/PyEsoRex installed, run in a fresh output directory:
