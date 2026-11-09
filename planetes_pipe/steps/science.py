@@ -206,7 +206,7 @@ def reduce_spectra(
         cannot establish wavelength-grid identity.
     p2vm : P2VM
         Inverse shaped (16 data channels, 24 outputs, wavelength), ordered as
-        T4,T3,T2,T1, six real coherent channels, then six imaginary channels.
+        S4,S3,S2,S1, six real coherent channels, then six imaginary channels.
     gd_search_min_m, gd_search_max_m : float, optional
         Interval [min, max) in metres in which each block of frames finds its fringe
         (extraction.tracked_group_delay); each frame is then refined within
@@ -310,7 +310,7 @@ def normalize_coherent_flux(
     coherent_flux : complex ndarray, shape (frame, 6, wavelength)
         Coherent flux in ADU, in baseline order 43,42,41,32,31,21.
     flux : ndarray, shape (frame, 4, wavelength)
-        Photometry in ADU, in telescope order T4,T3,T2,T1.
+        Photometry in ADU, in telescope order S4,S3,S2,S1.
 
     Returns
     -------

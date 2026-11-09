@@ -53,7 +53,7 @@ class FlatTests(unittest.TestCase):
         self.assertLess(flat.trace_x_range[0, 0], 50)
 
     def test_faint_telescope_traces_are_found_beside_bright_ones(self):
-        # 2026-11-05 17:02: T4 about 19 times T1, so the traces lit only by the faint
+        # 2026-11-05 17:02: S4 about 19 times S1, so the traces lit only by the faint
         # telescopes lay below the profile's 75th percentile, once the detection cut.
         height, width = 25 * 34, 120
         y, x = np.indices((height, width))

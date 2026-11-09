@@ -210,7 +210,7 @@ def build_flat(
     ----------
     flat_images : list of ndarray
         Four already dark-subtracted mean images in ADU, each shaped (y, x),
-        ordered T4, T3, T2, T1. No dark subtraction occurs here.
+        ordered S4, S3, S2, S1. No dark subtraction occurs here.
     bad : Bad
         Detector bit mask on the same grid; nonzero pixels are excluded.
     n_outputs : int, optional
@@ -592,11 +592,11 @@ def fit_gaussian(x, y, p0, max_iter=6):
 
 
 
-QC_FLUX = Keyword("QC.FLATFLUX.SC{0}", "Total flux per DIT, T{1}", "adu")
+QC_FLUX = Keyword("QC.FLATFLUX.SC{0}", "Total flux per DIT, S{1}", "adu")
 
 
 def qc(product: Flat) -> dict[Keyword, float]:
-    """Total flux of each dark-subtracted mean flat per DIT, in T4,T3,T2,T1 order."""
+    """Total flux of each dark-subtracted mean flat per DIT, in S4,S3,S2,S1 order."""
     if product.telescope_flux_adu is None:
         return {}
     fluxes = zip(layout.telescopes, product.telescope_flux_adu)
@@ -676,7 +676,7 @@ def run(dark_file, bad_file, flat_files, *, output_dir,
     reference = flats["4"].path  # Names the product and supplies its observation header.
     inputs = {"FLAT_RAW": flat_files, "DARK": [dark_file], "BAD": [bad_file]}
     header = products.provenance("planetes_flat", reference, inputs, **options)
-    record_saturation(header, {f"T{telescope}": raw for telescope, raw in flats.items()})
+    record_saturation(header, {f"S{telescope}": raw for telescope, raw in flats.items()})
     path = products.product_path(output_dir, reference, "FLAT")
     write_flat(path, product, header=header)
     return {"FLAT": path}

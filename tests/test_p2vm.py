@@ -42,8 +42,8 @@ class WavelengthGridTests(unittest.TestCase):
         flats[1, 0] = 25  # a weak but lit output of S4-S3 (2026-11-05)
         mapping = _identify_output_mapping(flats, scans)
         self.assertEqual(mapping, {b: list(range(4 * b, 4 * b + 4)) for b in range(6)})
-        flats[1, 0] = 1  # now unlit by T3: the baseline's outputs disagree
-        with self.assertRaisesRegex(ValueError, r"mismatch for baseline 43: .*T3 1, 100"):
+        flats[1, 0] = 1  # now unlit by S3: the baseline's outputs disagree
+        with self.assertRaisesRegex(ValueError, r"mismatch for baseline 43: .*S3 1, 100"):
             _identify_output_mapping(flats, scans)
 
     def test_intersection_at_native_sampling_and_fits_roundtrip(self):

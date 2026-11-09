@@ -149,7 +149,7 @@ Normalization retains its existing order and arithmetic:
    2026-11-05 this is S3-S2 alone, whose B-A then reads 270 deg instead of 90. Without
    it, closure phases containing that baseline do not close.
 
-V2PM has axes `(24 outputs, 16 data channels, wavelength)`: columns T4,T3,T2,T1,
+V2PM has axes `(24 outputs, 16 data channels, wavelength)`: columns S4,S3,S2,S1,
 then six real and six imaginary coherent components in 43,42,41,32,31,21 order.
 The coherent columns are amplitude*cos(phase) and amplitude*sin(phase); the whole
 matrix is divided by 24. Require numerical rank 16, then compute the original
@@ -158,12 +158,12 @@ per-wavelength `pinv`. No new condition-number rejection is added.
 The optional phase reference is applied in four explicit stages:
 
 1. Reconstruct reference coherent flux with the initial P2VM. Use baselines
-   43,42,41 to obtain central-channel phases relative to T4 (fixed phase zero),
+   43,42,41 to obtain central-channel phases relative to S4 (fixed phase zero),
    using GD to retain the existing phase branch. Subtract each telescope's
    temporal mean. These are phases in radians, not path lengths.
 2. Scale telescope phase differences by `lambda_center/lambda`, rotate each
    frame, then **sum** coherent flux over frames.
-3. Measure GD of that integrated coherence, construct the T4-anchored telescope
+3. Measure GD of that integrated coherence, construct the S4-anchored telescope
    phasors, and apply the existing residual chromatic-slope correction.
 4. Subtract the integrated reference phase only from each detector output's
    **own physical baseline** response. Rebuild and invert V2PM.

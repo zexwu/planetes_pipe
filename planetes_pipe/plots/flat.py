@@ -60,7 +60,7 @@ def sections(flat: Flat) -> list[Section]:
     if flat.telescope_flux_adu is not None:
         cells = [[f"{f:.4g}" for f in flat.telescope_flux_adu]]
         result.append(Section("Telescope fluxes (QC.FLATFLUX)",
-                              lambda fig: table(fig, cells, [f"T{t}" for t in layout.telescopes],
+                              lambda fig: table(fig, cells, [f"S{t}" for t in layout.telescopes],
                                                 ["ADU per DIT"]),
                               table_height(1), "Sum of all pixels of each telescope's dark-subtracted mean flat."))
     return result

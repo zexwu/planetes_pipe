@@ -19,12 +19,12 @@ class KeywordTests(unittest.TestCase):
         self.assertEqual(DIT.card, "HIERARCH ESO DET WIN1 DIT1")
         self.assertEqual(INSTRUME.card, "INSTRUME")
         self.assertEqual(SHUTTER.at(4).card, "HIERARCH ESO INS SHUT4 ST")
-        self.assertEqual(SHUTTER.at(4).comment, "Shutter T4 open")
+        self.assertEqual(SHUTTER.at(4).comment, "Shutter S4 open")
 
     def test_indexed_entries_fill_name_and_comment_positionally(self):
-        keyword = QC_FLUX.at(1, "4")  # First QC flux is telescope T4.
+        keyword = QC_FLUX.at(1, "4")  # First QC flux is telescope S4.
         self.assertEqual(keyword.name, "QC.FLATFLUX.SC1")
-        self.assertEqual(keyword.comment, "Total flux per DIT, T4")
+        self.assertEqual(keyword.comment, "Total flux per DIT, S4")
 
     def test_set_writes_unit_and_fits_the_comment_in_one_card(self):
         header = fits.Header()

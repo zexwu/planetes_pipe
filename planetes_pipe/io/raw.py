@@ -90,7 +90,7 @@ class Raw:
 
     @property
     def shutters(self) -> tuple:
-        """Recorded shutter states, physical T1..T4 order; None where not recorded."""
+        """Recorded shutter states, physical S1..S4 order; None where not recorded."""
         return read_shutters(self.header)
 
     @property
@@ -148,7 +148,7 @@ def read_raws(paths, category: str, identities: tuple[str, ...], *,
               hdu: int | str = "IMAGING_DATA_SC") -> dict[str, Raw]:
     """Read a calibration sequence keyed by physical identity, e.g. {"4": Raw, "3": Raw, ...}.
 
-    Identity comes from the recorded shutters ('4' = only T4 open, '43' = T4 and T3),
+    Identity comes from the recorded shutters ('4' = only S4 open, '43' = S4 and S3),
     never from the filename or input order. There must be exactly one file per
     identity: a missing, repeated or unexpected shutter configuration raises.
     """
@@ -239,7 +239,7 @@ def check_calibrations(raw: Raw, *, dark=None, flat=None) -> None:
 def record_saturation(header: afits.Header, raws: dict[str, Raw], pixels=None) -> None:
     """Write QC.NSAT.<label> for each raw input into a product header; warn if any is clipped.
 
-    raws maps a short label to each input, e.g. {"SC43": scan, "T4": flat}; pixels
+    raws maps a short label to each input, e.g. {"SC43": scan, "S4": flat}; pixels
     restricts the count to the extracted pixels (Flat.extracted_pixels()) when known.
     """
     for label, raw in raws.items():
@@ -253,7 +253,7 @@ def record_saturation(header: afits.Header, raws: dict[str, Raw], pixels=None) -
 
 
 def read_shutters(header: afits.Header) -> tuple:
-    """Shutter states in physical T1..T4 order; None where not recorded.
+    """Shutter states in physical S1..S4 order; None where not recorded.
 
     Files written before 2026-11 use the non-ESO names 'PLANETES INS SHUTn ST'.
     """
@@ -262,7 +262,7 @@ def read_shutters(header: afits.Header) -> tuple:
 
 
 def write_shutters(header: afits.Header, shutters) -> None:
-    """Write shutter states in physical T1..T4 order."""
+    """Write shutter states in physical S1..S4 order."""
     for n, state in enumerate(shutters, 1):
         SHUTTER.at(n).set(header, state)
 

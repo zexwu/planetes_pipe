@@ -90,7 +90,7 @@ def _wavelength_nm(reduced):
 
 
 def _telescope_entries():
-    return [(f"T{t}", {"color": color}) for t, color in zip(layout.telescopes, COLORS)]
+    return [(f"S{t}", {"color": color}) for t, color in zip(layout.telescopes, COLORS)]
 
 
 def _baseline_entries():
@@ -146,7 +146,7 @@ def _flux_waterfall(fig, reduced):
     means = flux.mean(axis=(0, 2), keepdims=True)
     relative = flux - means
     low, high = np.nanpercentile(relative, [1, 99])
-    labels = [f"T{t}  mean {m:.3g}" for t, m in zip(layout.telescopes, means.ravel())]
+    labels = [f"S{t}  mean {m:.3g}" for t, m in zip(layout.telescopes, means.ravel())]
     _waterfall(fig, reduced, relative.transpose(1, 0, 2), labels, 2, 2, "Flux − mean [ADU/DIT]",
                vmin=low, vmax=high, cmap="cubehelix")
 
@@ -196,7 +196,7 @@ def _phase_waterfall(fig, reduced):
 def _closure(fig, reduced):
     x, xlabel = _time(reduced)
     phase = np.angle(np.exp(1j * np.deg2rad(closure(reduced)[1])).mean(axis=-1), deg=True)
-    entries = [("T" + "-".join(t), {"color": COLORS[n]}) for n, t in enumerate(TRIPLETS)]
+    entries = [("–".join(f"S{s}" for s in t), {"color": COLORS[n]}) for n, t in enumerate(TRIPLETS)]
     _overlay(fig, x, phase.T, xlabel, "Closure phase [deg]", entries, ylim=(-180, 180),
              yticks=[-180, -90, 0, 90, 180])
 

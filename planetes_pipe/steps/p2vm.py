@@ -61,7 +61,7 @@ class P2VM:
 
 
 def normalized_coherence(p2vm: P2VM) -> NDArray:
-    """Coherence / (2 sqrt(T1 T2)) of each baseline's outputs: (baseline, A/C/B/D, wavelength).
+    """Coherence / (2 sqrt(P_i P_j)) of each baseline's outputs: (baseline, A/C/B/D, wavelength).
 
     1 for an output that reaches full fringe contrast during the calibration scan.
     """
@@ -160,7 +160,7 @@ def _identify_output_mapping(
     Parameters
     ----------
     telescope_spectra : ndarray, shape (4, 24, frame, wavelength)
-        Telescope-flat ADU spectra in T4,T3,T2,T1 order.
+        Telescope-flat ADU spectra in S4,S3,S2,S1 order.
     baseline_spectra : ndarray, shape (6, 24, frame, wavelength)
         ADU scans in baseline order 43,42,41,32,31,21.
 
@@ -201,7 +201,7 @@ def _identify_output_mapping(
                 f"Output mapping mismatch for baseline {layout.baselines[baseline]}: "
                 f"{sorted(from_flats)} from flats, "
                 f"{sorted(from_scan)} from modulation; flat flux [ADU] of outputs {shown}: "
-                + "; ".join(f"T{layout.telescopes[t]} "
+                + "; ".join(f"S{layout.telescopes[t]} "
                             + ", ".join(f"{fluxes[t][o]:.0f}" for o in shown)
                             for t in (telescope_1, telescope_2)))
         baseline_outputs[baseline] = sorted(modulated[baseline])
@@ -469,7 +469,7 @@ def _estimate_transmission(telescope_spectra: NDArray) -> NDArray:
     Parameters
     ----------
     telescope_spectra : ndarray, shape (4 telescopes, 24 outputs, frame, wavelength)
-        Extracted ADU flat spectra in T4,T3,T2,T1 order.
+        Extracted ADU flat spectra in S4,S3,S2,S1 order.
 
     Returns
     -------
@@ -588,7 +588,7 @@ def build_v2pm(
     Returns
     -------
     v2pm : ndarray, shape (24 outputs, 16 data channels, wavelength)
-        Dimensionless forward matrix. Columns are T4,T3,T2,T1, then Re(C_ij),
+        Dimensionless forward matrix. Columns are S4,S3,S2,S1, then Re(C_ij),
         then Im(C_ij), each coherent group ordered 43,42,41,32,31,21.
 
     Notes
@@ -614,7 +614,7 @@ def _apply_phase_reference(
     *,
     search_range: tuple[float, float],
 ) -> NDArray:
-    """Correct instrumental response phases using a reference anchored to telescope T4.
+    """Correct instrumental response phases using a reference anchored to telescope S4.
 
     Parameters
     ----------
@@ -641,7 +641,7 @@ def _apply_phase_reference(
     -----
     Recover telescope phases from baselines 43,42,41, remove their temporal mean,
     scale as 1/lambda and coherently SUM the corrected reference frames. Remove
-    the residual chromatic GD with T4-anchored telescope phasors, then subtract
+    the residual chromatic GD with S4-anchored telescope phasors, then subtract
     the integrated reference phase. The caller rebuilds and reinverts V2PM.
     """
     log.info("applying the phase reference (%d frames)", reference_spectra.shape[1])
@@ -650,7 +650,7 @@ def _apply_phase_reference(
     coherent_adu = channels[:, layout.real_slice, :] + 1j * channels[:, layout.imag_slice, :]
     center = len(wavelength_m) // 2
     anchor = layout.telescopes.index("4")
-    # 43, 42, 41 identify the other telescopes relative to T4 explicitly.
+    # 43, 42, 41 identify the other telescopes relative to S4 explicitly.
     anchor_baselines = [
         (baseline, second)
         for baseline, (first, second) in enumerate(layout.baseline_pairs)
@@ -683,7 +683,7 @@ def _apply_phase_reference(
             )
         ).sum(axis=0)
 
-    # Remove the residual spectral GD with telescope phasors anchored to T4.
+    # Remove the residual spectral GD with telescope phasors anchored to S4.
     phasor_by_tel = np.ones((layout.n_telescopes, len(wavelength_m)), dtype=complex)
     gd_m = estimate_group_delay(
         coherent_sum_adu, wavelength_m, search_range=search_range
@@ -1010,7 +1010,7 @@ def run(dark_file, flat_file, wave_file, flat_files, scan_files, *, output_dir,
         inputs["PHASE_DARK_CALIB"] = [phase_dark_file]
     header = products.provenance("planetes_p2vm", reference, inputs,
                                     wave_min_m=wave_min_m, wave_max_m=wave_max_m, **options)
-    record_saturation(header, {**{f"T{t}": raw for t, raw in flats.items()},
+    record_saturation(header, {**{f"S{t}": raw for t, raw in flats.items()},
                                **{f"SC{b}": raw for b, raw in scans.items()}},
                       flat.extracted_pixels())
     path = products.product_path(output_dir, reference, "P2VM")

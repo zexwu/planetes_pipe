@@ -348,7 +348,7 @@ def tracked_group_delay(
     Each block of GD_BLOCK_FRAMES frames finds its fringe with stacked_group_delay over
     search_range; each frame is then estimated (estimate_group_delay) within GD_SPAN_M
     of it. A single-frame search over the whole range at this precision is costly, and
-    a narrow one misses fringes beyond it: on 2026-11-06T175510 T4 was at -300 um and
+    a narrow one misses fringes beyond it: on 2026-11-06T175510 S4 was at -300 um and
     a +-100 um search returned delays scattered over it, with VISAMP 0.8.
 
     With at least GD_BLOCK_FRAMES frames showing fringes, the frames are then estimated
@@ -385,7 +385,7 @@ def tracked_group_delay(
 # Highest order of the dispersion polynomial in wavenumber. On 2026-11-06 the per-channel
 # residual (deg) fell 2 -> 3 on every baseline (S3-S1 1.99 -> 0.62: third-order dispersion is
 # real), 3 -> 4 on S3-S2 only (1.30 -> 0.99), and by < 0.1 beyond: what is left is a static
-# ~20 nm ripple on the T4 baselines and noise, which a higher order would start to absorb.
+# ~20 nm ripple on the S4 baselines and noise, which a higher order would start to absorb.
 DISPERSION_ORDER = 4
 # The first dispersion fit uses the blurred GDs, which wash out the band edges: on a
 # simulated 11 rad bow it left 0.3 rad and moved the GD 0.8 um; a second pass leaves

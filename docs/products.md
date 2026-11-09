@@ -53,7 +53,7 @@ The detector clips at `raw.SATURATION_ADU = 4095` ADU; `Raw.saturated()` counts 
 
 A product is named `<reference raw stem>_<category without underscores>.fits`,
 e.g. `PLANETES.2026-02-05T210609_singlescip2vmred.fits`. The reference is DARK_RAW,
-WAVELAMP_RAW or SINGLE_SCI_RAW, the T4 flat for FLAT, and the 43 scan for P2VM.
+WAVELAMP_RAW or SINGLE_SCI_RAW, the S4 flat for FLAT, and the 43 scan for P2VM.
 Existing files are never overwritten (`OSError`).
 
 Every keyword is a `Keyword` in ESO's short form (`DET.WIN1.DIT1` is the card
@@ -85,11 +85,11 @@ changes masks, weights or fits. Definitions follow GRAVITY 1.9.6
 | --- | --- | --- |
 | DARK | MEDIANDARK SC / DARKRMS SC | spatial median of the temporal mean / population RMS [ADU] |
 | BAD | BADPIX SC / BADPIX_DARK SC / BADPIX_RMS SC | flagged pixels: any, hot or dead, noisy |
-| FLAT | FLATFLUX SC1..4 | total flux of each dark-subtracted mean frame, T4..T1 [ADU/DIT] |
+| FLAT | FLATFLUX SC1..4 | total flux of each dark-subtracted mean frame, S4..S1 [ADU/DIT] |
 | WAVE | MINWAVE SC / MAXWAVE SC | wavelength range covered by every output [m] |
 | WAVE | RMSWAVE SC / NWAVE SC | sample stdev of accepted lamp residuals [m] / their number |
-| P2VM | P2VM_COHERENCE_SC43 … SC21 | coherence / (2 √T1 √T2), mean over outputs and wavelengths |
-| FLAT, WAVE, P2VM, P2VMRED | NSAT T4…T1 / SC43…SC21 / LAMP / SCI | raw samples at `raw.SATURATION_ADU` (4095 ADU) in each raw input: in the extracted pixels (`Flat.extracted_pixels()`), anywhere on the detector for FLAT |
+| P2VM | P2VM_COHERENCE_SC43 … SC21 | coherence / (2 √(P_i P_j)), P the baseline's two photometric fluxes, mean over outputs and wavelengths |
+| FLAT, WAVE, P2VM, P2VMRED | NSAT S4…S1 / SC43…SC21 / LAMP / SCI | raw samples at `raw.SATURATION_ADU` (4095 ADU) in each raw input: in the extracted pixels (`Flat.extracted_pixels()`), anywhere on the detector for FLAT |
 
 P2VMRED has only NSAT. A nonzero NSAT is also logged as a warning: clipped samples
 bias fluxes and fringe amplitudes low (two telescopes in phase reach about four times

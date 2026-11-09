@@ -60,7 +60,7 @@ def quality(p2vm: P2VM, header=None) -> dict:
     allowed = ALLOWED_OUTSIDE * len(p2vm.wavelength_m)
     low = int(np.count_nonzero(coherence < COHERENCE_RANGE[0]))
     high = int(np.count_nonzero(coherence > COHERENCE_RANGE[1]))
-    labels = [f"T{t}" for t in layout.telescopes] + [f"SC{b}" for b in layout.baselines]
+    labels = [f"S{t}" for t in layout.telescopes] + [f"SC{b}" for b in layout.baselines]
     counts = {label: QC_SATURATED.at(label).get(header) for label in labels} if header is not None else {}
     saturated = {label: int(count) for label, count in counts.items() if count}
     checks = {
@@ -179,7 +179,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
             cells.append([f"{100 * f / flux.sum():.1f}" for f in flux])
         return cells
     out.append(Section("Wavelength averaged photometric transmissions (%)", lambda fig: table(
-        fig, percent_cells(), [f"T{t}" for t in layout.telescopes], names,
+        fig, percent_cells(), [f"S{t}" for t in layout.telescopes], names,
         shade=[((b, t), MARK) for b, pair in enumerate(layout.baseline_pairs) for t in pair]),
         table_height(n), "Expressed in percentage of the total transmitted flux per baseline output; the baseline's "
         "two telescopes shaded, the others are cross-talk."))

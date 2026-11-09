@@ -1,3 +1,12 @@
+# PLANETES 0.40.0：望远镜统一记为 S1–S4
+
+- 报告、日志和关键字注释里的望远镜从 T1–T4 改为 S1–S4，与基线 S4–S3 … S2–S1 一致：平场 QC 表头、
+  P2VM 透过率表、科学报告的光通量图例，`Shutter S4 open`、`Total flux per DIT, S4` 等关键字注释，
+  以及 P2VM 对各路平场不一致的报错。闭合三角形记为 S4–S3–S2 等。
+- 平场的饱和计数关键字改为 `QC.NSAT.S4…S1`（原 `QC.NSAT.T4…T1`）；P2VM 报告读新名字，
+  0.40.0 以前的产品重新出报告时不显示这几项平场的饱和数，重新 reduce 即可。
+- `OI_T3`、`T3AMP`、`T3PHI` 是 GRAVITY/OIFITS 的表名和列名，不变。数值结果不变。
+
 # PLANETES 0.39.0：不再支持 2026-11-05 以前的扫描，删除 `dl_gain`
 
 - P2VM 扫描必须在 DL_SCAN 中记录 `OPDGAIN`（2026-11-05 起 `take_p2vm_calibration` 都会写入）。

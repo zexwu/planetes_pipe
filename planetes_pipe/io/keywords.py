@@ -34,10 +34,10 @@ class Keyword:
         return "HIERARCH ESO " + self.name.replace(".", " ")
 
     def at(self, *index) -> "Keyword":
-        """An indexed entry: SHUTTER.at(4) is INS.SHUT4.ST, 'Shutter T4 open'.
+        """An indexed entry: SHUTTER.at(4) is INS.SHUT4.ST, 'Shutter S4 open'.
 
         The same arguments fill the name and the comment; with more than one, use
-        positional fields ("QC.FLATFLUX.SC{0}", "flux of T{1}").
+        positional fields ("QC.FLATFLUX.SC{0}", "flux of S{1}").
         """
         return replace(self, name=self.name.format(*index), comment=self.comment.format(*index))
 
@@ -86,7 +86,7 @@ NDIT = Keyword("DET.WIN1.NDIT", "Number of frames")
 WINDOW = (DET_ID, WIN_STRX, WIN_STRY, WIN_NX, WIN_NY, WIN_BINX, WIN_BINY)
 
 # Instrument.
-SHUTTER = Keyword("INS.SHUT{}.ST", "Shutter T{} open")
+SHUTTER = Keyword("INS.SHUT{}.ST", "Shutter S{} open")
 
 # Processing (DICD §4.7.1): mandatory in every product.
 PRO_CATG = Keyword("PRO.CATG", "Category of pipeline product frame")
