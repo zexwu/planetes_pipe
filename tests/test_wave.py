@@ -13,11 +13,34 @@ from planetes_pipe.instrument import layout
 from planetes_pipe.io.raw import read_raw, read_raws, write_shutters
 from planetes_pipe.steps.dark import make_dark_products
 from planetes_pipe.steps.flat import make_flat, read_flat, write_flat
-from planetes_pipe.steps.wave import make_wave, match_peaks_grid, read_wave, write_wave
+from planetes_pipe.steps.wave import (
+    _surface_terms,
+    make_wave,
+    match_peaks_grid,
+    read_wave,
+    write_wave,
+)
 
 
 class WaveTests(unittest.TestCase):
     def test_raw_flat_and_lamp_recover_known_traces_and_wavelengths(self):
+        self.check_recovery(line_sigma=0.8)
+
+    def test_broad_lamp_lines_are_centred_below_a_pixel(self):
+        # FWHM 2.8 pixels, as on the bench: the old log-curvature cut left these
+        # lines at whole pixels, a 0.3-pixel scatter.
+        self.check_recovery(line_sigma=1.2)
+
+    def test_surface_basis_is_scaled_to_the_detector(self):
+        # On the 1280 x 1024 detector raw-pixel x^4 reaches 3e12 and the degree-4
+        # least-squares fit collapses; the scaled basis stays within [-1, 1].
+        y, x = np.meshgrid(np.arange(1024), np.arange(1280), indexing="ij")
+        terms = np.array(_surface_terms(x, y, 4, (1024, 1280)))
+        self.assertEqual(len(terms), 15)
+        self.assertLessEqual(np.abs(terms).max(), 1.0)
+        self.assertLess(np.linalg.cond(terms.reshape(15, -1)[:, ::97].T), 1e3)
+
+    def check_recovery(self, line_sigma):
         # Independent detector model: 24 Gaussian traces and a known dispersion.
         height, width = 768, 256
         y, x = np.indices((height, width))
@@ -35,7 +58,7 @@ class WaveTests(unittest.TestCase):
         lamp_image = np.zeros((height, width))
         for profile, shift in zip(profiles, shifts, strict=True):
             spectrum = 10 + sum(
-                3000 * np.exp(-0.5 * ((np.arange(width) - pixel - shift) / 0.8) ** 2)
+                3000 * np.exp(-0.5 * ((np.arange(width) - pixel - shift) / line_sigma) ** 2)
                 for pixel in line_pixels
             )
             lamp_image += profile * spectrum

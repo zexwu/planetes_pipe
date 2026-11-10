@@ -5,6 +5,7 @@
 """
 
 import logging
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ import numpy as np
 from astropy.io import fits as afits
 from numba import njit
 from numpy.typing import NDArray
+from scipy.optimize import OptimizeWarning, curve_fit
 from scipy.signal import find_peaks
 
 from planetes_pipe.instrument import layout
@@ -90,10 +92,20 @@ REFERENCE_WAVELENGTH_M = np.array([
 DETECTION_SIGMA   = 3.0
 
 
-SURFACE_DEGREE    = 3
+# Total degree of lambda(x, y). Degree 4 adds the x^2 y^2 change of the dispersion's
+# curvature across the outputs; held-out-line errors drop ~25% from degree 3 on the
+# 2026-11-05..10 lamps, degree 5 gains < 3 pm and degree 6 overfits.
+SURFACE_DEGREE    = 4
 
 
 RANSAC_ITERATIONS = 1_000_000
+
+
+# Line centres: Gaussian plus linear background fitted to +-CENTROID_HALF_WIDTH pixels.
+CENTROID_HALF_WIDTH = 4
+CENTROID_MAX_SHIFT  = 1.5           # pixels from the detected peak
+CENTROID_SIGMA      = (0.3, 4.0)    # accepted Gaussian sigma range, pixels
+# fmt: on
 
 
 def make_wave(raw: Raw, dark: Dark, flat: Flat) -> Wave:
@@ -138,15 +150,63 @@ def _peak_threshold(spectrum: NDArray) -> np.floating[Any]:
     return median + DETECTION_SIGMA * mad * 1.4826
 
 
-def _surface_terms(x, y, degree: int) -> list[NDArray]:
-    """Monomials x^(d-i) y^i of total degree d <= degree, in fixed order."""
-    return [x ** (d - i) * y**i for d in range(degree + 1) for i in range(d + 1)]
+def _gaussian_line(t, amplitude, centre, sigma, offset, slope):
+    return amplitude * np.exp(-0.5 * ((t - centre) / sigma) ** 2) + offset + slope * t
+
+
+def line_centres(spectrum: NDArray, peak_pixels: NDArray) -> NDArray:
+    """Sub-pixel centres of lamp lines detected at integer peak_pixels.
+
+    Fit a Gaussian plus a linear background to +-CENTROID_HALF_WIDTH pixels around
+    each peak. Fall back to the three-sample logarithmic parabola when the fit fails
+    or leaves CENTROID_MAX_SHIFT / CENTROID_SIGMA, and to the integer peak when the
+    three samples are not positive and concave in log.
+    """
+    spectrum = np.asarray(spectrum, dtype=np.float64)
+    centres = np.asarray(peak_pixels, dtype=np.float64).copy()
+    for k, peak in enumerate(np.asarray(peak_pixels, dtype=int)):
+        lo = max(peak - CENTROID_HALF_WIDTH, 0)
+        hi = min(peak + CENTROID_HALF_WIDTH + 1, spectrum.size)
+        t = np.arange(lo, hi) - peak
+        s = spectrum[lo:hi]
+        if t.size >= 6:
+            guess = [s[t == 0][0] - np.median(s), 0.0, 1.0, np.median(s), 0.0]
+            try:
+                with warnings.catch_warnings():  # only the centre is used, not its covariance
+                    warnings.simplefilter("ignore", OptimizeWarning)
+                    fit, _ = curve_fit(_gaussian_line, t, s, p0=guess, maxfev=2000)
+            except (RuntimeError, ValueError):
+                fit = None
+            if (fit is not None and fit[0] > 0 and abs(fit[1]) < CENTROID_MAX_SHIFT
+                    and CENTROID_SIGMA[0] < abs(fit[2]) < CENTROID_SIGMA[1]):
+                centres[k] = peak + fit[1]
+                continue
+        if 0 < peak < spectrum.size - 1:
+            low, mid, high = spectrum[peak - 1:peak + 2]
+            if min(low, mid, high) > 0:
+                low, mid, high = np.log([low, mid, high])
+                curvature = 2 * mid - low - high
+                if curvature > 0:
+                    centres[k] = peak + 0.5 * (high - low) / curvature
+    return centres
+
+
+def _surface_terms(x, y, degree: int, shape: tuple[int, int]) -> list[NDArray]:
+    """Monomials u^(d-i) v^i of total degree d <= degree, in fixed order.
+
+    u, v are detector x, y scaled to [-1, 1] over shape (ny, nx); in raw pixels the
+    degree-4 terms reach 1e12 and the least-squares fit loses the wavelength map.
+    """
+    ny, nx = shape
+    u = 2 * np.asarray(x, dtype=np.float64) / (nx - 1) - 1
+    v = 2 * np.asarray(y, dtype=np.float64) / (ny - 1) - 1
+    return [u ** (d - i) * v**i for d in range(degree + 1) for i in range(d + 1)]
 
 
 def fit_wavelength_solution(
     wave_image_adu: NDArray, flat: Flat, reference_wavelength_m: NDArray
 ) -> Wave:
-    """Fit a global cubic wavelength surface to matched lamp-line positions.
+    """Fit a global polynomial wavelength surface to matched lamp-line positions.
 
     Parameters
     ----------
@@ -170,7 +230,7 @@ def fit_wavelength_solution(
     -----
     Use the mean of the last four outputs as the reference lamp spectrum.
     Match it to the line list with quadratic RANSAC, align each output to that
-    reference, then fit lambda(x, y) with all monomials of total degree <= 3.
+    reference, then fit lambda(x, y) with all monomials of total degree <= SURFACE_DEGREE.
     Three rounds reject residuals beyond 3 population standard deviations.
     No per-line uncertainty weighting or absolute-accuracy certification is used.
     The last-four-output choice is a fixed bench convention, not a measured S/N
@@ -212,20 +272,7 @@ def fit_wavelength_solution(
         # Locate peaks independently, then align them to the reference quartet.
         peak_pixels, _ = find_peaks(spec, height=_peak_threshold(spec), distance=5)
 
-        # A Gaussian line has a quadratic log profile near its peak. Refine
-        # only positive samples with sufficient log curvature (fixed bench cuts).
-        pn1, pct, pp1 = spec[peak_pixels - 1], spec[peak_pixels], spec[peak_pixels + 1]
-        _pn1, _pct, _pp1 = (
-            np.log(abs(pn1) + 1e-8),
-            np.log(abs(pct) + 1e-8),
-            np.log(abs(pp1) + 1e-8),
-        )
-
-        good = (pn1 > 1) & (pp1 > 1) & (pct > 1) & (abs(2 * _pct - _pp1 - _pn1) > 1)
-
-        p_shift = np.zeros(peak_pixels.shape)
-        p_shift[good] = 0.5 * (_pp1 - _pn1)[good] / (2 * _pct - _pp1 - _pn1)[good]
-        peak_pixels = 1.0 * peak_pixels + p_shift
+        peak_pixels = line_centres(spec, peak_pixels)
 
         # Constrain inter-output shifts with a near-unity quadratic pixel map.
         matches, _ = match_peaks_grid(
@@ -262,9 +309,9 @@ def fit_wavelength_solution(
     fit_y = np.concatenate(line_y)
     fit_wave_m = np.concatenate(line_wave_m)
 
-    # Fit the wl = f(x, y), using a 3rd order polynomial
+    # Fit wl = f(x, y) with all monomials of total degree <= SURFACE_DEGREE.
     deg = SURFACE_DEGREE
-    design = np.column_stack(_surface_terms(fit_x, fit_y, deg))
+    design = np.column_stack(_surface_terms(fit_x, fit_y, deg, flat.flat_map_adu.shape))
     terms = [f"x{d - i}y{i}" for d in range(deg + 1) for i in range(d + 1)]
     log.debug("surface terms: %s", ", ".join(terms))
     coeffs, _, _, _ = np.linalg.lstsq(design, fit_wave_m, rcond=None)
@@ -285,7 +332,7 @@ def fit_wavelength_solution(
     # Evaluate the fitted 2-D polynomial on every detector trace.
     trace_x = np.repeat(np.arange(nx)[None, :], layout.n_outputs, axis=0)
     trace_y = y_trace
-    basis = np.array(_surface_terms(trace_x, trace_y, deg))
+    basis = np.array(_surface_terms(trace_x, trace_y, deg, flat.flat_map_adu.shape))
     wave_map_m = np.einsum("i,iyx->yx", coeffs, basis)
 
     wave = Wave(

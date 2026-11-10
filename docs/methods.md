@@ -54,17 +54,21 @@ Subtract the selected lamp dark from the complete mean lamp image and extract
 using flat's geometry. Use the mean of the last four outputs as the reference
 spectrum. Detect lines above the retained median/MAD threshold and match to the
 30 laboratory lines with the original quadratic RANSAC search. Refine individual
-output line positions using a logarithmic parabola and match them to the reference
-with the constrained quadratic grid search.
+output line positions with a Gaussian plus linear background fitted to ±4 pixels
+and match them to the reference with the constrained quadratic grid search.
 
 The reference quartet is a fixed bench choice, not selected by measured S/N.
-The three-sample logarithmic parabola estimates the center of a locally Gaussian
-line. Its retained ADU and log-curvature cuts prevent applying that refinement
-to weak or flat samples; their numerical values are bench criteria. Laboratory
+A fit that fails, moves more than 1.5 pixels or has a sigma outside 0.3–4 pixels
+falls back to the three-sample logarithmic parabola, and to the integer peak when
+those samples are not positive and concave in log. Before 0.42.0 a log-curvature
+cut > 1 (sigma < 1 pixel) left most bench lines (FWHM 2.4–2.8 pixels) at whole
+pixels, a 0.3-pixel (~100 pm) scatter. Laboratory
 lines must be increasing because matching indices refer to sorted arrays.
 
-Fit the global cubic `wavelength = f(detector_x, trace_y)` with the retained
-iterative residual clipping. Evaluate at each traced output. The result is a
+Fit the global degree-4 `wavelength = f(detector_x, trace_y)` with the retained
+iterative residual clipping. Degree 4 adds the change of the dispersion curvature
+across the outputs (x²y²); leaving whole lamp lines out, it predicts them ~25% better
+than degree 3 on the 2026-11-05..10 lamps, degree 5 gains < 3 pm, degree 6 overfits. Evaluate at each traced output. The result is a
 24 × detector-x wavelength map in metres. Smooth mapping and preserved line order
 are assumptions; coverage alone is not a wavelength-accuracy measurement.
 

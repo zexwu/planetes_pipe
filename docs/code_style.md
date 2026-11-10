@@ -94,7 +94,7 @@ visamp, flags = normalize_coherent_flux(coherent_adu, flux_adu)
 ```python
 # fmt: off
 DETECTION_SIGMA   = 3.0
-SURFACE_DEGREE    = 3
+SURFACE_DEGREE    = 4
 RANSAC_ITERATIONS = 1_000_000
 # fmt: on
 ```
