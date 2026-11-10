@@ -50,7 +50,8 @@ def sections(reduced: P2VMRed, full: bool = False) -> list[Section]:
                            rf"$|\sum C_{{ij}}|/\sqrt{{\sum|\sigma_C|^2}}$ over wavelength, vs. {unit}; $\sigma_C$ from the output variance "
                            rf"(signal / gain + DARK read noise, gain {GAIN_E_PER_ADU:.0f} e$^-$/ADU) through P2VM$^2$."))
     out += [Section("SC visibility amplitude waterfall (VISAMP)", lambda fig: _visibility(fig, reduced),
-                    WATERFALL_HEIGHT, "$|C_{ij}|\\,/\\,\\sqrt{P_i P_j}$, relative to the calibration: 1 = as coherent as the P2VM source; flagged samples masked."),
+                    WATERFALL_HEIGHT, "$\\sqrt{|C_{ij}|^2 - |\\sigma_C|^2}\\,/\\,\\sqrt{P_i P_j}$ (noise bias removed as GRAVITY, when the "
+                    "product has VISERR), relative to the calibration: 1 = as coherent as the P2VM source; flagged samples masked."),
             Section("SC visibility amplitude vs. wavelength (VISAMP averaged over frames)",
                     lambda fig: _mean_visibility(fig, reduced), 2.4, "Unflagged frames."),
             Section("arg(VISDATA) vs. time", lambda fig: _phase(fig, reduced), STACK_HEIGHT,

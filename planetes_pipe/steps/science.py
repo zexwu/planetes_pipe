@@ -227,7 +227,8 @@ def reduce_spectra(
 
     Notes
     -----
-    Baseline order is 43,42,41,32,31,21. VISAMP = abs(C_ij)/sqrt(P_i*P_j).
+    Baseline order is 43,42,41,32,31,21. VISAMP = abs(C_ij)/sqrt(P_i*P_j), with the
+    noise bias |VISERR|^2 removed from |C_ij|^2 when spectra_variance is given.
     Flags describe this normalization's validity, not an S/N or GD-quality cut.
     GD and phase are calculated from all coherent channels without flag masking.
     Differential phase removes GD, rotates by the mean phasor, subtracts the
@@ -245,10 +246,10 @@ def reduce_spectra(
     channels = np.einsum("box,ofx->fbx", p2vm.matrix, spectra)
     flux_adu = channels[:, :layout.n_telescopes, :]
     coherent_adu = channels[:, layout.real_slice, :] + 1j * channels[:, layout.imag_slice, :]
-    visamp, flags = normalize_coherent_flux(coherent_adu, flux_adu)
     flux_err = coherent_err = chi2 = None
     if spectra_variance is not None:
         flux_err, coherent_err, chi2 = propagate_errors(spectra, spectra_variance, channels, p2vm)
+    visamp, flags = normalize_coherent_flux(coherent_adu, flux_adu, coherent_err)
 
     if not include_phase:
         return P2VMRed(
@@ -301,7 +302,7 @@ def reduce_spectra(
 
 
 def normalize_coherent_flux(
-    coherent_flux: NDArray, flux: NDArray
+    coherent_flux: NDArray, flux: NDArray, coherent_err: NDArray | None = None
 ) -> tuple[NDArray, NDArray]:
     """Normalize coherent amplitudes by the fixed baseline photometric products.
 
@@ -311,11 +312,16 @@ def normalize_coherent_flux(
         Coherent flux in ADU, in baseline order 43,42,41,32,31,21.
     flux : ndarray, shape (frame, 4, wavelength)
         Photometry in ADU, in telescope order S4,S3,S2,S1.
+    coherent_err : complex ndarray, optional
+        VISERR, sigma of the real and imaginary parts in ADU (propagate_errors). When
+        given, the noise bias is removed as GRAVITY's gravi_visual computeVisAmp:
+        sqrt(|C|^2 - |VISERR|^2), clipped at zero where noise dominates.
 
     Returns
     -------
     visamp : ndarray, shape (frame, 6, wavelength)
-        abs(coherent_flux) / sqrt(P_i * P_j), or NaN for invalid samples.
+        abs(coherent_flux) / sqrt(P_i * P_j) (bias removed with coherent_err), or NaN
+        for invalid samples.
     flags : ndarray of bool, shape (frame, 6, wavelength)
         True when the photometric product is nonpositive/nonfinite or the complex
         coherent flux is nonfinite. This tests the product, not each flux separately.
@@ -334,9 +340,10 @@ def normalize_coherent_flux(
             & np.isfinite(flux_product)
             & np.isfinite(coherent_flux[:, baseline, :])
         )
-        visamp[:, baseline, :][valid] = np.abs(
-            coherent_flux[:, baseline, :][valid]
-        ) / np.sqrt(flux_product[valid])
+        power = np.abs(coherent_flux[:, baseline, :][valid]) ** 2
+        if coherent_err is not None:
+            power = np.clip(power - np.abs(coherent_err[:, baseline, :][valid]) ** 2, 0, None)
+        visamp[:, baseline, :][valid] = np.sqrt(power / flux_product[valid])
         flag[:, baseline, :] = ~valid
 
     return visamp, flag

@@ -46,11 +46,20 @@ def central_band(p2vm: P2VM) -> slice:
 
 
 def output_phases_deg(p2vm: P2VM) -> np.ndarray:
-    """Phase of each baseline's outputs relative to A over the central band: (baseline, 4)."""
-    band = central_band(p2vm)
-    phases = [np.angle(np.exp(1j * p2vm.coherence_phase_rad[p2vm.baseline_outputs[b], b, band]
-                              ).mean(axis=1)) for b in range(len(layout.baselines))]
+    """Phase of each baseline's outputs relative to A over all wavelengths, as GRAVITY: (baseline, 4).
+
+    A circular mean, where GRAVITY averages unwrapped phases; the same away from wraps.
+    """
+    phases = [np.angle(np.nanmean(np.exp(1j * p2vm.coherence_phase_rad[p2vm.baseline_outputs[b], b]),
+                                  axis=1)) for b in range(len(layout.baselines))]
     return np.rad2deg(np.asarray(phases)) % 360
+
+
+def visibility_transmission(p2vm: P2VM) -> tuple[np.ndarray, np.ndarray]:
+    """Mean and standard deviation of the normalized coherence over a baseline's outputs and
+    all wavelengths, as GRAVITY's "Wavelength averaged visibility transmission": (baseline,) each."""
+    coherence = normalized_coherence(p2vm)
+    return np.nanmean(coherence, axis=(1, 2)), np.nanstd(coherence, axis=(1, 2))
 
 
 def quality(p2vm: P2VM, header=None) -> dict:
@@ -73,8 +82,7 @@ def quality(p2vm: P2VM, header=None) -> dict:
     failed = sum(checks.values())
     verdict = "GOOD" if failed == 0 else ("WARNING" if failed < 3 else "BAD")
     return {"verdict": verdict, "checks": checks, "relative_transmission": relative,
-            "coherence_low": low, "coherence_high": high, "saturated": saturated,
-            "visibility": np.nanmean(coherence, axis=(1, 2))}
+            "coherence_low": low, "coherence_high": high, "saturated": saturated}
 
 
 def phase_residual_rad(phase_rad, opd_m, wavelength_m: float):
@@ -145,12 +153,13 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         f"(middle {100 * (CENTRAL_BAND[1] - CENTRAL_BAND[0]):.0f} % of the channels); saturated samples per raw input (QC.NSAT)."))
 
     phases = output_phases_deg(p2vm)
-    per_baseline = [[f"{100 * result['visibility'][b]:.1f} %"] + [f"{phases[b, i]:.1f}" for i in (1, 2, 3)]
-                    for b in range(n)]
+    visibility, visibility_std = visibility_transmission(p2vm)
+    per_baseline = [[f"{100 * visibility[b]:.1f} %", f"{100 * visibility_std[b]:.1f} %"]
+                    + [f"{phases[b, i]:.1f}" for i in (1, 2, 3)] for b in range(n)]
     out.append(Section("Coherence transmission per baseline", lambda fig: table(
-        fig, per_baseline, ["Visibility transm.", "C−A [deg]", "B−A [deg]", "D−A [deg]"], names,
-        shade=[((b, 0), FLAG) for b in range(n) if result["visibility"][b] < COHERENCE_RANGE[0]]),
-        table_height(n), f"Central band means over A, C, B, D; visibility transmission below "
+        fig, per_baseline, ["Visibility transm.", "Standard dev.", "C−A [deg]", "B−A [deg]", "D−A [deg]"],
+        names, shade=[((b, 0), FLAG) for b in range(n) if visibility[b] < COHERENCE_RANGE[0]]),
+        table_height(n), f"Means over A, C, B, D and all wavelengths, as GRAVITY; visibility transmission below "
         f"{100 * COHERENCE_RANGE[0]:.0f} % shaded. Nominal phases C−A 180, B−A 90, D−A 270."))
 
     # Photometry (GRAVITY: relative transmission per output; transmissions vs wavelength).
@@ -197,12 +206,14 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
             first_share.append(t[:, t1] / (t[:, t1] + t[:, t2]))
     for values, title, ylabel, explanation, ylim, guide in (
             (pair_mean, "RAW photometric transmission vs. wavelength", "Transmission",
-             "$(T_{oi} + T_{oj})\\,/\\,2$ of each output of baseline $ij$: how much of the two "
-             "telescopes' light reaches it; 1 = the average output.", None, 1.0),
+             "$(T_{oi} + T_{oj})\\,/\\,2$ of each output of baseline $ij$. $T_{ot}$ is normalized to a mean "
+             "of 1 over all 24 outputs, as GRAVITY; a telescope feeds only 12 of them, so an output that "
+             "gets its share is at 2.", None, 2.0),
             (first_share, "RELATIVE photometric transmission vs. wavelength",
              "Share of the first telescope",
              "$T_{oi}\\,/\\,(T_{oi} + T_{oj})$ of each output of baseline $ij$ (S$i$ named first): "
-             "0.5 = both telescopes give the output the same flux, as fringe contrast needs.",
+             "0.5 = both telescopes give the output the same flux, as fringe contrast needs. GRAVITY "
+             "divides by all four telescopes; cross-talk is left out here (see the table above).",
              (0, 1), 0.5)):
         def draw(fig, values=values, ylabel=ylabel, ylim=ylim, guide=guide):
             axes = baseline_panels(fig, "Wavelength [nm]", ylabel, sharey=ylim is not None)
@@ -233,7 +244,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
 
     def draw_visibility(fig):
         ax = fig.subplots()
-        mean = np.nanmean(coherence[..., band], axis=2)
+        mean = np.nanmean(coherence, axis=2)
         for i, color in enumerate(ABCD_COLORS):
             ax.bar(np.arange(n) + (i - 1.5) * 0.2, 100 * mean[:, i], 0.18, color=color)
         ax.axhline(100 * COHERENCE_RANGE[0], **GUIDE)
@@ -243,7 +254,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         ax.set(ylabel="Visibility transmission [%]", ylim=(0, 110))
         legend(fig, abcd_entries(lw=4) + [(f"minimum {100 * COHERENCE_RANGE[0]:.0f} %", GUIDE)])
     out.append(Section("Wavelength averaged visibility transmission", draw_visibility, 2.2,
-                       "$V_{ob}$ over the central band, per output: the instrumental transfer function of the visibility; nominal "
+                       "$V_{ob}$ over all wavelengths, per output: the instrumental transfer function of the visibility; nominal "
                        f"higher than {100 * COHERENCE_RANGE[0]:.0f} %."))
 
     def draw_coherence(fig):
@@ -263,7 +274,7 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
                     f"{(phases[b, 3] - phases[b, 2]) % 360:.1f}"] for b in range(n)]
     out.append(Section("Wavelength averaged phases of combiner outputs (degrees, A=0)", lambda fig: table(
         fig, phase_cells, ["C−A", "B−A", "D−A", "D−B"], names), table_height(n),
-        "$\\theta_{ob} - \\theta_{Ab}$ over the central band, $\\theta_{ob}$ from the scan fit. Nominal: C−A 180, B−A 90, D−A 270, D−B 180; "
+        "$\\theta_{ob} - \\theta_{Ab}$ over all wavelengths, $\\theta_{ob}$ from the scan fit. Nominal: C−A 180, B−A 90, D−A 270, D−B 180; "
         "a baseline with a reversed fringe direction (positive OPDGAIN) has B−A 270, D−A 90."))
 
     def draw_phases(fig):

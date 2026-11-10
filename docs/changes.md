@@ -1,3 +1,16 @@
+# PLANETES 0.41.0：报告与 GRAVITY 的定义对齐，VISAMP 去掉噪声偏置
+
+- **VISAMP 去掉噪声偏置**（产品数值改变）：有 VISERR 时，VISAMP = sqrt(|C|² − |VISERR|²) / sqrt(P_i P_j)，
+  与 GRAVITY gravi_visual 的 `computeVisAmp` 相同；噪声占主导的点截为 0。以前是 |C| / sqrt(P_i P_j)，低 SNR 时偏高。
+  `normalize_coherent_flux` 新增可选参数 `coherent_err`，不传时与以前相同（实时窗口不受影响）。T3AMP 是三个 VISAMP 之积，随之改变。
+- P2VM 报告 RAW photometric transmission：参考线从 1 改为 2。T_ot 按 GRAVITY 归一为 24 个输出上的平均为 1，
+  而每个望远镜只进入其中 12 个，所以正常的输出约为 2；0.40.1 说明里的“1 = 平均”是错的。
+- RELATIVE photometric transmission 的说明写明与 GRAVITY 的区别：GRAVITY 除以四个望远镜之和（含串扰），这里只除以基线的两个望远镜。
+- Coherence transmission per baseline 表、Wavelength averaged visibility transmission 柱状图和相位表改为对全部波长平均，
+  与 GRAVITY 相同（以前只用中间 70% 的通道）；表中增加 Standard dev. 列。质量判据仍只看中间波段，GRAVITY 也是如此。
+  `quality()` 不再返回 `visibility`，改用 `visibility_transmission(p2vm)`（平均值与标准差）。
+- DARK 报告的标准差图颜色范围改为 1–97%，与 GRAVITY 相同（暗场图仍为 1–99%）。
+
 # PLANETES 0.40.1：P2VM 报告的透过率图和相位残差更易读
 
 - RAW photometric transmission：每个输出一条线，画 (T_oi + T_oj)/2，即这对望远镜的光有多少到达该输出（1 = 平均）。

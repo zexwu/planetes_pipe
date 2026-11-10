@@ -166,6 +166,15 @@ class ReduceTests(unittest.TestCase):
         self.assertTrue(np.isnan(visamp[0, 0, 1]))
         self.assertTrue(flag[0, 0, 1])
 
+    def test_visibility_noise_bias_is_removed(self) -> None:
+        coherent_flux = np.tile(np.array([[[6 + 8j]]]), (1, 6, 1))   # |C|^2 = 100
+        flux = np.full((1, 4, 1), 10.0)                              # P_i P_j = 100
+        error = np.full((1, 6, 1), 6 + 0j)                           # |VISERR|^2 = 36
+        visamp, _ = normalize_coherent_flux(coherent_flux, flux, error)
+        self.assertAlmostEqual(visamp[0, 0, 0], 0.8)                 # sqrt(64 / 100)
+        noisy, _ = normalize_coherent_flux(coherent_flux, flux, 20 * error)
+        self.assertEqual(noisy[0, 0, 0], 0.0)                        # noise dominated: clipped
+
 
 if __name__ == "__main__":
     unittest.main()

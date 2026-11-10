@@ -15,21 +15,22 @@ def sections(dark: Dark | None = None, bad: Bad | None = None) -> list[Section]:
     """Sections for a DARK, a BAD, or both."""
     result = []
     if dark is not None:
-        maps = [("SC dark", dark.mean_adu)]
+        # Colour ranges as GRAVITY: 1-99 % of the pixels for the dark, 1-97 % for its deviation.
+        maps = [("SC dark", dark.mean_adu, 99)]
         if dark.temporal_rms_adu is not None:
-            maps.append(("SC dark standard deviation", dark.temporal_rms_adu))
+            maps.append(("SC dark standard deviation", dark.temporal_rms_adu, 97))
 
         def draw_maps(fig):
             axes = panels(fig, 1, len(maps), "Detector x [pixel]", "Detector y [pixel]", sharey=True)
-            for ax, (title, image) in zip(axes, maps):
-                low, high = np.percentile(image, [1, 99])
+            for ax, (title, image, top) in zip(axes, maps):
+                low, high = np.percentile(image, [1, top])
                 shown = ax.imshow(image, origin="lower", aspect="auto", vmin=low, vmax=high)
                 fig.colorbar(shown, ax=ax, label=f"{title} [ADU/DIT]", shrink=0.9, pad=0.02)
                 ax.minorticks_off()
 
         def draw_histograms(fig):
             axes = panels(fig, 1, len(maps), "ADU", "Pixels", sharex=False)
-            for ax, (title, image) in zip(axes, maps):
+            for ax, (title, image, _) in zip(axes, maps):
                 median = float(np.median(image))
                 ax.hist(image.ravel(), bins=300, log=True, color="0.45", histtype="stepfilled")
                 ax.axvline(median, color=ABCD_COLORS[3], lw=0.7)
@@ -37,7 +38,7 @@ def sections(dark: Dark | None = None, bad: Bad | None = None) -> list[Section]:
 
         frames = f"{dark.n_frames} frames; " if dark.n_frames else ""
         result += [Section("SC dark image and standard deviation (ADU/DIT)", draw_maps, 3.0,
-                           f"Per-pixel mean and standard deviation over the frames; {frames}colour range 1–99 % of the pixels."),
+                           f"Per-pixel mean and standard deviation over the frames; {frames}colour range 1–99 % of the pixels (1–97 % for the deviation), as GRAVITY."),
                    Section("DARK pixel distributions", draw_histograms, 2.0,
                            "Histograms on a logarithmic scale; red line: median.")]
     if bad is not None:

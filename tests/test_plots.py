@@ -75,7 +75,8 @@ class PlotTests(unittest.TestCase):
     def test_quality_follows_gravity_rules_and_flags_saturation(self):
         clean = p2vm_pages.quality(self.p2vm)
         self.assertEqual(clean["checks"]["Saturated raw samples"], 0)
-        self.assertEqual(len(clean["visibility"]), 6)
+        mean, std = p2vm_pages.visibility_transmission(self.p2vm)
+        self.assertEqual((len(mean), len(std)), (6, 6))
         header = fits.Header()
         QC_SATURATED.at("SC43").set(header, 39725)
         result = p2vm_pages.quality(self.p2vm, header)
