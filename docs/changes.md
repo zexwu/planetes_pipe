@@ -1,3 +1,10 @@
+# PLANETES 0.40.1：P2VM 报告的透过率图和相位残差更易读
+
+- RAW photometric transmission：每个输出一条线，画 (T_oi + T_oj)/2，即这对望远镜的光有多少到达该输出（1 = 平均）。
+- RELATIVE photometric transmission：每个输出一条线，画 T_oi/(T_oi + T_oj)，即第一个望远镜的份额（0.5 = 平衡）。
+  以前每格画两个望远镜共 8 条线，相对透过率里第二条只是第一条的镜像。串扰仍见上面的百分比表。
+- Fringe phase residual along the scan：y 范围按残差自动设定（至少 ±5°），不再固定 ±180°。
+
 # PLANETES 0.40.0：望远镜统一记为 S1–S4
 
 - 报告、日志和关键字注释里的望远镜从 T1–T4 改为 S1–S4，与基线 S4–S3 … S2–S1 一致：平场 QC 表头、

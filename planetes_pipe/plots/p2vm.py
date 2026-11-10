@@ -93,6 +93,7 @@ def phase_residual_rad(phase_rad, opd_m, wavelength_m: float):
 
 VERDICT_COLORS = {"GOOD": PASS, "WARNING": "#FFF2CC", "BAD": FLAG}
 CHANNEL_COLORS = ("#0C5DA5", "#00B945", "#FF2C00")  # three sample wavelengths
+RESIDUAL_MIN_LIMIT_DEG = 5.0  # smallest half-range of the phase residual plot
 
 
 def delay_line_error_m(p2vm: P2VM) -> np.ndarray | None:
@@ -184,27 +185,34 @@ def sections(p2vm: P2VM, header=None) -> list[Section]:
         table_height(n), "Expressed in percentage of the total transmitted flux per baseline output; the baseline's "
         "two telescopes shaded, the others are cross-talk."))
 
-    share = p2vm.transmission / p2vm.transmission.sum(axis=1, keepdims=True)
-    pair_entries = abcd_entries() + [("first telescope", {"color": "0.3"}),
-                                     ("second telescope", {"color": "0.3", "ls": "--"})]
-    for values, title, ylabel, explanation, ylim in (
-            (p2vm.transmission, "RAW photometric transmission vs. wavelength", "Transmission",
-             "$T_{ot} = F_{ot}\\,/\\,\\langle F_{ot}\\rangle_o$, $F_{ot}$ the median flat spectrum of telescope $t$ in output $o$: "
-             "1 = the average share of that telescope's light. Solid: the baseline's first telescope, dashed: its second.", None),
-            (share, "RELATIVE photometric transmission vs. wavelength", "Relative transmission",
-             "$T_{ot}\\,/\\,\\sum_t T_{ot}$; balanced = 0.5. Solid: first "
-             "telescope, dashed: second.", (0, 1))):
-        def draw(fig, values=values, ylabel=ylabel, ylim=ylim):
+    # Per baseline, one curve per output for each question, rather than one per telescope:
+    # how much of the pair's light reaches the output (RAW), and how evenly the two
+    # telescopes contribute to it (RELATIVE). Cross-talk is in the table above.
+    pairs = np.asarray(layout.baseline_pairs)
+    pair_mean, first_share = [], []
+    for b, (t1, t2) in enumerate(pairs):
+        t = p2vm.transmission[p2vm.baseline_outputs[b]]
+        pair_mean.append((t[:, t1] + t[:, t2]) / 2)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            first_share.append(t[:, t1] / (t[:, t1] + t[:, t2]))
+    for values, title, ylabel, explanation, ylim, guide in (
+            (pair_mean, "RAW photometric transmission vs. wavelength", "Transmission",
+             "$(T_{oi} + T_{oj})\\,/\\,2$ of each output of baseline $ij$: how much of the two "
+             "telescopes' light reaches it; 1 = the average output.", None, 1.0),
+            (first_share, "RELATIVE photometric transmission vs. wavelength",
+             "Share of the first telescope",
+             "$T_{oi}\\,/\\,(T_{oi} + T_{oj})$ of each output of baseline $ij$ (S$i$ named first): "
+             "0.5 = both telescopes give the output the same flux, as fringe contrast needs.",
+             (0, 1), 0.5)):
+        def draw(fig, values=values, ylabel=ylabel, ylim=ylim, guide=guide):
             axes = baseline_panels(fig, "Wavelength [nm]", ylabel, sharey=ylim is not None)
             for b, ax in enumerate(axes):
-                t1, t2 = layout.baseline_pairs[b]
-                for o, color in zip(p2vm.baseline_outputs[b], ABCD_COLORS):
-                    ax.plot(wavelength, values[o, t1], color=color)
-                    ax.plot(wavelength, values[o, t2], color=color, ls="--")
+                for curve, color in zip(values[b], ABCD_COLORS):
+                    ax.plot(wavelength, curve, color=color)
+                ax.axhline(guide, **GUIDE)
                 if ylim:
-                    ax.axhline(0.5, **GUIDE)
                     ax.set_ylim(*ylim)
-            legend(fig, pair_entries)
+            legend(fig, abcd_entries())
         out.append(Section(title, draw, GRID_HEIGHT, explanation))
 
     # Coherence (GRAVITY: coherent flux matrix, visibility transmission, coherence vs wavelength).
@@ -359,15 +367,19 @@ def _scan_sections(p2vm) -> list[Section]:
         def draw_residuals(fig):
             axes = baseline_panels(fig, "Scan OPD [µm]", "Phase residual [deg]", sharex=False,
                                    sharey=True)
+            residuals = [[np.rad2deg(phase_residual_rad(p2vm.ellipse_phase_rad[b, :, j],
+                                                        p2vm.opd_m[b], p2vm.wavelength_m[j]))
+                          for j in channels] for b in range(len(axes))]
+            # Scaled to the residuals, not to +-180 deg, so their structure shows.
+            limit = max(RESIDUAL_MIN_LIMIT_DEG,
+                        1.2 * float(np.nanpercentile(np.abs(residuals), 99.5)))
             for b, ax in enumerate(axes):
-                for j, color in zip(channels, CHANNEL_COLORS):
-                    residual = phase_residual_rad(p2vm.ellipse_phase_rad[b, :, j], p2vm.opd_m[b],
-                                                  p2vm.wavelength_m[j])
-                    ax.plot(p2vm.opd_m[b] * 1e6, np.rad2deg(residual), ".", ms=1.2, color=color)
+                for residual, color in zip(residuals[b], CHANNEL_COLORS):
+                    ax.plot(p2vm.opd_m[b] * 1e6, residual, ".", ms=1.2, color=color, alpha=0.7)
                 ax.axhline(0, **GUIDE)
-            axes[0].set(ylim=(-180, 180), yticks=[-180, -90, 0, 90, 180])
+            axes[0].set_ylim(-limit, limit)
             legend(fig, channel_entries)
         out.append(Section("Fringe phase residual along the scan", draw_residuals,
-                           GRID_HEIGHT, "Phase of every frame minus 2π·OPD/λ, wrapped; "
-                           "structure means dispersion, OPD errors or distorted fringes."))
+                           GRID_HEIGHT, "Phase of every frame minus 2π·OPD/λ, wrapped, on a scale set by the "
+                           "residuals; structure means dispersion, OPD errors or distorted fringes."))
     return out
