@@ -14,7 +14,9 @@ from planetes_pipe.io.raw import read_raw, read_raws, write_shutters
 from planetes_pipe.steps.dark import make_dark_products
 from planetes_pipe.steps.flat import make_flat, read_flat, write_flat
 from planetes_pipe.steps.wave import (
+    LINE_MAX_FWHM,
     _surface_terms,
+    line_centres,
     make_wave,
     match_peaks_grid,
     read_wave,
@@ -31,6 +33,27 @@ class WaveTests(unittest.TestCase):
         # lines at whole pixels, a 0.3-pixel scatter.
         self.check_recovery(line_sigma=1.2)
 
+    def test_defocused_lines_are_dropped_before_the_fit(self):
+        # Outputs 0-3 out of focus (FWHM 6.4 px; the blue end of the middle outputs reached
+        # 5-8 px on 2026-11-10): their lines are flagged and the others still give the
+        # solution. Broader lines fill this dense synthetic spectrum and raise the MAD
+        # detection threshold above them.
+        wave = self.check_recovery(line_sigma=1.2, broad_outputs=4)
+        broad = wave.fit_fwhm_pixels > LINE_MAX_FWHM
+        self.assertTrue(broad.any())
+        np.testing.assert_array_equal(np.unique(wave.fit_output[broad]), np.arange(4))
+        self.assertTrue(wave.fit_rejected[broad].all())
+
+    def test_line_centres_measure_the_line_width(self):
+        x = np.arange(200)
+        for sigma in (0.8, 1.2, 3.0, 4.5):  # 4.5 is beyond CENTROID_SIGMA: still measured
+            spectrum = 10 + 3000 * np.exp(-0.5 * ((x - 100.3) / sigma) ** 2)
+            centre, fwhm = line_centres(spectrum, np.array([100]))
+            self.assertAlmostEqual(fwhm[0], 2 * np.sqrt(2 * np.log(2)) * sigma, places=3)
+            self.assertAlmostEqual(centre[0], 100.3, places=3)
+        _, fwhm = line_centres(np.full(200, 10.0), np.array([100]))  # no line: not measured
+        self.assertTrue(np.isnan(fwhm[0]))
+
     def test_surface_basis_is_scaled_to_the_detector(self):
         # On the 1280 x 1024 detector raw-pixel x^4 reaches 3e12 and the degree-4
         # least-squares fit collapses; the scaled basis stays within [-1, 1].
@@ -40,7 +63,7 @@ class WaveTests(unittest.TestCase):
         self.assertLessEqual(np.abs(terms).max(), 1.0)
         self.assertLess(np.linalg.cond(terms.reshape(15, -1)[:, ::97].T), 1e3)
 
-    def check_recovery(self, line_sigma):
+    def check_recovery(self, line_sigma, broad_outputs=0):
         # Independent detector model: 24 Gaussian traces and a known dispersion.
         height, width = 768, 256
         y, x = np.indices((height, width))
@@ -56,9 +79,10 @@ class WaveTests(unittest.TestCase):
         reference = 1.05e-6 + line_pixels * 1e-9
         shifts = (centers - centers.mean()) / 2000
         lamp_image = np.zeros((height, width))
-        for profile, shift in zip(profiles, shifts, strict=True):
+        for output, (profile, shift) in enumerate(zip(profiles, shifts, strict=True)):
+            sigma = 2.7 if output < broad_outputs else line_sigma
             spectrum = 10 + sum(
-                3000 * np.exp(-0.5 * ((np.arange(width) - pixel - shift) / line_sigma) ** 2)
+                3000 * np.exp(-0.5 * ((np.arange(width) - pixel - shift) / sigma) ** 2)
                 for pixel in line_pixels
             )
             lamp_image += profile * spectrum
@@ -117,7 +141,7 @@ class WaveTests(unittest.TestCase):
             # wavelength, the lamp spectra and the lamp image.
             n_lines = len(wave.fit_residual_m)
             for field in ("fit_x_pixels", "fit_y_pixels", "fit_wavelength_m", "fit_output",
-                          "fit_rejected"):
+                          "fit_rejected", "fit_fwhm_pixels"):
                 self.assertEqual(len(getattr(loaded, field)), n_lines, field)
             self.assertEqual(loaded.fit_rejected.dtype, bool)
             np.testing.assert_array_equal(loaded.fit_output, wave.fit_output)
@@ -126,6 +150,8 @@ class WaveTests(unittest.TestCase):
             np.testing.assert_allclose(loaded.fit_wavelength_m - loaded.fit_residual_m,
                                        wave.fit_wavelength_m - wave.fit_residual_m, rtol=0,
                                        atol=1e-18)
+            np.testing.assert_allclose(loaded.fit_fwhm_pixels, wave.fit_fwhm_pixels)
+            return wave
 
     def test_grid_line_matching_is_one_to_one(self) -> None:
         theoretical = np.array([0.0, 0.15, 1.0, 2.0])

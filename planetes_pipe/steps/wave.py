@@ -40,7 +40,8 @@ class Wave:
     fit_y_pixels: NDArray | None = None
     fit_wavelength_m: NDArray | None = None  # laboratory wavelength
     fit_output: NDArray | None = None
-    fit_rejected: NDArray | None = None
+    fit_rejected: NDArray | None = None  # dropped as too broad, or beyond 3 sigma
+    fit_fwhm_pixels: NDArray | None = None  # Gaussian FWHM of the line, NaN if not measured
     # Diagnostics for the report.
     lamp_spectra_adu: NDArray | None = None  # (output, x), extracted
     lamp_image_adu: NDArray | None = None  # (y, x), mean lamp minus its dark
@@ -105,6 +106,12 @@ RANSAC_ITERATIONS = 1_000_000
 CENTROID_HALF_WIDTH = 4
 CENTROID_MAX_SHIFT  = 1.5           # pixels from the detected peak
 CENTROID_SIGMA      = (0.3, 4.0)    # accepted Gaussian sigma range, pixels
+# Lines broader than this (Gaussian FWHM, pixels) are defocused: dropped before the fit.
+# In focus a bench line is 2.0-2.8 px; on the 2026-11-10 19:10 lamp the blue end of the
+# middle outputs reached 5-8 px with centres off by up to 2 px. A 6 px cut drops those
+# 19 of 539 lines without changing the in-band error measured from the OPD series; 4-5 px
+# lowers the fit RMS but loses blue lines and makes the in-band error 4-7 pm worse.
+LINE_MAX_FWHM       = 6.0
 # fmt: on
 
 
@@ -154,16 +161,19 @@ def _gaussian_line(t, amplitude, centre, sigma, offset, slope):
     return amplitude * np.exp(-0.5 * ((t - centre) / sigma) ** 2) + offset + slope * t
 
 
-def line_centres(spectrum: NDArray, peak_pixels: NDArray) -> NDArray:
-    """Sub-pixel centres of lamp lines detected at integer peak_pixels.
+def line_centres(spectrum: NDArray, peak_pixels: NDArray) -> tuple[NDArray, NDArray]:
+    """Sub-pixel centres and FWHM [pixels] of lamp lines detected at integer peak_pixels.
 
     Fit a Gaussian plus a linear background to +-CENTROID_HALF_WIDTH pixels around
     each peak. Fall back to the three-sample logarithmic parabola when the fit fails
     or leaves CENTROID_MAX_SHIFT / CENTROID_SIGMA, and to the integer peak when the
-    three samples are not positive and concave in log.
+    three samples are not positive and concave in log. The FWHM is the Gaussian's
+    whenever it converged on a positive line within CENTROID_MAX_SHIFT, also beyond
+    CENTROID_SIGMA (a defocused line), else NaN.
     """
     spectrum = np.asarray(spectrum, dtype=np.float64)
     centres = np.asarray(peak_pixels, dtype=np.float64).copy()
+    fwhm = np.full(len(centres), np.nan)
     for k, peak in enumerate(np.asarray(peak_pixels, dtype=int)):
         lo = max(peak - CENTROID_HALF_WIDTH, 0)
         hi = min(peak + CENTROID_HALF_WIDTH + 1, spectrum.size)
@@ -177,10 +187,11 @@ def line_centres(spectrum: NDArray, peak_pixels: NDArray) -> NDArray:
                     fit, _ = curve_fit(_gaussian_line, t, s, p0=guess, maxfev=2000)
             except (RuntimeError, ValueError):
                 fit = None
-            if (fit is not None and fit[0] > 0 and abs(fit[1]) < CENTROID_MAX_SHIFT
-                    and CENTROID_SIGMA[0] < abs(fit[2]) < CENTROID_SIGMA[1]):
-                centres[k] = peak + fit[1]
-                continue
+            if fit is not None and fit[0] > 0 and abs(fit[1]) < CENTROID_MAX_SHIFT:
+                fwhm[k] = 2 * np.sqrt(2 * np.log(2)) * abs(fit[2])
+                if CENTROID_SIGMA[0] < abs(fit[2]) < CENTROID_SIGMA[1]:
+                    centres[k] = peak + fit[1]
+                    continue
         if 0 < peak < spectrum.size - 1:
             low, mid, high = spectrum[peak - 1:peak + 2]
             if min(low, mid, high) > 0:
@@ -188,7 +199,7 @@ def line_centres(spectrum: NDArray, peak_pixels: NDArray) -> NDArray:
                 curvature = 2 * mid - low - high
                 if curvature > 0:
                     centres[k] = peak + 0.5 * (high - low) / curvature
-    return centres
+    return centres, fwhm
 
 
 def _surface_terms(x, y, degree: int, shape: tuple[int, int]) -> list[NDArray]:
@@ -231,7 +242,8 @@ def fit_wavelength_solution(
     Use the mean of the last four outputs as the reference lamp spectrum.
     Match it to the line list with quadratic RANSAC, align each output to that
     reference, then fit lambda(x, y) with all monomials of total degree <= SURFACE_DEGREE.
-    Three rounds reject residuals beyond 3 population standard deviations.
+    Lines broader than LINE_MAX_FWHM never enter the fit; three rounds then reject
+    residuals beyond 3 population standard deviations. Both are flagged in fit_rejected.
     No per-line uncertainty weighting or absolute-accuracy certification is used.
     The last-four-output choice is a fixed bench convention, not a measured S/N
     selection. Its suitability must be checked for a different detector layout.
@@ -252,6 +264,7 @@ def fit_wavelength_solution(
     line_y = []
     line_wave_m = []
     line_output = []
+    line_fwhm = []
     # Fixed bench reference quartet; no automatic S/N-based output selection.
     mean_spectrum = lamp_spectra[-4:].mean(axis=0)
 
@@ -272,7 +285,7 @@ def fit_wavelength_solution(
         # Locate peaks independently, then align them to the reference quartet.
         peak_pixels, _ = find_peaks(spec, height=_peak_threshold(spec), distance=5)
 
-        peak_pixels = line_centres(spec, peak_pixels)
+        peak_pixels, peak_fwhm = line_centres(spec, peak_pixels)
 
         # Constrain inter-output shifts with a near-unity quadratic pixel map.
         matches, _ = match_peaks_grid(
@@ -301,6 +314,7 @@ def fit_wavelength_solution(
         line_y.append(np.interp(refined_x, detector_x, y_trace[output]))
         line_wave_m.append(lines_m[line_indices])
         line_output.append(np.full(len(refined_x), output))
+        line_fwhm.append(peak_fwhm[peak_indices])
 
     log.info("lines matched per output: %d-%d (mean %.1f)", min(matched_per_output),
              max(matched_per_output), np.mean(matched_per_output))
@@ -308,26 +322,31 @@ def fit_wavelength_solution(
     fit_x = np.concatenate(line_x)
     fit_y = np.concatenate(line_y)
     fit_wave_m = np.concatenate(line_wave_m)
+    fit_fwhm = np.concatenate(line_fwhm)
+    broad = fit_fwhm > LINE_MAX_FWHM  # NaN (not measured) is kept
 
     # Fit wl = f(x, y) with all monomials of total degree <= SURFACE_DEGREE.
     deg = SURFACE_DEGREE
     design = np.column_stack(_surface_terms(fit_x, fit_y, deg, flat.flat_map_adu.shape))
     terms = [f"x{d - i}y{i}" for d in range(deg + 1) for i in range(d + 1)]
     log.debug("surface terms: %s", ", ".join(terms))
-    coeffs, _, _, _ = np.linalg.lstsq(design, fit_wave_m, rcond=None)
+    coeffs, _, _, _ = np.linalg.lstsq(design[~broad], fit_wave_m[~broad], rcond=None)
     residuals = fit_wave_m - design @ coeffs
-    std = np.std(residuals)
+    std = np.std(residuals[~broad])
     first_std = std
+    log.info("dropped %d of %d lines broader than %.1f px FWHM (defocused)",
+             broad.sum(), len(broad), LINE_MAX_FWHM)
     log.debug("residual std %.3f nm before rejection", std * 1e9)
     for iteration in range(3):
-        reject = abs(residuals) > 3 * std
+        reject = broad | (abs(residuals) > 3 * std)
         coeffs = np.linalg.lstsq(design[~reject], fit_wave_m[~reject], rcond=None)[0]
         residuals = fit_wave_m - design @ coeffs
         std = np.std(residuals[~reject])
         log.debug("rejection pass %d: %d outliers, residual std %.3f nm", iteration + 1,
                   reject.sum(), std * 1e9)
     log.info("wavelength fit (%d lines, degree %d): residual std %.2f -> %.2f nm after "
-             "rejecting %d", len(fit_wave_m), deg, first_std * 1e9, std * 1e9, reject.sum())
+             "rejecting %d", (~broad).sum(), deg, first_std * 1e9, std * 1e9,
+             (reject & ~broad).sum())
 
     # Evaluate the fitted 2-D polynomial on every detector trace.
     trace_x = np.repeat(np.arange(nx)[None, :], layout.n_outputs, axis=0)
@@ -343,6 +362,7 @@ def fit_wavelength_solution(
         fit_wavelength_m=fit_wave_m,
         fit_output=np.concatenate(line_output),
         fit_rejected=reject,
+        fit_fwhm_pixels=fit_fwhm,
         lamp_spectra_adu=lamp_spectra,
     )
     return wave
@@ -715,9 +735,10 @@ def write_wave(path: Path, product: Wave, *, header=None) -> None:
         ]
         for name, values, unit in (("WAVELENGTH", product.fit_wavelength_m, "m"),
                                    ("OUTPUT", product.fit_output, ""),
-                                   ("REJECTED", product.fit_rejected, "")):
+                                   ("REJECTED", product.fit_rejected, ""),
+                                   ("FWHM", product.fit_fwhm_pixels, "pixel")):
             if values is not None:
-                if name != "WAVELENGTH":
+                if name in ("OUTPUT", "REJECTED"):
                     values = np.asarray(values, dtype=np.int64)
                 fit.append(products.column(name, values, unit))
         extensions.append(afits.BinTableHDU.from_columns(fit, name="PLANETES_WAVE_FIT"))
@@ -738,7 +759,7 @@ def read_wave(path: Path) -> Wave:
             wave.fit_y_pixels = products.read_column(hdus, "PLANETES_WAVE_FIT", "Y")
             names = hdus["PLANETES_WAVE_FIT"].columns.names
             for field, column in (("fit_wavelength_m", "WAVELENGTH"), ("fit_output", "OUTPUT"),
-                                  ("fit_rejected", "REJECTED")):
+                                  ("fit_rejected", "REJECTED"), ("fit_fwhm_pixels", "FWHM")):
                 if column in names:
                     setattr(wave, field, products.read_column(hdus, "PLANETES_WAVE_FIT", column))
             if wave.fit_rejected is not None:

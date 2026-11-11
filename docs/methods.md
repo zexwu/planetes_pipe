@@ -62,7 +62,10 @@ A fit that fails, moves more than 1.5 pixels or has a sigma outside 0.3–4 pixe
 falls back to the three-sample logarithmic parabola, and to the integer peak when
 those samples are not positive and concave in log. Before 0.42.0 a log-curvature
 cut > 1 (sigma < 1 pixel) left most bench lines (FWHM 2.4–2.8 pixels) at whole
-pixels, a 0.3-pixel (~100 pm) scatter. Laboratory
+pixels, a 0.3-pixel (~100 pm) scatter. The Gaussian's FWHM is kept for every line,
+also beyond the sigma window; a matched line broader than 6 pixels (`LINE_MAX_FWHM`,
+defocused: in focus a line is 2.0–2.8 pixels) never enters the surface fit and is
+flagged rejected with the 3σ outliers. Laboratory
 lines must be increasing because matching indices refer to sorted arrays.
 
 Fit the global degree-4 `wavelength = f(detector_x, trace_y)` with the retained

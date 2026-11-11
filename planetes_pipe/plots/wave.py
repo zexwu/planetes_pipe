@@ -20,6 +20,7 @@ from planetes_pipe.plots.pages import (
     table_height,
 )
 from planetes_pipe.steps.wave import (
+    LINE_MAX_FWHM,
     QC_WAVE_MAX,
     QC_WAVE_MIN,
     REFERENCE_WAVELENGTH_M,
@@ -31,6 +32,7 @@ from planetes_pipe.steps.wave import (
 
 ACCEPTED = {"color": "0.25", "ls": "", "marker": ".", "ms": 3}
 REJECTED = {"color": "#FF2C00", "ls": "", "marker": "o", "ms": 4, "mfc": "none", "mew": 0.7}
+BROAD = {"color": "#FF9500", "ls": "", "marker": "x", "ms": 4, "mew": 0.9}
 OUTPUT_CMAP = "viridis"  # outputs coloured by index, bottom of the detector first
 
 def _lines(wave: Wave):
@@ -40,6 +42,13 @@ def _lines(wave: Wave):
     lab = None if wave.fit_wavelength_m is None else wave.fit_wavelength_m * 1e9
     return (wave.fit_residual_m * 1e9, wave.fit_x_pixels, wave.fit_y_pixels, lab,
             wave.fit_output, rejected)
+
+
+def _broad(wave: Wave):
+    """Lines dropped before the fit as broader than LINE_MAX_FWHM (none before 0.43.0)."""
+    if wave.fit_fwhm_pixels is None:
+        return np.zeros(len(wave.fit_residual_m), bool)
+    return np.nan_to_num(wave.fit_fwhm_pixels) > LINE_MAX_FWHM
 
 
 def _output_colors(n_outputs):
@@ -69,7 +78,13 @@ def summary(wave: Wave, header=None) -> list[tuple[str, str]]:
         residual, _, _, lab, output, rejected = _lines(wave)
         accepted = residual[~rejected]
         rms = np.std(accepted, ddof=1) if len(accepted) > 1 else np.nan
-        rows.append(("Lines fitted / rejected", f"{len(residual)} / {int(rejected.sum())}"))
+        broad = _broad(wave)
+        rows.append(("Lines matched / too broad / rejected",
+                     f"{len(residual)} / {int(broad.sum())} / {int((rejected & ~broad).sum())}"))
+        if wave.fit_fwhm_pixels is not None and np.isfinite(wave.fit_fwhm_pixels).any():
+            p5, p50, p95 = np.nanpercentile(wave.fit_fwhm_pixels, [5, 50, 95])
+            rows.append(("Line FWHM [pixel]", f"{p50:.2f} (5–95%: {p5:.2f} – {p95:.2f}); "
+                                              f"dropped above {LINE_MAX_FWHM:g}"))
         rows.append(("Residual stdev (accepted)",
                      f"{rms:.3f} nm = {rms / np.median(dispersion):.3f} pixel"))
         if output is not None:
@@ -111,16 +126,19 @@ def sections(wave: Wave, header=None) -> list[Section]:
             shown.set_clim(0, np.arcsinh(10))
             if has_lines:
                 _, lx, ly, _, _, rejected = _lines(wave)
+                broad = _broad(wave)
                 ax.plot(lx[~rejected], ly[~rejected], **{**ACCEPTED, "color": "#0C5DA5", "ms": 2})
-                ax.plot(lx[rejected], ly[rejected], **REJECTED)
+                ax.plot(lx[rejected & ~broad], ly[rejected & ~broad], **REJECTED)
+                ax.plot(lx[broad], ly[broad], **BROAD)
             ax.minorticks_off()
             ax.set(xlabel="Detector x [pixel]", ylabel="Detector y [pixel]")
             if has_lines:
                 legend(fig, [("accepted line", {**ACCEPTED, "color": "#0C5DA5"}),
-                             ("rejected line", REJECTED)])
+                             ("rejected line", REJECTED),
+                             (f"too broad (FWHM > {LINE_MAX_FWHM:g} px)", BROAD)])
         result.append(Section("Lamp image with the fitted lines", draw_image, 3.2,
                               "Mean lamp frame minus its dark (arcsinh stretch), and every lamp "
-                              "line the fit used."))
+                              "line matched: used, rejected beyond 3σ, or dropped as defocused."))
 
     if wave.lamp_spectra_adu is not None:
         spectra = wave.lamp_spectra_adu
